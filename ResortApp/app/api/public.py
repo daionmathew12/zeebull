@@ -57,7 +57,7 @@ class PublicPackageBookingOut(BaseModel):
 def get_public_rooms(db: Session = Depends(get_db), skip: int = 0, limit: int = 100):
     """Get all available rooms without authentication"""
     try:
-        rooms = db.query(Room).options(joinedload(Room.images)).filter(Room.status == "Available").offset(skip).limit(limit).all()
+        rooms = db.query(Room).filter(Room.status == "Available").offset(skip).limit(limit).all()
         return rooms
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching rooms: {str(e)}")
