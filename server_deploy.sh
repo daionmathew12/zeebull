@@ -34,6 +34,7 @@ fi
 npm run build
 # Deploy to webroot
 echo "Deploying Frontend to $APP_DIR/html..."
+sudo mkdir -p $APP_DIR/html
 sudo rm -rf $APP_DIR/html/*
 sudo cp -r build/* $APP_DIR/html/
 
