@@ -105,9 +105,9 @@ app = FastAPI(
 @app.on_event("startup")
 async def startup_event():
     """Start background tasks"""
-    from app.utils.food_scheduler import run_food_scheduler
-    import asyncio
-    asyncio.create_task(run_food_scheduler())
+    # from app.utils.food_scheduler import run_food_scheduler
+    # import asyncio
+    # asyncio.create_task(run_food_scheduler())
 
 # Exception handlers for proper error logging and responses
 @app.exception_handler(StarletteHTTPException)
@@ -304,14 +304,14 @@ else:
     print("[ERROR] Inventory router not imported, skipping registration")
 
 # Include stock reconciliation router
-try:
-    from app.api import stock_reconciliation
-    app.include_router(stock_reconciliation.router, prefix="/api", tags=["Stock Reconciliation"])
-    print(f"[OK] Stock reconciliation router registered with {len(stock_reconciliation.router.routes)} routes")
-except Exception as e:
-    print(f"[ERROR] ERROR importing/registering stock reconciliation router: {e}")
-    import traceback
-    traceback.print_exc()
+# try:
+#     from app.api import stock_reconciliation
+#     app.include_router(stock_reconciliation.router, prefix="/api", tags=["Stock Reconciliation"])
+#     print(f"[OK] Stock reconciliation router registered with {len(stock_reconciliation.router.routes)} routes")
+# except Exception as e:
+#     print(f"[ERROR] ERROR importing/registering stock reconciliation router: {e}")
+#     import traceback
+#     traceback.print_exc()
 
 # Include public router if it was imported successfully
 if public_module is not None:
