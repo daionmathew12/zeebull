@@ -85,7 +85,15 @@ fi
 # Set permissions
 sudo chown -R $USER:$GROUP $APP_DIR
 sudo chmod -R 755 $APP_DIR
-sudo chmod -R 775 $APP_DIR/ResortApp/uploads
+
+# 5.1 Ensure Uploads Directory Exists and Writable
+UPLOAD_ROOT="$APP_DIR/ResortApp/uploads"
+sudo mkdir -p $UPLOAD_ROOT/food_categories
+sudo mkdir -p $UPLOAD_ROOT/food_items
+sudo chown -R $USER:$GROUP $UPLOAD_ROOT
+sudo chmod -R 777 $UPLOAD_ROOT 
+# Using 777 for uploads specifically to ensure absolutely no permission issues for the service user or nginx.
+# In production 755 or 775 is better if groups align, but 777 removes "I think folder not created" ambiguity.
 sudo chmod -R 775 $APP_DIR/ResortApp/static
 
 # 6. Database Migrations & Seeding
@@ -105,6 +113,8 @@ fi
 echo "[7/7] Restarting Services..."
 sudo systemctl start inventory-resort
 sudo systemctl status inventory-resort --no-pager
+echo "Reloading Nginx to clear cache..."
+sudo systemctl reload nginx
 
 echo "============================================================"
 echo "Deployment Completed Successfully!"
