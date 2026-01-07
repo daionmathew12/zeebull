@@ -2636,6 +2636,7 @@ const Bookings = () => {
         .reduce((sum, b) => sum + b.adults + b.children, 0);
 
       // Store all rooms for filtering
+      console.log("[Bookings fetchData] All rooms from API:", allRooms?.length, allRooms?.map(r => r.number));
       setAllRooms(allRooms);
 
       // Set initial package rooms to all available rooms
@@ -2664,8 +2665,12 @@ const Bookings = () => {
             const requestedCheckOut = new Date(formData.checkOut);
 
             // Check if room is part of this booking
+            // Handle both regular bookings (r.id) and package bookings (r.room.id)
             const isRoomInBooking =
-              booking.rooms && booking.rooms.some((r) => r.id === room.id);
+              booking.rooms && booking.rooms.some((r) => {
+                const roomId = r.room?.id || r.id;
+                return roomId === room.id;
+              });
             if (!isRoomInBooking) return false;
 
             // Check for date overlap
@@ -2737,6 +2742,11 @@ const Bookings = () => {
   // Refilter rooms when check-in/check-out dates change for room booking
   useEffect(() => {
     if (formData.checkIn && formData.checkOut && allRooms.length > 0) {
+      console.log("[ROOM FILTER DEBUG] Starting room filtering...");
+      console.log("  Requested dates:", formData.checkIn, "to", formData.checkOut);
+      console.log("  Total rooms to check:", allRooms.length);
+      console.log("  Total bookings to check:", bookings.length);
+
       const availableRooms = allRooms.filter((room) => {
         // Check if room has any conflicting bookings
         // Only consider bookings with status "booked" or "checked-in" as conflicts
@@ -2757,16 +2767,38 @@ const Bookings = () => {
           const requestedCheckOut = new Date(formData.checkOut);
 
           // Check if room is part of this booking
+          // Handle both regular bookings (r.id) and package bookings (r.room.id)
           const isRoomInBooking =
-            booking.rooms && booking.rooms.some((r) => r.id === room.id);
+            booking.rooms && booking.rooms.some((r) => {
+              const roomId = r.room?.id || r.id;
+              return roomId === room.id;
+            });
           if (!isRoomInBooking) return false;
 
           // Check for date overlap
-          return (
+          const hasDateOverlap = (
             requestedCheckIn < bookingCheckOut &&
             requestedCheckOut > bookingCheckIn
           );
+
+          if (hasDateOverlap && (room.number === "100" || room.number === "101" || room.number === "102")) {
+            console.log(`[ROOM FILTER DEBUG] Room ${room.number} BLOCKED by booking:`, {
+              bookingId: booking.id,
+              status: booking.status,
+              normalizedStatus,
+              bookingDates: `${booking.check_in} to ${booking.check_out}`,
+              requestedDates: `${formData.checkIn} to ${formData.checkOut}`,
+              isPackage: booking.is_package,
+              rooms: booking.rooms?.map(r => r.room?.number || r.number)
+            });
+          }
+
+          return hasDateOverlap;
         });
+
+        if (!hasConflict && (room.number === "100" || room.number === "101" || room.number === "102")) {
+          console.log(`[ROOM FILTER DEBUG] Room ${room.number} is AVAILABLE`);
+        }
 
         return !hasConflict;
       });
@@ -3030,6 +3062,7 @@ const Bookings = () => {
 
   const handlePackageBookingChange = (e) => {
     const { name, value } = e.target;
+    console.log("Package Input changed:", name, value);
     setPackageBookingForm((prev) => {
       const updated = { ...prev, [name]: value };
 
@@ -3535,6 +3568,7 @@ const Bookings = () => {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
+    console.log("Input changed:", name, value);
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
@@ -5115,7 +5149,7 @@ const Bookings = () => {
                     )}
                     <form
                       onSubmit={handleSubmit}
-                      className="flex flex-col h-full"
+                      className="flex flex-col h-full relative z-30"
                     >
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 flex-grow">
                         <div className="flex flex-col">
@@ -5296,7 +5330,7 @@ const Bookings = () => {
                     </h2>
                     <form
                       onSubmit={handlePackageBookingSubmit}
-                      className="flex flex-col h-full"
+                      className="flex flex-col h-full relative z-30"
                     >
                       <div className="space-y-4 flex-grow">
                         <select

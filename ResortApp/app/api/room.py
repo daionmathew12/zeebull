@@ -343,9 +343,9 @@ def _get_rooms_impl(db: Session, skip: int = 0, limit: int = 20):
         else:
             print(f"Skipping room status update for large query (limit={limit}) to prevent timeout")
         
-        # Query rooms with proper error handling
+        # Query rooms with proper error handling - ORDER BY number to ensure consistent ordering
         try:
-            rooms = db.query(Room).offset(skip).limit(limit).all()
+            rooms = db.query(Room).order_by(Room.number).offset(skip).limit(limit).all()
         except Exception as query_error:
             print(f"Room query failed: {query_error}")
             db.rollback()
