@@ -36,7 +36,7 @@ def create_account_group(
 @router.get("/groups", response_model=List[AccountGroupOut])
 def get_account_groups(
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=100),  # Reduced for low network
+    limit: int = Query(50, ge=1, le=5000),  # Increased limit for mobile compatibility
     account_type: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -99,7 +99,7 @@ def create_account_ledger(
 @router.get("/ledgers", response_model=List[AccountLedgerOut])
 def get_account_ledgers(
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=100),  # Reduced for low network
+    limit: int = Query(50, ge=1, le=5000),  # Increased limit for mobile compatibility
     group_id: Optional[int] = Query(None),
     module: Optional[str] = Query(None),
     is_active: Optional[bool] = Query(True),
@@ -190,7 +190,7 @@ def create_journal_entry(
 @router.get("/journal-entries", response_model=List[JournalEntryOut])
 def get_journal_entries(
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=100),  # Reduced for low network
+    limit: int = Query(50, ge=1, le=5000),  # Increased limit for mobile compatibility
     reference_type: Optional[str] = Query(None),
     reference_id: Optional[int] = Query(None),
     start_date: Optional[datetime] = Query(None),

@@ -3,6 +3,7 @@ class ApiConstants {
   // If you see 404 errors for new endpoints (notifications/reports), 
   // it means the server code hasn't been updated yet.
   static const String baseUrl = 'https://teqmates.com/orchidapi/api';
+  static const String imageBaseUrl = 'https://teqmates.com/orchidapi';
   // static const String baseUrl = 'http://localhost:8000/api'; // Use for local testing
   static const String login = '/auth/login';
   static const String profile = '/auth/me';
@@ -30,5 +31,6 @@ class ApiConstants {
   static const String stockIssues = '/inventory/issues';
   static const String stocks = '/inventory/stocks';
   static const String foodItems = '/food-items';
+  static const String foodCategories = '/food-categories';
   static const String employees = '/employees';
 }

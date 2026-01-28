@@ -87,7 +87,7 @@ class InventorySourceSelection(BaseModel):
     location_id: int
 
 class InventoryReturnItem(BaseModel):
-    assignment_id: int
+    inventory_item_id: int
     quantity_returned: float
     quantity_used: Optional[float] = 0.0  # Allow updating used quantity
     notes: Optional[str] = None
@@ -112,6 +112,8 @@ class AssignedServiceOut(BaseModel):
     status: ServiceStatus
     last_used_at: Optional[datetime] = None  # Timestamp when service was last used (during checkout)
     override_charges: Optional[float] = None
+    inventory_items_used: Optional[List[ServiceInventoryItemOut]] = []  # Actual items used (template + extra)
+    debug_items: Optional[List[dict]] = None # Debug field to trace data issues
 
     class Config:
         from_attributes = True

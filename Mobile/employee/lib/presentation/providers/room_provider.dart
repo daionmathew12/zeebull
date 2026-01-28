@@ -16,9 +16,12 @@ class RoomProvider with ChangeNotifier {
   String? get error => _error;
 
   Future<void> fetchRooms() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+    final softLoading = _rooms.isNotEmpty;
+    if (!softLoading) {
+      _isLoading = true;
+      _error = null;
+      notifyListeners();
+    }
 
     try {
       final response = await _apiService.dio.get(ApiConstants.rooms);

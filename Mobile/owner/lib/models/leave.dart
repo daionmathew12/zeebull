@@ -17,6 +17,8 @@ class Leave {
     required this.leaveType,
   });
 
+  String get type => leaveType;
+
   factory Leave.fromJson(Map<String, dynamic> json) {
     return Leave(
       id: json['id'] ?? 0,

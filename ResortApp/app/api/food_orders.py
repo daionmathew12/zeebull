@@ -101,6 +101,13 @@ def update_order(order_id: int, order_update: FoodOrderUpdate, db: Session = Dep
         
     current_status = current_order.status
     
+    # Auto-set prepared_by_id if moving to cooking
+    if order_update.status in ['cooking', 'accepted', 'preparing', 'ready'] and current_order.prepared_by_id is None:
+        # Link current user (chef) to the order
+        chef_emp = db.query(models.Employee).filter(models.Employee.user_id == current_user.id).first()
+        if chef_emp:
+            order_update.prepared_by_id = chef_emp.id
+
     updated = crud.update_food_order(db, order_id, order_update)
     
     # If status changed to 'completed', deduct inventory

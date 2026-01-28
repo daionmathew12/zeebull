@@ -14,6 +14,8 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
+  String _selectedDepartment = 'Kitchen'; // Default
+  final List<String> _departments = ['Kitchen', 'Housekeeping', 'Restaurant', 'Maintenance'];
   bool _isLoading = false;
 
   @override
@@ -37,7 +39,19 @@ class _LoginScreenState extends State<LoginScreen> {
         setState(() => _isLoading = false);
 
         if (success && mounted) {
-           Navigator.of(context).pushNamedAndRemoveUntil('/dashboard', (route) => false);
+           // Navigate based on selection
+           String route = '/dashboard';
+           // We can also route directly if we want to bypass the generic DashboardScreen wrapper
+           // But DashboardScreen handles role-based body. 
+           // If the user wants to choose, maybe they have multiple roles?
+           // For now, let's just push to dashboard, but we could try to force the tab if we had that logic.
+           // Wait, the user said "no need of this page" (the generic dashboard). 
+           // So we should navigate DIRECTLY to the module.
+           
+
+           if (success && mounted) {
+             Navigator.of(context).pushNamedAndRemoveUntil('/dashboard', (route) => false);
+           }
         } else if (!success && mounted) {
            ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Login failed: unknown error.')),

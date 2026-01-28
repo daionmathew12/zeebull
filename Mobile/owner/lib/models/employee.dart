@@ -6,6 +6,7 @@ class Employee {
   final bool isClockedIn;
   final int? userId;
   final double? salary;
+  final String? joinDate;
 
   Employee({
     required this.id,
@@ -15,6 +16,7 @@ class Employee {
     required this.isClockedIn,
     this.userId,
     this.salary,
+    this.joinDate,
   });
 
   factory Employee.fromJson(Map<String, dynamic> json) {
@@ -26,6 +28,7 @@ class Employee {
       isClockedIn: json['is_clocked_in'] ?? false,
       userId: json['user_id'],
       salary: (json['salary'] as num?)?.toDouble(),
+      joinDate: json['join_date'] ?? 'N/A',
     );
   }
 }

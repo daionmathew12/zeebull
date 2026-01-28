@@ -83,6 +83,7 @@ class PackageBookingOut(PackageBookingBase):
     id: int
     display_id: Optional[str] = None  # Format: PK-000001
     status: str
+    total_amount: Optional[float] = 0.0
     rooms: List[PackageBookingRoomOut] = Field(default_factory=list)
     package: Optional[PackageOut]
     

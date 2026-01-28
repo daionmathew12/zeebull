@@ -143,8 +143,50 @@ def get_bookings(
                 guest_photo_url=getattr(booking, 'guest_photo_url', None),
                 user=user_obj,
                 is_package=False,
+                total_amount=booking.total_amount or 0.0,
+                advance_deposit=booking.advance_deposit or 0.0,
                 rooms=booking_rooms_map.get(booking.id, [])
             )
+            
+            # Fallback: Calculate total amount if 0 (for legacy data)
+            if (booking_out.total_amount is None or booking_out.total_amount == 0) and booking.check_in and booking.check_out and booking_out.rooms:
+                try:
+                    # Calculate duration
+                    d_in = booking.check_in
+                    d_out = booking.check_out
+                    
+                    # Handle potential string dates from unexpected sources
+                    if isinstance(d_in, str):
+                        from datetime import datetime
+                        d_in = datetime.strptime(d_in, '%Y-%m-%d').date()
+                    if isinstance(d_out, str):
+                        from datetime import datetime
+                        d_out = datetime.strptime(d_out, '%Y-%m-%d').date()
+                        
+                    stay_days = (d_out - d_in).days
+                    stay_nights = max(1, stay_days)
+                    
+                    room_total = sum(float(r.price or 0) for r in booking_out.rooms)
+                    final_amount = room_total * stay_nights
+                    
+                    if final_amount > 0:
+                        booking_out.total_amount = final_amount
+                        # Self-healing: Update DB
+                        # Note: We need to be careful with commits in GET, but specific updates are okay.
+                        # We use a separate update query to avoid messing with the current session state too much.
+                        try:
+                            # Use core update to avoid session issues
+                            from sqlalchemy import update
+                            stmt = update(Booking).where(Booking.id == booking.id).values(total_amount=final_amount)
+                            db.execute(stmt)
+                            db.commit()
+                            print(f"Self-healed Booking {booking.id} total_amount to {final_amount}")
+                        except Exception as db_e:
+                            print(f"Failed to update healed amount to DB: {db_e}")
+                            db.rollback()
+                except Exception as e:
+                    print(f"Error calculating fallback amount for booking {booking.id}: {str(e)}")
+            
             booking_results.append(booking_out)
         
         # Get total count (only if limit is reasonable to avoid slow queries)
@@ -334,6 +376,36 @@ def get_booking_details(booking_id: Union[str, int], is_package: bool, db: Sessi
                  checkout_rec = db.query(Checkout).filter(Checkout.booking_id == booking.id).order_by(Checkout.id.desc()).first()
                  if checkout_rec: total_amt = checkout_rec.grand_total
             
+            # Fallback for active regular bookings without a total (legacy data)
+            if (total_amt is None or total_amt == 0) and booking.check_in and booking.check_out and booking.booking_rooms:
+                try:
+                    # Calculate dates
+                    d_in = booking.check_in
+                    d_out = booking.check_out
+                    
+                    if isinstance(d_in, str):
+                        from datetime import datetime
+                        d_in = datetime.strptime(d_in, '%Y-%m-%d').date()
+                    if isinstance(d_out, str):
+                        from datetime import datetime
+                        d_out = datetime.strptime(d_out, '%Y-%m-%d').date()
+                        
+                    stay_days = (d_out - d_in).days
+                    stay_nights = max(1, stay_days)
+                    
+                    room_total = sum(float(br.room.price or 0) for br in booking.booking_rooms if br.room)
+                    calc_amt = room_total * stay_nights
+                    
+                    if calc_amt > 0:
+                        total_amt = calc_amt
+                        # Update DB 
+                        from sqlalchemy import update
+                        stmt = update(Booking).where(Booking.id == booking.id).values(total_amount=calc_amt)
+                        db.execute(stmt)
+                        db.commit()
+                except Exception as e:
+                    print(f"Error self-healing booking detail {booking.id}: {e}")
+            
             room_ids = [r.room_id for r in booking.booking_rooms if r.room_id]
 
             return BookingOut(
@@ -350,7 +422,8 @@ def get_booking_details(booking_id: Union[str, int], is_package: bool, db: Sessi
                 guest_photo_url=getattr(booking, 'guest_photo_url', None),
                 user=booking.user,
                 is_package=False,
-                total_amount=total_amt, 
+                total_amount=total_amt,
+                advance_deposit=booking.advance_deposit or 0.0,
                 rooms=[br.room for br in booking.booking_rooms if br.room],
                 food_orders=_fetch_extras(db, room_ids, booking.check_in, booking.check_out),
                 service_requests=_fetch_services(db, room_ids, booking.check_in, booking.check_out),
@@ -791,6 +864,18 @@ def create_guest_booking(booking: BookingCreate, db: Session = Depends(get_db)):
                     detail=f"Room {room.number if room else room_id} is not available for the selected dates."
                 )
 
+        # Calculate stay duration
+        from datetime import datetime
+        # Ensure dates are date objects
+        d_check_in = booking.check_in if isinstance(booking.check_in, date) else datetime.strptime(str(booking.check_in), '%Y-%m-%d').date()
+        d_check_out = booking.check_out if isinstance(booking.check_out, date) else datetime.strptime(str(booking.check_out), '%Y-%m-%d').date()
+        days = (d_check_out - d_check_in).days
+        stay_nights = days if days > 0 else 1
+        
+        # Calculate total room price per night
+        total_price_per_night = sum(room.price or 0 for room in selected_rooms)
+        calculated_total_amount = total_price_per_night * stay_nights
+
         db_booking = Booking(
             guest_name=guest_name_to_use,
             guest_mobile=guest_mobile or booking.guest_mobile or None,  # Use normalized mobile or original, fallback to None
@@ -800,6 +885,7 @@ def create_guest_booking(booking: BookingCreate, db: Session = Depends(get_db)):
             adults=booking.adults,
             children=booking.children,
             user_id=guest_user_id,  # Link booking to guest user
+            total_amount=calculated_total_amount, # Set calculated total amount
         )
         db.add(db_booking)
         db.commit()

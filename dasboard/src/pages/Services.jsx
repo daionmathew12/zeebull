@@ -2173,65 +2173,66 @@ const Services = () => {
                             </td>
                             <td className="p-3 border-t border-gray-200">
                               <div className="flex gap-2">
-                                    {isCheckoutRequest ? (
+                                {isCheckoutRequest ? (
+                                  <>
+                                    {((request.status || "").toLowerCase() === "pending" || (request.status || "").toLowerCase() === "in_progress" || (request.status || "").toLowerCase() === "inventory_checked") ? (
                                       <>
-                                        {((request.status || "").toLowerCase() === "pending" || (request.status || "").toLowerCase() === "in_progress" || (request.status || "").toLowerCase() === "inventory_checked") ? (
-                                          <>
-                                            {!request.employee_id ? (
-                                              <button
-                                                onClick={() => handleQuickAssignFromRequest(request)}
-                                                className="px-4 py-2 rounded-lg text-sm font-semibold bg-orange-500 hover:bg-orange-600 text-white shadow-md hover:shadow-lg transition-all duration-200"
-                                                title="Assign employee first before verification"
-                                              >
-                                                ⚠ Assign Employee First
-                                              </button>
-                                            ) : (
-                                              <button
-                                                onClick={() => handleViewCheckoutInventory(checkoutRequestId)}
-                                                className="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white shadow-md hover:shadow-lg transition-all duration-200"
-                                                title="View inventory details and verify"
-                                              >
-                                                ✓ Verify Inventory
-                                              </button>
-                                            )}
-                                          </>
-                                        ) : (request.status || "").toLowerCase() === "completed" ? (
-                                          <span className="px-3 py-1 rounded text-sm font-medium bg-green-100 text-green-800">
-                                            ✓ Completed
-                                          </span>
-                                        ) : null}
+                                        {!request.employee_id ? (
+                                          <button
+                                            onClick={() => handleQuickAssignFromRequest(request)}
+                                            className="px-4 py-2 rounded-lg text-sm font-semibold bg-orange-500 hover:bg-orange-600 text-white shadow-md hover:shadow-lg transition-all duration-200"
+                                            title="Assign employee first before verification"
+                                          >
+                                            ⚠ Assign Employee First
+                                          </button>
+                                        ) : (
+                                          <button
+                                            onClick={() => handleViewCheckoutInventory(checkoutRequestId)}
+                                            className="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white shadow-md hover:shadow-lg transition-all duration-200"
+                                            title="View inventory details and verify"
+                                          >
+                                            ✓ Verify Inventory
+                                          </button>
+                                        )}
                                       </>
-                                    ) : (
-                                      <div className="flex gap-2">
-                                        {(request.status || "").toLowerCase() === "pending" && (
-                                          <button
-                                            onClick={!request.employee_id ? () => handleQuickAssignFromRequest(request) : () => handleUpdateRequestStatus(request.id, 'in_progress')}
-                                            className={`px-3 py-1 rounded text-sm font-medium ${!request.employee_id ? 'bg-green-500 hover:bg-green-600' : 'bg-blue-500 hover:bg-blue-600'} text-white`}
-                                            title={!request.employee_id ? "Assign Service" : "Accept & Start Request"}
-                                          >
-                                            {!request.employee_id ? "Assign" : "Accept"}
-                                          </button>
-                                        )}
-                                        
-                                        {(request.status || "").toLowerCase() === "in_progress" && (
-                                          <button
-                                            onClick={() => handleUpdateRequestStatus(request.id, 'completed')}
-                                            className="px-3 py-1 rounded text-sm font-medium bg-green-600 hover:bg-green-700 text-white"
-                                            title="Mark as Completed"
-                                          >
-                                            Complete
-                                          </button>
-                                        )}
-
-                                        <button
-                                          onClick={() => handleDeleteRequest(request.id)}
-                                          className="px-3 py-1 rounded text-sm font-medium bg-red-500 hover:bg-red-600 text-white"
-                                          title="Delete Request"
-                                        >
-                                          Delete
-                                        </button>
-                                      </div>
+                                    ) : (request.status || "").toLowerCase() === "completed" ? (
+                                      <span className="px-3 py-1 rounded text-sm font-medium bg-green-100 text-green-800">
+                                        ✓ Completed
+                                      </span>
+                                    ) : null}
+                                  </>
+                                ) : (
+                                  <div className="flex gap-2">
+                                    {(request.status || "").toLowerCase() === "pending" && (
+                                      <button
+                                        onClick={!request.employee_id ? () => handleQuickAssignFromRequest(request) : () => handleUpdateRequestStatus(request.id, 'in_progress')}
+                                        className={`px-3 py-1 rounded text-sm font-medium ${!request.employee_id ? 'bg-green-500 hover:bg-green-600' : 'bg-blue-500 hover:bg-blue-600'} text-white`}
+                                        title={!request.employee_id ? "Assign Service" : "Accept & Start Request"}
+                                      >
+                                        {!request.employee_id ? "Assign" : "Accept"}
+                                      </button>
                                     )}
+
+                                    {(request.status || "").toLowerCase() === "in_progress" && (
+                                      <button
+                                        onClick={() => handleUpdateRequestStatus(request.id, 'completed')}
+                                        className="px-3 py-1 rounded text-sm font-medium bg-green-600 hover:bg-green-700 text-white"
+                                        title="Mark as Completed"
+                                      >
+                                        Complete
+                                      </button>
+                                    )}
+
+                                    <button
+                                      onClick={() => handleDeleteRequest(request.id)}
+                                      className="px-3 py-1 rounded text-sm font-medium bg-red-500 hover:bg-red-600 text-white"
+                                      title="Delete Request"
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         );
@@ -3085,16 +3086,28 @@ const Services = () => {
                   className="w-full border p-3 rounded-lg"
                 >
                   <option value="">Select Employee</option>
-                  {employees.map((e) => (
-                    <option
-                      key={e.id}
-                      value={e.id}
-                      className={e.is_clocked_in ? "text-green-600 font-bold" : ""}
-                      style={{ color: e.is_clocked_in ? "#16a34a" : "inherit" }}
-                    >
-                      {e.name} {e.is_clocked_in ? " ● (On Duty)" : ""}
-                    </option>
-                  ))}
+                  {employees
+                    .sort((a, b) => {
+                      // Sort online employees to top
+                      const aOnline = a.status === 'on_duty' || a.is_clocked_in;
+                      const bOnline = b.status === 'on_duty' || b.is_clocked_in;
+                      if (aOnline && !bOnline) return -1;
+                      if (!aOnline && bOnline) return 1;
+                      return 0;
+                    })
+                    .map((e) => {
+                      const isOnline = e.status === 'on_duty' || e.is_clocked_in;
+                      return (
+                        <option
+                          key={e.id}
+                          value={e.id}
+                          className={isOnline ? "text-green-600 font-bold" : ""}
+                          style={{ color: isOnline ? "#16a34a" : "inherit", fontWeight: isOnline ? "bold" : "normal" }}
+                        >
+                          {e.name} {isOnline ? " 🟢 (Online)" : ` (${e.status || 'No Status'})`}
+                        </option>
+                      );
+                    })}
                 </select>
                 <select
                   value={assignForm.room_id}
@@ -3600,36 +3613,36 @@ const Services = () => {
                                       ) : null}
                                     </>
                                   ) : (
-                                      <div className="flex gap-2">
-                                        {(request.status || "").toLowerCase() === "pending" && (
-                                          <button
-                                            onClick={!request.employee_id ? () => handleQuickAssignFromRequest(request) : () => handleUpdateRequestStatus(request.id, 'in_progress')}
-                                            className={`px-3 py-1 rounded text-sm font-medium ${!request.employee_id ? 'bg-green-500 hover:bg-green-600' : 'bg-blue-500 hover:bg-blue-600'} text-white`}
-                                            title={!request.employee_id ? "Assign Service" : "Accept & Start Request"}
-                                          >
-                                            {!request.employee_id ? "Assign" : "Accept"}
-                                          </button>
-                                        )}
-                                        
-                                        {(request.status || "").toLowerCase() === "in_progress" && (
-                                          <button
-                                            onClick={() => handleUpdateRequestStatus(request.id, 'completed')}
-                                            className="px-3 py-1 rounded text-sm font-medium bg-green-600 hover:bg-green-700 text-white"
-                                            title="Mark as Completed"
-                                          >
-                                            Complete
-                                          </button>
-                                        )}
-
+                                    <div className="flex gap-2">
+                                      {(request.status || "").toLowerCase() === "pending" && (
                                         <button
-                                          onClick={() => handleDeleteRequest(request.id)}
-                                          className="px-3 py-1 rounded text-sm font-medium bg-red-500 hover:bg-red-600 text-white"
-                                          title="Delete Request"
+                                          onClick={!request.employee_id ? () => handleQuickAssignFromRequest(request) : () => handleUpdateRequestStatus(request.id, 'in_progress')}
+                                          className={`px-3 py-1 rounded text-sm font-medium ${!request.employee_id ? 'bg-green-500 hover:bg-green-600' : 'bg-blue-500 hover:bg-blue-600'} text-white`}
+                                          title={!request.employee_id ? "Assign Service" : "Accept & Start Request"}
                                         >
-                                          Delete
+                                          {!request.employee_id ? "Assign" : "Accept"}
                                         </button>
-                                      </div>
-                                    )}
+                                      )}
+
+                                      {(request.status || "").toLowerCase() === "in_progress" && (
+                                        <button
+                                          onClick={() => handleUpdateRequestStatus(request.id, 'completed')}
+                                          className="px-3 py-1 rounded text-sm font-medium bg-green-600 hover:bg-green-700 text-white"
+                                          title="Mark as Completed"
+                                        >
+                                          Complete
+                                        </button>
+                                      )}
+
+                                      <button
+                                        onClick={() => handleDeleteRequest(request.id)}
+                                        className="px-3 py-1 rounded text-sm font-medium bg-red-500 hover:bg-red-600 text-white"
+                                        title="Delete Request"
+                                      >
+                                        Delete
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               </td>
                             </tr>

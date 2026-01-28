@@ -8,8 +8,13 @@ import 'package:orchid_employee/presentation/widgets/app_drawer.dart';
 import 'package:orchid_employee/presentation/screens/waiter/waiter_dashboard.dart';
 import 'package:orchid_employee/presentation/screens/kitchen/kitchen_dashboard.dart';
 import 'package:orchid_employee/presentation/screens/maintenance/maintenance_dashboard.dart';
-import 'package:orchid_employee/presentation/screens/common/notifications_screen.dart';
 import 'package:orchid_employee/presentation/providers/notification_provider.dart';
+import 'package:orchid_employee/presentation/screens/common/notifications_screen.dart';
+import 'package:orchid_employee/presentation/screens/manager/manager_dashboard.dart';
+import 'package:orchid_employee/presentation/screens/manager/manager_staff_screen.dart';
+import 'package:orchid_employee/presentation/screens/manager/manager_inventory_screen.dart';
+import 'package:orchid_employee/presentation/screens/manager/financial_reports_screen.dart';
+import 'package:orchid_employee/presentation/screens/waiter/menu_order_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -19,6 +24,8 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+  int _currentIndex = 0;
+
   @override
   void initState() {
     super.initState();
@@ -30,138 +37,122 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final userRole = Provider.of<AuthProvider>(context).role;
+    final pages = _getPagesForRole(userRole);
 
     return Scaffold(
       drawer: const AppDrawer(),
-      appBar: userRole == UserRole.kitchen 
-        ? null 
-        : AppBar(
-            title: const Text('Dashboard'),
-            backgroundColor: AppColors.primary,
-            actions: [
-              Consumer<NotificationProvider>(
-                builder: (context, provider, child) => IconButton(
-                  icon: Badge(
-                    label: Text('${provider.unreadCount}'),
-                    isLabelVisible: provider.unreadCount > 0,
-                    child: const Icon(Icons.notifications_none),
-                  ),
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const NotificationsScreen()),
-                    ).then((_) => provider.fetchUnreadCount());
-                  },
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.logout),
-                onPressed: () async {
-                  final auth = Provider.of<AuthProvider>(context, listen: false);
-                  await auth.logout();
-                  if (context.mounted) {
-                    Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
-                  }
-                },
-              ),
-            ],
-          ),
-      body: _buildBodyForRole(userRole, context),
+      appBar: (userRole == UserRole.kitchen || (userRole == UserRole.manager && _currentIndex == 0))
+          ? null
+          : AppBar(
+              title: Text(_getTitleForIndex(userRole, _currentIndex)),
+              backgroundColor: AppColors.primary,
+              actions: [
+                _buildNotificationButton(),
+                _buildLogoutButton(),
+              ],
+            ),
+      body: IndexedStack(
+        index: _currentIndex,
+        children: pages,
+      ),
+      bottomNavigationBar: _shouldShowBottomBar(userRole)
+          ? BottomNavigationBar(
+              currentIndex: _currentIndex,
+              onTap: (index) => setState(() => _currentIndex = index),
+              type: BottomNavigationBarType.fixed,
+              selectedItemColor: AppColors.primary,
+              unselectedItemColor: Colors.grey,
+              items: _getBottomBarItems(userRole),
+            )
+          : null,
     );
   }
 
-  Widget _buildBodyForRole(UserRole role, BuildContext context) {
+  bool _shouldShowBottomBar(UserRole role) {
+    return role == UserRole.manager || role == UserRole.housekeeping || role == UserRole.waiter;
+  }
+
+  List<Widget> _getPagesForRole(UserRole role) {
     switch (role) {
-      case UserRole.housekeeping:
-        return const _HousekeepingDashboard();
-      case UserRole.kitchen:
-        return const _KitchenDashboard();
-      case UserRole.waiter:
-        return const WaiterDashboard();
-      case UserRole.maintenance:
-        return const MaintenanceDashboard();
       case UserRole.manager:
-        return _ManagerDashboard();
+        return [
+          const ManagerDashboardScreen(),
+          ManagerStaffScreen(),
+          ManagerInventoryScreen(),
+          FinancialReportsScreen(),
+        ];
+      case UserRole.housekeeping:
+        return [
+          const HousekeepingDashboard(),
+          RoomListScreen(),
+          NotificationsScreen(),
+        ];
+      case UserRole.waiter:
+        return [
+          const WaiterDashboard(),
+          MenuOrderScreen(),
+          NotificationsScreen(),
+        ];
+      case UserRole.kitchen:
+        return [const KitchenDashboard()];
+      case UserRole.maintenance:
+        return [const MaintenanceDashboard()];
       default:
-        return const Center(child: Text("Welcome! Please select a module from the menu."));
+        return [const Center(child: Text("Welcome!"))];
     }
   }
-}
 
-class _HousekeepingDashboard extends StatelessWidget {
-  const _HousekeepingDashboard({super.key});
-  @override
-  Widget build(BuildContext context) {
-    return const HousekeepingDashboard();
+  List<BottomNavigationBarItem> _getBottomBarItems(UserRole role) {
+    if (role == UserRole.manager) {
+      return const [
+        BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: "Dash"),
+        BottomNavigationBarItem(icon: Icon(Icons.people), label: "Staff"),
+        BottomNavigationBarItem(icon: Icon(Icons.inventory), label: "Stock"),
+        BottomNavigationBarItem(icon: Icon(Icons.analytics), label: "Finance"),
+      ];
+    } else if (role == UserRole.housekeeping) {
+      return const [
+        BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: "Home"),
+        BottomNavigationBarItem(icon: Icon(Icons.bed), label: "Rooms"),
+        BottomNavigationBarItem(icon: Icon(Icons.notifications), label: "Alerts"),
+      ];
+    } else if (role == UserRole.waiter) {
+      return const [
+        BottomNavigationBarItem(icon: Icon(Icons.table_bar), label: "Tables"),
+        BottomNavigationBarItem(icon: Icon(Icons.add_shopping_cart), label: "Order"),
+        BottomNavigationBarItem(icon: Icon(Icons.notifications), label: "Alerts"),
+      ];
+    }
+    return [];
   }
-}
 
-class _KitchenDashboard extends StatelessWidget {
-  const _KitchenDashboard({super.key});
-  @override
-  Widget build(BuildContext context) {
-    return const KitchenDashboard();
+  String _getTitleForIndex(UserRole role, int index) {
+    if (role == UserRole.manager) {
+      return ["Dashboard", "Staff Management", "Inventory Control", "Financial Analytics"][index];
+    }
+    return "Dashboard";
   }
-}
 
-class _ManagerDashboard extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-          _DashboardCard(
-            title: "Staff Active", 
-            icon: Icons.people, 
-            count: "12 Online",
-            onTap: () {},
-          ),
-          _DashboardCard(
-            title: "Occupancy", 
-            icon: Icons.hotel, 
-            count: "85%",
-            onTap: () {},
-          ),
-          _DashboardCard(
-            title: "Revenue Today", 
-            icon: Icons.payments, 
-            count: "₹45,200",
-            color: Colors.green,
-            onTap: () {},
-          ),
-          _DashboardCard(
-            title: "Pending Checkouts", 
-            icon: Icons.outbox, 
-            count: "4 Rooms",
-            color: Colors.orange,
-            onTap: () {},
-          ),
-      ],
+  Widget _buildNotificationButton() {
+    return Consumer<NotificationProvider>(
+      builder: (context, provider, child) => IconButton(
+        icon: Badge(
+          label: Text('${provider.unreadCount}'),
+          isLabelVisible: provider.unreadCount > 0,
+          child: const Icon(Icons.notifications_none),
+        ),
+        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => NotificationsScreen())),
+      ),
     );
   }
-}
 
-class _DashboardCard extends StatelessWidget {
-  final String title;
-  final IconData icon;
-  final String? count;
-  final Color? color;
-  final VoidCallback? onTap;
-
-  const _DashboardCard({required this.title, required this.icon, this.count, this.color, this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.only(bottom: 16),
-      child: ListTile(
-        onTap: onTap,
-        leading: Icon(icon, size: 40, color: color ?? AppColors.primary),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: count != null ? Text(count!, style: const TextStyle(color: AppColors.secondary, fontWeight: FontWeight.bold)) : null,
-        trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-      ),
+  Widget _buildLogoutButton() {
+    return IconButton(
+      icon: const Icon(Icons.logout),
+      onPressed: () async {
+        await Provider.of<AuthProvider>(context, listen: false).logout();
+        if (mounted) Navigator.pushReplacementNamed(context, '/login');
+      },
     );
   }
 }

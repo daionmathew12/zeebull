@@ -97,6 +97,14 @@ class _KOTHistoryScreenState extends State<KOTHistoryScreen> {
                                     Text(
                                         "${kot.items.length} items • ${isCancelled ? 'Cancelled' : (isPaid ? 'Paid' : 'Served')} at ${DateFormat('hh:mm a').format(kot.createdAt)}",
                                         style: TextStyle(color: Colors.grey.shade600)),
+                                    const SizedBox(height: 4),
+                                    Row(
+                                      children: [
+                                        Text("Created by: ${kot.creatorName}", style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                                        const SizedBox(width: 8),
+                                        Text("Prep: ${kot.chefName}", style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                                      ],
+                                    ),
                                     if (!_showTodayOnly)
                                       Text(DateFormat('MMM dd, yyyy').format(kot.createdAt),
                                           style: TextStyle(color: Colors.grey.shade400, fontSize: 11)),

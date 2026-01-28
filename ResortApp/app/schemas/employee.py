@@ -19,8 +19,8 @@ class Employee(BaseModel):
     id: int
     name: str
     role: str
-    salary: float
-    join_date: date
+    salary: Optional[float] = 0.0
+    join_date: Optional[date] = None
     # ✅ It must use 'image_url' to match the database column.
     image_url: Optional[str] = None
     # ✅ It must include 'user_id' to match the database model.
@@ -36,18 +36,20 @@ class Employee(BaseModel):
 
 # Your other schemas for Leave can remain as they are.
 class LeaveBase(BaseModel):
-    employee_id: int
-    from_date: date
-    to_date: date
-    reason: str
+    employee_id: Optional[int] = None
+    from_date: Optional[date] = None
+    to_date: Optional[date] = None
+    reason: Optional[str] = None
     leave_type: Optional[str] = "Paid"
 
 class LeaveCreate(LeaveBase):
     pass
 
 class LeaveOut(LeaveBase):
-    id: int
-    status: str
+    id: Optional[int] = None
+    status: Optional[str] = "pending"
+    employee: Optional[Employee] = None # Include full employee details
+    
     class Config:
         from_attributes = True
 

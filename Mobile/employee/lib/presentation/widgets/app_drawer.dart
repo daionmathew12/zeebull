@@ -11,6 +11,16 @@ import 'package:orchid_employee/presentation/screens/kitchen/kot_screen.dart';
 import 'package:orchid_employee/presentation/screens/waiter/waiter_dashboard.dart';
 import 'package:orchid_employee/presentation/screens/waiter/menu_order_screen.dart';
 import 'package:orchid_employee/presentation/screens/common/work_report_screen.dart';
+import 'package:orchid_employee/presentation/screens/manager/manager_inventory_screen.dart';
+import 'package:orchid_employee/presentation/screens/manager/manager_staff_screen.dart';
+import 'package:orchid_employee/presentation/screens/manager/financial_reports_screen.dart';
+import 'package:orchid_employee/presentation/screens/manager/booking_analysis_screen.dart';
+import 'package:orchid_employee/presentation/screens/manager/manager_purchase_screen.dart';
+import 'package:orchid_employee/presentation/screens/manager/manager_room_mgmt_screen.dart';
+import 'package:orchid_employee/presentation/screens/manager/manager_bookings_screen.dart';
+import 'package:orchid_employee/presentation/screens/manager/manager_food_orders_screen.dart';
+import 'package:orchid_employee/presentation/screens/manager/manager_food_management_screen.dart';
+import 'package:orchid_employee/presentation/screens/manager/manager_service_assignment_screen.dart';
 
 class AppDrawer extends StatelessWidget {
   const AppDrawer({super.key});
@@ -211,6 +221,94 @@ class AppDrawer extends StatelessWidget {
                     },
                   ),
                 ],
+                
+                // Manager Menu
+                if (userRole == UserRole.manager) ...[
+                  const Divider(),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Text(
+                      "MANAGEMENT",
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey,
+                      ),
+                    ),
+                  ),
+                  _DrawerItem(
+                    icon: Icons.hotel_class,
+                    title: "Bookings",
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const ManagerBookingsScreen()));
+                    },
+                  ),
+                  _DrawerItem(
+                    icon: Icons.meeting_room,
+                    title: "Room Inventory",
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const ManagerRoomMgmtScreen()));
+                    },
+                  ),
+                  _DrawerItem(
+                    icon: Icons.restaurant,
+                    title: "Restaurant Hub",
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const ManagerFoodOrdersScreen(initialTab: 1)));
+                    },
+                  ),
+                  _DrawerItem(
+                    icon: Icons.fastfood,
+                    title: "Food Management",
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const ManagerFoodOrdersScreen(initialTab: 3)));
+                    },
+                  ),
+                  _DrawerItem(
+                    icon: Icons.assignment_ind,
+                    title: "Service Allocation",
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const ManagerServiceAssignmentScreen()));
+                    },
+                  ),
+                  _DrawerItem(
+                    icon: Icons.people_alt,
+                    title: "Staff & Payroll",
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const ManagerStaffScreen()));
+                    },
+                  ),
+                  _DrawerItem(
+                    icon: Icons.monetization_on,
+                    title: "Financial Reports",
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const FinancialReportsScreen()));
+                    },
+                  ),
+                  _DrawerItem(
+                    icon: Icons.inventory_2,
+                    title: "Stock Control",
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const ManagerInventoryScreen()));
+                    },
+                  ),
+                  _DrawerItem(
+                    icon: Icons.shopping_cart,
+                    title: "Purchases",
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const ManagerPurchaseScreen()));
+                    },
+                  ),
+                ],
 
                 // Common Menu Items
                 const Divider(),
@@ -227,7 +325,7 @@ class AppDrawer extends StatelessWidget {
                 ),
                 _DrawerItem(
                   icon: Icons.assessment,
-                  title: "Team Activity",
+                  title: "Activity Log",
                   onTap: () {
                     Navigator.pop(context);
                     Navigator.push(

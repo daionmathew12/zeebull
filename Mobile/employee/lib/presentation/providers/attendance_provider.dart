@@ -34,44 +34,56 @@ class AttendanceProvider extends ChangeNotifier {
     notifyListeners();
     
     try {
+      print("Checking attendance status for employee: $employeeId");
       final response = await _apiService.getWorkLogs(employeeId);
+      print("Work logs response status: ${response.statusCode}");
+      
       if (response.statusCode == 200 && response.data is List) {
         final logs = response.data as List;
+        print("Total work logs: ${logs.length}");
         bool foundActive = false;
         
         if (logs.isNotEmpty) {
            final today = DateTime.now();
            final todayLogs = logs.where(
-             (log) => DateTime.parse(log['date']).day == today.day && DateTime.parse(log['date']).month == today.month && DateTime.parse(log['date']).year == today.year
+             (log) {
+               final logDate = DateTime.parse(log['date']);
+               return logDate.day == today.day && 
+                      logDate.month == today.month && 
+                      logDate.year == today.year;
+             }
            ).toList();
            
-           // Sort by creation or time? Assuming latest is what we care about
+           print("Today's logs: ${todayLogs.length}");
+           
            // Check if ANY log is open (no checkout time)
-           final activeLog = todayLogs.firstWhere((log) => log['check_out_time'] == null, orElse: () => null);
-
-           if (activeLog != null) {
-              _isClockedIn = true;
-              _clockInTime = DateTime.parse('${activeLog['date']} ${activeLog['check_in_time']}');
-              foundActive = true;
-           } else {
-              // Maybe they clocked out?
-              // If they have logs but all closed, they are clocked out.
-              if (todayLogs.isNotEmpty) {
-                 // Optionally store last clock in time?
-              }
+           try {
+             final activeLog = todayLogs.firstWhere(
+               (log) => log['check_out_time'] == null,
+             );
+             
+             print("Found active log: ${activeLog}");
+             _isClockedIn = true;
+             _clockInTime = DateTime.parse('${activeLog['date']} ${activeLog['check_in_time']}');
+             foundActive = true;
+             print("Status: CLOCKED IN at ${_clockInTime}");
+           } catch (e) {
+             // No active log found
+             print("No active clock-in found");
+             if (todayLogs.isNotEmpty) {
+               print("Last log was clocked out");
+             }
            }
         }
         
         if (!foundActive) {
            _isClockedIn = false;
-           // Keep clockInTime null or set to last known? For now null.
            _clockInTime = null;
+           print("Status: CLOCKED OUT");
         }
       }
     } catch (e) {
       _error = e.toString();
-      // Don't reset _isClockedIn on error? Or assume safely false?
-      // Better to keep previous state or explicit error handling.
       print("Check status error: $e");
     } finally {
       _isLoading = false;
@@ -85,18 +97,34 @@ class AttendanceProvider extends ChangeNotifier {
     notifyListeners();
     
     try {
+      print("Attempting to clock in for employee: $employeeId");
       final response = await _apiService.clockIn(employeeId, "Mobile App");
+      print("Clock-in response status: ${response.statusCode}");
+      print("Clock-in response data: ${response.data}");
+      
       if (response.statusCode == 200) {
         _isClockedIn = true;
         _clockInTime = DateTime.now();
+        print("Clock-in successful!");
+        // Refresh status to get latest data
+        await checkTodayStatus(employeeId);
         return true;
       } else {
-        _error = "Failed to clock in";
+        _error = "Failed to clock in: ${response.statusMessage}";
         _isClockedIn = false;
+        print("Clock-in failed: ${response.statusMessage}");
         return false;
       }
     } catch (e) {
-      _error = e.toString();
+      // Check if already clocked in
+      if (e.toString().contains("already clocked in")) {
+        _error = "You are already clocked in. Please clock out first.";
+        _isClockedIn = true; // Update status
+        print("Already clocked in");
+      } else {
+        _error = e.toString();
+        print("Clock-in error: $e");
+      }
       return false;
     } finally {
       _isLoading = false;

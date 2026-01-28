@@ -31,6 +31,8 @@ class KOT {
   final String? deliveryRequest;
   final String orderType;
   int? assignedEmployeeId;
+  final String creatorName;
+  final String chefName;
 
   KOT({
     required this.id,
@@ -42,6 +44,8 @@ class KOT {
     this.deliveryRequest,
     required this.orderType,
     this.assignedEmployeeId,
+    required this.creatorName,
+    required this.chefName,
   });
 
   factory KOT.fromJson(Map<String, dynamic> json) {
@@ -49,7 +53,7 @@ class KOT {
     return KOT(
       id: json['id'],
       roomNumber: json['room_number'] ?? 'N/A',
-      waiterName: json['employee_name'] ?? 'N/A',
+      waiterName: json['employee_name'] ?? 'N/A', // This is assigned name
       createdAt: json['created_at'] != null 
           ? DateTime.parse(json['created_at']).toLocal() 
           : DateTime.now(),
@@ -58,6 +62,8 @@ class KOT {
       deliveryRequest: json['delivery_request'],
       orderType: json['order_type'] ?? 'dine_in',
       assignedEmployeeId: json['assigned_employee_id'],
+      creatorName: json['creator_name'] ?? 'N/A',
+      chefName: json['chef_name'] ?? 'Not Started',
     );
   }
 }

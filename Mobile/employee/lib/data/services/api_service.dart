@@ -7,7 +7,8 @@ import 'package:orchid_employee/core/constants/app_constants.dart';
 class ApiService {
   final Dio _dio = Dio();
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
-
+  
+  bool _isRedirecting = false;
   VoidCallback? onUnauthorized;
 
   ApiService() {
@@ -25,8 +26,14 @@ class ApiService {
       },
       onError: (DioException e, handler) {
         if (e.response?.statusCode == 401) {
-          print("[AUTH] 401 Unauthorized detected globally");
-          onUnauthorized?.call();
+          if (!_isRedirecting) {
+            print("[AUTH] 401 Unauthorized detected globally - Triggering Logout");
+            _isRedirecting = true;
+            onUnauthorized?.call();
+            // Reset flag after a delay to allow re-login attempts later if needed, 
+            // though typically UI rebuilt handles this.
+            Future.delayed(const Duration(seconds: 5), () => _isRedirecting = false);
+          }
         }
         return handler.next(e);
       },
@@ -97,6 +104,14 @@ class ApiService {
     return await _dio.get('/employees/pending-leaves');
   }
 
+  Future<Response> getAllLeaves({String? status}) async {
+    return await _dio.get(
+      '/employees/all-leaves',
+      queryParameters: status != null && status != 'All' ? {'status': status} : null,
+    );
+  }
+
+
   // Employee Details
   Future<Response> getEmployeeDetails(int employeeId) async {
     return await _dio.get('/employees/$employeeId');
@@ -116,11 +131,8 @@ class ApiService {
     return await _dio.post('/food-orders', data: data);
   }
 
-  Future<Response> updateFoodOrderStatus(int orderId, String status) async {
-    return await _dio.put(
-      '/food-orders/$orderId',
-      data: {'status': status},
-    );
+  Future<Response> updateFoodOrder(int orderId, Map<String, dynamic> data) async {
+    return await _dio.put('/food-orders/$orderId', data: data);
   }
 
   // Stock Requisitions
@@ -141,9 +153,47 @@ class ApiService {
     return await _dio.get('/inventory/waste-logs');
   }
 
+  Future<Response> getInventoryTransactions({String? type, int limit = 100}) async {
+    return await _dio.get(
+      '/inventory/transactions',
+      queryParameters: {
+        if (type != null) 'type': type,
+        'limit': limit,
+      },
+    );
+  }
+
   // Food Items (Menu)
   Future<Response> getFoodItems() async {
     return await _dio.get(ApiConstants.foodItems);
+  }
+
+  Future<Response> updateFoodItem(int id, Map<String, dynamic> data) async {
+    return await _dio.put('${ApiConstants.foodItems}/$id', data: data);
+  }
+
+  Future<Response> createFoodItem(FormData data) async {
+    return await _dio.post(ApiConstants.foodItems, data: data);
+  }
+
+  Future<Response> deleteFoodItem(int id) async {
+    return await _dio.delete('${ApiConstants.foodItems}/$id');
+  }
+
+  Future<Response> getFoodCategories() async {
+    return await _dio.get(ApiConstants.foodCategories);
+  }
+
+  Future<Response> createFoodCategory(FormData data) async {
+    return await _dio.post(ApiConstants.foodCategories, data: data);
+  }
+
+  Future<Response> updateFoodCategory(int id, FormData data) async {
+    return await _dio.put('${ApiConstants.foodCategories}/$id', data: data);
+  }
+
+  Future<Response> deleteFoodCategory(int id) async {
+    return await _dio.delete('${ApiConstants.foodCategories}/$id');
   }
 
   Future<Response> getRooms() async {
@@ -153,6 +203,11 @@ class ApiService {
   Future<Response> getRecipe(int foodItemId) async {
     return await _dio.get('/recipes', queryParameters: {'food_item_id': foodItemId});
   }
+  
+  Future<Response> getComprehensiveItemDetails(int itemId) async {
+    return await _dio.get('${ApiConstants.inventoryItems}/$itemId/comprehensive-details');
+  }
+
 
   Future<Response> getEmployees() async {
     return await _dio.get(ApiConstants.employees);
@@ -213,5 +268,82 @@ class ApiService {
         if (toDate != null) 'to_date': toDate,
       },
     );
+  }
+
+  // Room Management
+  Future<Response> createRoom(Map<String, dynamic> data) async {
+    return await _dio.post(ApiConstants.rooms, data: data);
+  }
+
+  Future<Response> updateRoom(int id, Map<String, dynamic> data) async {
+    return await _dio.put('${ApiConstants.rooms}/$id', data: data);
+  }
+
+  Future<Response> deleteRoom(int id) async {
+    return await _dio.delete('${ApiConstants.rooms}/$id');
+  }
+
+  // Booking Management
+  Future<Response> getBookings() async {
+    return await _dio.get('/bookings');
+  }
+
+  Future<Response> createBooking(Map<String, dynamic> data) async {
+    return await _dio.post('/bookings', data: data);
+  }
+
+  Future<Response> getPackages() async {
+    return await _dio.get('/packages');
+  }
+
+  Future<Response> createPackage(FormData data) async {
+    return await _dio.post('/packages', data: data);
+  }
+
+  Future<Response> updatePackage(int id, FormData data) async {
+    return await _dio.put('/packages/$id', data: data);
+  }
+
+  Future<Response> deletePackage(int id) async {
+    return await _dio.delete('/packages/$id');
+  }
+
+  Future<Response> createPackageBooking(Map<String, dynamic> data) async {
+    return await _dio.post('/packages/book', data: data);
+  }
+
+  Future<Response> getPackageBookings() async {
+    return await _dio.get('/packages/bookingsall');
+  }
+
+  Future<Response> checkInBooking(
+    int bookingId, {
+    bool isPackage = false,
+    required dynamic idCardImage, // File or String path
+    required dynamic guestPhoto, // File or String path
+    String? amenityAllocation,
+  }) async {
+    final formData = FormData.fromMap({
+      if (idCardImage != null)
+        'id_card_image': await MultipartFile.fromFile(idCardImage),
+      if (guestPhoto != null)
+        'guest_photo': await MultipartFile.fromFile(guestPhoto),
+      if (amenityAllocation != null) 'amenityAllocation': amenityAllocation,
+    });
+
+    final endpoint = isPackage
+        ? '/packages/booking/$bookingId/check-in'
+        : '/bookings/$bookingId/check-in';
+
+    return await _dio.put(endpoint, data: formData);
+  }
+
+  // Dashboard & Management
+  Future<Response> getDashboardSummary({String period = "day"}) async {
+    return await _dio.get('/dashboard/summary', queryParameters: {'period': period});
+  }
+
+  Future<Response> getDashboardCharts() async {
+    return await _dio.get('/dashboard/charts');
   }
 }

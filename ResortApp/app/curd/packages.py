@@ -259,6 +259,24 @@ def book_package(db: Session, booking: PackageBookingCreate):
             room = db.query(Room).filter(Room.id == room_id).first()
             raise HTTPException(status_code=400, detail=f"Room {room.number if room else room_id} is not available for the selected dates.")
 
+    # Calculate calculated_total_amount based on package price and duration
+    # Note: Package price is typically per night.
+    # Logic: price * nights * (rooms count if applicable? usually package is per room-night or per person-night?
+    # Based on book_package_guest_api logic: package_charges = package_price * stay_nights * len(booking.room_ids)
+    
+    from datetime import datetime, date
+    d_check_in = booking.check_in if isinstance(booking.check_in, date) else datetime.strptime(str(booking.check_in), '%Y-%m-%d').date()
+    d_check_out = booking.check_out if isinstance(booking.check_out, date) else datetime.strptime(str(booking.check_out), '%Y-%m-%d').date()
+    stay_days = (d_check_out - d_check_in).days
+    stay_nights = stay_days if stay_days > 0 else 1
+    
+    calc_total_amount = 0.0
+    if selected_package:
+        # Assuming price is per night per package unit (often per room for packages)
+        # If booking.room_ids has multiple rooms, we multiply.
+        num_rooms = len(booking.room_ids) if booking.room_ids else 1
+        calc_total_amount = selected_package.price * stay_nights * num_rooms
+
     # All conflict checks passed - now create the booking
     db_booking = PackageBooking(
         package_id=booking.package_id,
@@ -273,6 +291,7 @@ def book_package(db: Session, booking: PackageBookingCreate):
         user_id=guest_user_id,  # Link booking to guest user
         food_preferences=booking.food_preferences,
         special_requests=booking.special_requests,
+        total_amount=calc_total_amount, # Set calculated total
     )
     db.add(db_booking)
     db.commit()

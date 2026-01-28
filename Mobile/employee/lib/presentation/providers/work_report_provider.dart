@@ -44,7 +44,7 @@ class WorkReportProvider extends ChangeNotifier {
     
     switch (filter) {
       case 'Today':
-        _fromDate = now;
+        _fromDate = DateTime(now.year, now.month, now.day);
         break;
       case 'Week':
         // Last 7 days
@@ -74,19 +74,26 @@ class WorkReportProvider extends ChangeNotifier {
         toDateStr = "${_toDate!.year}-${_toDate!.month.toString().padLeft(2, '0')}-${_toDate!.day.toString().padLeft(2, '0')}";
       }
 
-      // Use Global Report for everyone as per request
-      final response = await _apiService.getGlobalActivityReport(
+      // Use User Activity Report for specific user
+      final response = await _apiService.getUserActivityReport(
+        userId,
         fromDate: fromDateStr, 
         toDate: toDateStr
       );
 
       if (response.statusCode == 200) {
-        _report = UserHistory.fromList(response.data);
+        // The API returns UserHistoryOut object directly, not a list of activities
+        // We need to parse it
+        _report = UserHistory.fromJson(response.data);
       } else {
         _error = "Failed to fetch report";
       }
     } catch (e) {
-      _error = e.toString();
+      if (e.toString().contains("404")) {
+        _error = "Server not updated with new report features yet.";
+      } else {
+        _error = e.toString();
+      }
       print("WorkReportProvider error: $e");
     } finally {
       _isLoading = false;

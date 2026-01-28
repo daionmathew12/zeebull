@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:orchid_employee/data/models/inventory_item_model.dart';
 import 'package:orchid_employee/data/services/api_service.dart';
 import 'package:orchid_employee/core/constants/api_constants.dart';
+import 'package:dio/dio.dart';
 
 class InventoryProvider with ChangeNotifier {
   final ApiService _apiService;
@@ -18,9 +19,23 @@ class InventoryProvider with ChangeNotifier {
   List<InventoryItem> _allItems = [];
   List<dynamic> _locations = [];
   List<dynamic> _rooms = [];
+  List<dynamic> _categories = [];
   List<InventoryItem> get allItems => _allItems;
   List<dynamic> get locations => _locations;
   List<dynamic> get rooms => _rooms;
+  List<dynamic> get categories => _categories;
+
+  Future<void> fetchCategories() async {
+    try {
+      final response = await _apiService.dio.get('/inventory/categories?limit=100');
+      if (response.statusCode == 200) {
+        _categories = response.data;
+        notifyListeners();
+      }
+    } catch (e) {
+      print("Error fetching categories: $e");
+    }
+  }
 
   Future<void> fetchRooms() async {
     try {
@@ -92,6 +107,70 @@ class InventoryProvider with ChangeNotifier {
     }
   }
 
+  Future<Map<String, dynamic>?> getComprehensiveItemDetails(int itemId) async {
+    try {
+      final response = await _apiService.getComprehensiveItemDetails(itemId);
+      if (response.statusCode == 200) {
+        return response.data;
+      }
+    } catch (e) {
+      print("Error fetching detailed item info: $e");
+    }
+    return null;
+  }
+
+
+  Future<bool> createItem(Map<String, dynamic> data) async {
+    try {
+      final formData = FormData.fromMap(data);
+      final response = await _apiService.dio.post(
+        '${ApiConstants.inventoryItems}',
+        data: formData,
+      );
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        await fetchSellableItems();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      print("Error creating item: $e");
+      return false;
+    }
+  }
+
+  Future<bool> updateItem(int id, Map<String, dynamic> data) async {
+    try {
+      final formData = FormData.fromMap(data);
+      final response = await _apiService.dio.put(
+        '${ApiConstants.inventoryItems}/$id',
+        data: formData,
+      );
+      if (response.statusCode == 200) {
+        await fetchSellableItems();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      print("Error updating item: $e");
+      return false;
+    }
+  }
+
+  Future<bool> deleteItem(int id) async {
+    try {
+      final response = await _apiService.dio.delete('${ApiConstants.inventoryItems}/$id');
+      if (response.statusCode == 200) {
+        _allItems.removeWhere((i) => i.id == id);
+        notifyListeners();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      print("Error deleting item: $e");
+      return false;
+    }
+  }
+
   Future<bool> createStockIssue({
     required int sourceLocationId,
     required List<Map<String, dynamic>> items, // {item_id, quantity}
@@ -103,8 +182,8 @@ class InventoryProvider with ChangeNotifier {
         ApiConstants.stockIssues,
         data: {
           'source_location_id': sourceLocationId,
-          'destination_location_id': destinationLocationId, // Optional, implies consumption if null? Backend logic varies.
-          'status': 'issued', 
+          'destination_location_id': destinationLocationId,
+          'status': 'issued',
           'issue_date': DateTime.now().toIso8601String(),
           'notes': notes,
           'details': items,
@@ -113,6 +192,19 @@ class InventoryProvider with ChangeNotifier {
       return response.statusCode == 200 || response.statusCode == 201;
     } catch (e) {
       print("Error creating stock issue: $e");
+      return false;
+    }
+  }
+
+  Future<bool> addWasteLog(FormData data) async {
+    try {
+      final response = await _apiService.createWasteLog(data);
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return true;
+      }
+      return false;
+    } catch (e) {
+      print("Error adding waste log: $e");
       return false;
     }
   }

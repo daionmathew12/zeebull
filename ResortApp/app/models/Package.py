@@ -10,7 +10,8 @@ class Package(Base):
     description = Column(String)
     price = Column(Float, nullable=False)
     booking_type = Column(String, default="room_type")  # "whole_property" or "room_type"
-    room_types = Column(String, nullable=True)  # Comma-separated list of room types (e.g., "Cottage,Non AC Double Room")
+    room_types = Column(String, nullable=True)  # Comma-separated list of room types
+    status = Column(String, default="active") # active, inactive
     
     # New fields
     theme = Column(String, nullable=True)  # Romance, Wellness, Adventure, Family, etc.
@@ -55,6 +56,7 @@ class PackageBooking(Base):
     guest_photo_url = Column(String, nullable=True)
 
     status = Column(String)
+    total_amount = Column(Float, default=0.0) # Added for tracking package booking value
     advance_deposit = Column(Float, default=0.0)  # Advance payment made during booking
     food_preferences = Column(String, nullable=True)
     special_requests = Column(String, nullable=True)

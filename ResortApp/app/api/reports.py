@@ -256,10 +256,15 @@ def get_user_history_report(
 
             service_name = s.service.name if s.service else "Unknown Service"
             room_num = s.room.number if s.room else "Unknown Room"
+            # Debugging role detection
+            roles_debug = []
+            if employee.role: roles_debug.append(str(employee.role).lower())
+            if employee.user and employee.user.role: roles_debug.append(str(employee.user.role.name).lower())
+            
             activities.append(ActivityItem(
                 activity_date=act_date,
                 type="Service",
-                description=f"Completed service: {service_name} in Room {room_num}",
+                description=f"Completed service: {service_name} in Room {room_num} [Roles: {roles_debug}]",
                 amount=None 
             ))
 
@@ -293,16 +298,42 @@ def get_user_history_report(
             ))
 
         # 5. Food Orders
-        fo_query = db.query(FoodOrder).filter(FoodOrder.assigned_employee_id == employee.id)
+        # 5. Food Orders
+        # Logic: If user is kitchen staff, show ALL food orders (since they prepare them).
+        # Otherwise, show only orders assigned to the employee (e.g. waiter delivery).
+        
+        is_kitchen_staff = False
+        roles_to_check = []
+        if employee.role:
+            roles_to_check.append(str(employee.role).lower())
+        if employee.user and employee.user.role and employee.user.role.name:
+            roles_to_check.append(str(employee.user.role.name).lower())
+            
+        for r in roles_to_check:
+            if "kitchen" in r or "chef" in r or "cook" in r:
+                is_kitchen_staff = True
+                break
+        
+        if is_kitchen_staff:
+             fo_query = db.query(FoodOrder) # Kitchen sees all
+        else:
+             fo_query = db.query(FoodOrder).filter(FoodOrder.assigned_employee_id == employee.id)
+             
         if from_date: fo_query = fo_query.filter(FoodOrder.created_at >= from_date)
         if to_date: fo_query = fo_query.filter(FoodOrder.created_at <= to_date)
 
         for f in fo_query.all():
             room_num = f.room.number if f.room else "N/A"
+            
+            delivery_person = f.employee.name if f.employee else "Unassigned"
+            desc = f"Served order in Room {room_num} ({len(f.items)} items)"
+            if is_kitchen_staff:
+                desc = f"Kitchen Order: Room {room_num} ({len(f.items)} items) - {f.status} | Prep: Kitchen | Del: {delivery_person}"
+            
             activities.append(ActivityItem(
                 activity_date=f.created_at,
                 type="Food Order",
-                description=f"Served order in Room {room_num} ({len(f.items)} items)",
+                description=desc,
                 amount=f.total_with_gst or f.amount
             ))
 

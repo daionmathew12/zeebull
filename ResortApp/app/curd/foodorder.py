@@ -65,7 +65,8 @@ def create_food_order(db: Session, order_data: FoodOrderCreate):
         status="pending",
         billing_status="unbilled",
         order_type=getattr(order_data, 'order_type', 'dine_in'),
-        delivery_request=getattr(order_data, 'delivery_request', None)
+        delivery_request=getattr(order_data, 'delivery_request', None),
+        created_by_id=order_data.assigned_employee_id # Default creator to assigned employee for now
     )
     db.add(order)
     db.commit()
@@ -138,6 +139,8 @@ def get_food_orders(db: Session, skip: int = 0, limit: int = 100):
             db.query(FoodOrder)
             .options(
                 joinedload(FoodOrder.employee),  # Load employee for employee name
+                joinedload(FoodOrder.creator),   # Load creator name
+                joinedload(FoodOrder.chef),      # Load chef name
                 joinedload(FoodOrder.room),      # Load room for room number
                 joinedload(FoodOrder.items).joinedload(FoodOrderItem.food_item)  # Load items and food details
             )
@@ -160,6 +163,10 @@ def get_food_orders(db: Session, skip: int = 0, limit: int = 100):
                 order.room_number = order.room.number
             else:
                 order.room_number = None
+            
+            # Set additional names
+            order.creator_name = order.creator.name if order.creator else "Unknown"
+            order.chef_name = order.chef.name if order.chef else "Not Started"
             
             # Set guest name significantly improved logic:
             # Search for booking that was active at the time the order was created
@@ -184,6 +191,12 @@ def update_food_order_status(db: Session, order_id: int, status: str):
     if order:
         old_status = order.status
         order.status = status
+        
+        # If moving to cooking/preparing, set the chef
+        # (This usually happens via the kitchen staff's UI)
+        # Note: We don't have the context of 'current_user' here, 
+        # but the caller (API) can pass prepared_by_id if needed.
+        
         db.commit()
         db.refresh(order)
         
@@ -231,6 +244,15 @@ def update_food_order(db: Session, order_id: int, update_data: FoodOrderUpdate):
     if update_data.status is not None:
         old_status = order.status
         order.status = update_data.status
+        
+        # If status moved to cooking/preparing, and prepared_by_id not set, 
+        # we can assume the person updating it is preparing it? 
+        # Actually, let's check if prepared_by_id is explicitly passed.
+        if update_data.prepared_by_id is not None:
+            order.prepared_by_id = update_data.prepared_by_id
+        elif update_data.status in ['cooking', 'accepted', 'preparing'] and order.prepared_by_id is None:
+             # If the UI doesn't pass it, we might set it in the endpoint layer
+             pass
         
         # Process inventory usage if completed
         if old_status != "completed" and update_data.status == "completed":

@@ -346,6 +346,169 @@ def get_item_stocks(item_id: int, db: Session = Depends(get_db), current_user: U
     return inventory_crud.get_item_stocks(db, item_id)
 
 
+@router.get("/items/{item_id}/comprehensive-details")
+def get_item_comprehensive_details(
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    from app.models.inventory import (
+        InventoryItem, LocationStock, Location, PurchaseDetail, PurchaseMaster,
+        InventoryTransaction, WasteLog
+    )
+    from sqlalchemy import func
+
+    # 1. Basic Item Details
+    item = inventory_crud.get_item_by_id(db, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    
+    category = inventory_crud.get_category_by_id(db, item.category_id)
+    
+    # 2. Location Stocks
+    stocks_query = db.query(LocationStock, Location.name, Location.location_type)\
+        .join(Location, LocationStock.location_id == Location.id)\
+        .filter(LocationStock.item_id == item_id, LocationStock.quantity != 0).all()
+        
+    location_stocks = []
+    for stock, loc_name, loc_type in stocks_query:
+        location_stocks.append({
+            "location_id": stock.location_id,
+            "location_name": loc_name,
+            "location_type": loc_type,
+            "quantity": float(stock.quantity),
+            "last_updated": stock.last_updated
+        })
+
+    # 3. Purchase History & Stats
+    purchases_query = db.query(PurchaseDetail, PurchaseMaster)\
+        .join(PurchaseMaster, PurchaseDetail.purchase_master_id == PurchaseMaster.id)\
+        .filter(PurchaseDetail.item_id == item_id, PurchaseMaster.status.in_(['received', 'confirmed']))\
+        .order_by(PurchaseMaster.purchase_date.desc()).all()
+
+    total_purchased_qty = 0.0
+    total_purchased_val = 0.0
+    purchase_history = []
+    
+    for detail, master in purchases_query:
+        qty = float(detail.quantity or 0)
+        val = float(detail.total_amount or 0)
+        total_purchased_qty += qty
+        total_purchased_val += val
+        
+        # Get vendor name safely
+        vendor_name = master.vendor.name if master.vendor else "Unknown"
+        
+        purchase_history.append({
+            "date": master.purchase_date,
+            "purchase_number": master.purchase_number,
+            "vendor_name": vendor_name,
+            "quantity": qty,
+            "unit_price": float(detail.unit_price or 0),
+            "total_amount": val
+        })
+
+    avg_purchase_price = (total_purchased_val / total_purchased_qty) if total_purchased_qty > 0 else 0.0
+
+    # 4. Usage (Consumption) History & Stats (Transactions type='out', Ref starts with ISS)
+    usage_query = db.query(InventoryTransaction)\
+        .filter(
+            InventoryTransaction.item_id == item_id, 
+            InventoryTransaction.transaction_type == 'out',
+            InventoryTransaction.reference_number.like('ISS-%')
+        ).order_by(InventoryTransaction.created_at.desc()).all()
+
+    total_consumed_qty = 0.0
+    total_consumed_val = 0.0
+    usage_history = []
+    
+    for trans in usage_query:
+        qty = float(trans.quantity or 0)
+        val = float(trans.total_amount or 0)
+        total_consumed_qty += qty
+        total_consumed_val += val
+        
+        usage_history.append({
+            "date": trans.created_at,
+            "reference": trans.reference_number,
+            "quantity": qty,
+            "notes": trans.notes or "Consumption"
+        })
+
+    # 5. Wastage History & Stats
+    waste_query = db.query(WasteLog, Location.name)\
+        .outerjoin(Location, WasteLog.location_id == Location.id)\
+        .filter(WasteLog.item_id == item_id)\
+        .order_by(WasteLog.waste_date.desc()).all()
+        
+    total_wasted_qty = 0.0
+    waste_history = []
+    
+    for log, loc_name in waste_query:
+        qty = float(log.quantity or 0)
+        total_wasted_qty += qty
+        
+        waste_history.append({
+            "date": log.waste_date,
+            "reference": log.log_number,
+            "location": loc_name or "Unknown",
+            "quantity": qty,
+            "reason": log.reason_code,
+            "notes": log.notes
+        })
+
+    # Calculate wastage value from transactions
+    waste_trans_query = db.query(func.sum(InventoryTransaction.total_amount))\
+        .filter(
+            InventoryTransaction.item_id == item_id,
+            InventoryTransaction.transaction_type == 'out',
+            InventoryTransaction.reference_number.like('WASTE-%')
+        ).scalar()
+    total_wasted_val = float(waste_trans_query or 0)
+
+    # 6. Transfers (Stock Movement)
+    transfer_query = db.query(InventoryTransaction)\
+        .filter(
+            InventoryTransaction.item_id == item_id,
+            InventoryTransaction.transaction_type.in_(['transfer_out', 'transfer_in'])
+        ).order_by(InventoryTransaction.created_at.desc()).all()
+        
+    transfer_history = []
+    for trans in transfer_query:
+        transfer_history.append({
+            "date": trans.created_at,
+            "type": trans.transaction_type,
+            "reference": trans.reference_number,
+            "quantity": float(trans.quantity or 0),
+            "department": trans.department,
+            "notes": trans.notes
+        })
+
+    # Convert item to dict handling SQLAlchemy internal state
+    item_dict = {c.name: getattr(item, c.name) for c in item.__table__.columns}
+    item_dict["category_name"] = category.name if category else None
+
+    return {
+        "item": item_dict,
+        "location_stocks": location_stocks,
+        "stats": {
+            "total_purchased_qty": total_purchased_qty,
+            "total_purchased_val": total_purchased_val,
+            "avg_purchase_price": avg_purchase_price,
+            "total_consumed_qty": total_consumed_qty,
+            "total_consumed_val": total_consumed_val,
+            "total_wasted_qty": total_wasted_qty,
+            "total_wasted_val": total_wasted_val,
+        },
+        "history": {
+            "purchases": purchase_history,
+            "usage": usage_history,
+            "wastage": waste_history,
+            "transfers": transfer_history
+        }
+    }
+
+
 @router.put("/items/{item_id}", response_model=InventoryItemOut)
 async def update_item(
     item_id: int,

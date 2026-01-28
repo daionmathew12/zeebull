@@ -122,7 +122,7 @@ class KitchenProvider extends ChangeNotifier {
 
   Future<bool> updateStatus(int orderId, String newStatus) async {
     try {
-      final response = await _apiService.updateFoodOrderStatus(orderId, newStatus);
+      final response = await _apiService.updateFoodOrder(orderId, {'status': newStatus});
       if (response.statusCode == 200) {
         // Update local state
         final index = _activeKots.indexWhere((kot) => kot.id == orderId);

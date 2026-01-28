@@ -257,6 +257,7 @@ async def update_package_api(
     package.max_stay_days = max_stay_days
     package.food_included = food_included
     package.food_timing = food_timing
+    package.status = status
     
     # Add new images if provided
     if images:
@@ -466,6 +467,47 @@ def get_bookings(db: Session = Depends(get_db), current_user: User = Depends(get
             joinedload(PackageBooking.package)
             # Removed nested room loading to reduce query complexity
         ).filter(PackageBooking.package_id.is_not(None)).offset(skip).limit(limit).all()
+        
+        # Fallback: Calculate total amount if 0 (for legacy data)
+        for booking in result:
+            if (not booking.total_amount or booking.total_amount == 0) and booking.check_in and booking.check_out and booking.package:
+                try:
+                    from datetime import datetime, date
+                    d_in = booking.check_in
+                    d_out = booking.check_out
+                    
+                    if isinstance(d_in, str):
+                        d_in = datetime.strptime(d_in, '%Y-%m-%d').date()
+                    if isinstance(d_out, str):
+                        d_out = datetime.strptime(d_out, '%Y-%m-%d').date()
+                        
+                    stay_days = (d_out - d_in).days
+                    stay_nights = max(1, stay_days)
+                    # For packages, price is per unit (usually room). Count rooms if available, else 1.
+                    # We need to access rooms relationship if loaded, or assume 1 if not.
+                    # Warning: rooms might not be eager loaded here based on lines above.
+                    # But checking len(booking.rooms) might trigger lazy load if not detached.
+                    num_rooms = len(booking.rooms) if booking.rooms else 1
+                    
+                    calc_amount = booking.package.price * stay_nights * num_rooms
+                    
+                    if calc_amount > 0:
+                         booking.total_amount = calc_amount
+                         # Self-healing
+                         try:
+                             from sqlalchemy import update
+                             stmt = update(PackageBooking).where(PackageBooking.id == booking.id).values(total_amount=calc_amount)
+                             db.execute(stmt)
+                             db.commit()
+                             print(f"Self-healed Package Booking {booking.id} total_amount to {calc_amount}")
+                         except Exception as db_e:
+                             print(f"Failed to update healed package amount: {db_e}")
+                             db.rollback()
+
+                except Exception as e:
+                    print(f"Error patching total_amount for package {booking.id}: {e}")
+                    pass
+
         return result if result is not None else []
     except Exception as e:
         import traceback
@@ -478,7 +520,7 @@ def get_bookings(db: Session = Depends(get_db), current_user: User = Depends(get
         return []
 
 
-def _list_packages_impl(db: Session, skip: int = 0, limit: int = 20):
+def _list_packages_impl(db: Session, skip: int = 0, limit: int = 20, status: str = None):
     """Helper function for list_packages"""
     try:
         # Optimized for low network - reduced to 50
@@ -487,8 +529,13 @@ def _list_packages_impl(db: Session, skip: int = 0, limit: int = 20):
         if limit < 1:
             limit = 20
         
-        # Query directly in the endpoint to apply pagination
-        result = db.query(Package).offset(skip).limit(limit).all()
+        # Query directly in the endpoint to apply pagination and filtering
+        query = db.query(Package)
+        
+        if status:
+            query = query.filter(Package.status == status)
+            
+        result = query.offset(skip).limit(limit).all()
         return result if result is not None else []
     except Exception as e:
         import traceback
@@ -501,12 +548,12 @@ def _list_packages_impl(db: Session, skip: int = 0, limit: int = 20):
         return []
 
 @router.get("", response_model=List[PackageOut])
-def list_packages(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20):
-    return _list_packages_impl(db, skip, limit)
+def list_packages(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20, status: str = None):
+    return _list_packages_impl(db, skip, limit, status)
 
 @router.get("/", response_model=List[PackageOut])  # Handle trailing slash
-def list_packages_slash(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20):
-    return _list_packages_impl(db, skip, limit)
+def list_packages_slash(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20, status: str = None):
+    return _list_packages_impl(db, skip, limit, status)
 
 
 @router.get("/{package_id}", response_model=PackageOut)

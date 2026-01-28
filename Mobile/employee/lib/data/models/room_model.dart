@@ -7,6 +7,7 @@ class Room {
   final int floor;
   final DateTime? lastCleaned;
   final String? assignedTo;
+  final double price;
 
   Room({
     required this.id,
@@ -17,6 +18,7 @@ class Room {
     required this.floor,
     this.lastCleaned,
     this.assignedTo,
+    this.price = 0.0,
   });
 
   factory Room.fromJson(Map<String, dynamic> json) {
@@ -31,6 +33,7 @@ class Room {
           ? DateTime.parse(json['last_cleaned']) 
           : null,
       assignedTo: json['assigned_to'],
+      price: (json['price'] as num?)?.toDouble() ?? 0.0,
     );
   }
 

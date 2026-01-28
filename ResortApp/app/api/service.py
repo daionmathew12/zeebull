@@ -690,6 +690,45 @@ def get_all_assigned_services(
             service_inventory_items = _load_inventory_items_for_service(db, assigned.service.id)
             print(f"[DEBUG get_all_assigned_services] Service {assigned.service.id} has {len(service_inventory_items)} inventory items")
             
+            # Fetch actual inventory items used from EmployeeInventoryAssignment (includes extra items)
+            items_used_list = []
+            try:
+                from app.models.employee_inventory import EmployeeInventoryAssignment
+                from app.models.inventory import InventoryItem
+                
+                print(f"[DEBUG] Querying EmployeeInventoryAssignment for service search {assigned.id}")
+                emp_inv_assignments = db.query(EmployeeInventoryAssignment).filter(
+                    EmployeeInventoryAssignment.assigned_service_id == assigned.id
+                ).all()
+                print(f"[DEBUG] Found {len(emp_inv_assignments)} assignments for service {assigned.id}")
+                
+                if emp_inv_assignments:
+                    for eia in emp_inv_assignments:
+                        # Fetch item details (optimize with joinedload if needed, but loop is small)
+                        inv_item = db.query(InventoryItem).filter(InventoryItem.id == eia.item_id).first()
+                        if inv_item:
+                            items_used_list.append({
+                                "id": int(inv_item.id),
+                                "name": str(inv_item.name),
+                                "item_code": getattr(inv_item, 'item_code', None),
+                                "unit": getattr(inv_item, 'unit', 'pcs') or 'pcs',
+                                "quantity": float(eia.quantity_assigned),
+                                "unit_price": float(inv_item.unit_price) if inv_item.unit_price is not None else 0.0,
+                                "selling_price": float(inv_item.selling_price) if hasattr(inv_item, 'selling_price') and inv_item.selling_price is not None else None
+                            })
+                    print(f"[DEBUG] Constructed {len(items_used_list)} items_used_list entries")
+            except Exception as e:
+                print(f"[WARNING] Failed to fetch inventory items used for assigned service {assigned.id}: {e}")
+                import traceback
+                traceback.print_exc()
+            
+            # Fallback to template items if no specific assignment records found
+            if not items_used_list:
+                print(f"[DEBUG] items_used_list empty, falling back to service_inventory_items ({len(service_inventory_items)} items)")
+                items_used_list = service_inventory_items or []
+            
+            print(f"[DEBUG] Final items_used_list for {assigned.id}: {json.dumps(items_used_list, default=str)}")
+            
             result.append({
                 "id": assigned.id,
                 "service_id": assigned.service.id,  # Add service_id for filtering
@@ -715,7 +754,9 @@ def get_all_assigned_services(
                 },
                 "assigned_at": assigned.assigned_at,
                 "status": status_enum,
-                "last_used_at": assigned.last_used_at
+                "last_used_at": assigned.last_used_at,
+                "inventory_items_used": items_used_list,
+                "debug_items": items_used_list # Bypass schema filtering check
             })
         
         return result

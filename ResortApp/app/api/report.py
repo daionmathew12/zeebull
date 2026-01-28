@@ -175,7 +175,7 @@ def get_user_history(
     """
     Generates a complete history of activities for a specific user within a date range.
     """
-    user = db.query(models.User).filter(models.User.id == user_id).first()
+    user = db.query(models.User).options(joinedload(models.User.role)).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -193,7 +193,7 @@ def get_user_history(
     # 1. Room Bookings created by user
     room_bookings_query = db.query(models.Booking).filter(models.Booking.user_id == user_id)
     room_bookings = apply_date_filter(room_bookings_query, models.Booking.check_in).options(
-        joinedload(models.Booking.booking_rooms).joinedload(models.booking.BookingRoom.room)
+        joinedload(models.Booking.booking_rooms).joinedload(models.BookingRoom.room)
     ).all()
     for b in room_bookings:
         stay_days = max(1, (b.check_out - b.check_in).days)
@@ -214,29 +214,73 @@ def get_user_history(
             details={"guest_name": pb.guest_name, "package_title": pb.package.title if pb.package else "N/A"}
         ))
 
-    # 3. Food Orders assigned to user
-    food_orders_query = db.query(models.FoodOrder).filter(models.FoodOrder.assigned_employee_id == user_id)
-    food_orders = apply_date_filter(food_orders_query, models.FoodOrder.created_at).all()
-    food_orders_query = food_orders_query.options(joinedload(models.FoodOrder.room))
+    # 3. Food Orders
+    # 3. Food Orders
+    # Logic: If user is kitchen staff (or Admin/Manager), show ALL food orders.
+    show_all_orders = False
+    
+    # Robust Role Detection
+    user_role_name = ""
+    if user.role and user.role.name:
+        user_role_name = str(user.role.name).lower()
+    
+    emp = db.query(models.Employee).filter(models.Employee.user_id == user_id).first()
+    emp_role_name = ""
+    if emp and emp.role:
+        emp_role_name = str(emp.role).lower()
+        
+    global_roles = ["kitchen", "chef", "cook", "admin", "manager"]
+    if any(x in user_role_name for x in global_roles) or any(x in emp_role_name for x in global_roles):
+        show_all_orders = True
+
+    if show_all_orders:
+        food_orders_query = db.query(models.FoodOrder)
+    else:
+        # Show only orders relevant to this specific employee
+        # Filters: Assigned to them, Created by them, or Prepared by them
+        from sqlalchemy import or_
+        filters = [models.FoodOrder.assigned_employee_id == (emp.id if emp else -1)]
+        filters.append(models.FoodOrder.created_by_id == (emp.id if emp else -1))
+        filters.append(models.FoodOrder.prepared_by_id == (emp.id if emp else -1))
+        food_orders_query = db.query(models.FoodOrder).filter(or_(*filters))
+    
+    food_orders = apply_date_filter(food_orders_query, models.FoodOrder.created_at).options(
+        joinedload(models.FoodOrder.room),
+        joinedload(models.FoodOrder.items),
+        joinedload(models.FoodOrder.employee) 
+    ).all()
+
     for fo in food_orders:
+        room_num = fo.room.number if fo.room else 'N/A'
+        
+        delivery_person = fo.employee.name if fo.employee else "Unassigned"
+        desc = f"Handled food order for Room {room_num}"
+        
+        # Enhanced description for all who can view all orders
+        if show_all_orders:
+            desc = f"Order: Room {room_num} ({len(fo.items)} items) - {fo.status} | Prep: Kitchen | Del: {delivery_person}"
+
         activities.append(UserActivityItem(
             type="Food Order", activity_date=fo.created_at,
-            description=f"Handled food order for Room {fo.room.number if fo.room else 'N/A'}", amount=fo.amount, status=fo.status,
-            details={"room_number": fo.room.number if fo.room else "N/A", "items": len(fo.items)}
+            description=desc, 
+            amount=fo.amount, status=fo.status,
+            details={"room_number": room_num, "items": len(fo.items)}
         ))
 
-    # Fetch associated employee to link services
-    employee = db.query(models.Employee).filter(models.Employee.user_id == user_id).first()
-    
-    # 4. Services assigned to user (linked via Employee ID)
-    if employee:
-        services_query = db.query(models.AssignedService).filter(models.AssignedService.employee_id == employee.id)
-        assigned_services = apply_date_filter(services_query, models.AssignedService.assigned_at).all()
+    # 4. Service Requests assigned to user
+    if emp:
+        from app.models.service_request import ServiceRequest
+        services_query = db.query(ServiceRequest).filter(ServiceRequest.employee_id == emp.id)
+        assigned_services = apply_date_filter(services_query, ServiceRequest.created_at).all()
         for s in assigned_services:
+            act_date = s.created_at
             activities.append(UserActivityItem(
-                type="Service", activity_date=s.assigned_at,
-                description=f"Assigned service '{s.service.name if s.service else 'N/A'}' to Room {s.room.number if s.room else 'N/A'}", amount=s.service.charges if s.service else 0, status=s.status,
-                details={"service_name": s.service.name if s.service else "N/A", "room_number": s.room.number if s.room else "N/A"}
+                type="Service", # Using 'Service' so icon shows up correctly in frontend
+                activity_date=act_date,
+                description=f"{s.request_type.capitalize() if s.request_type else 'Service'} Request: {s.description or 'No description'}", 
+                amount=0, 
+                status=s.status,
+                details={"room_number": "N/A"} # Could join Room to get number if needed
             ))
 
     # 5. Expenses submitted by user
@@ -245,10 +289,10 @@ def get_user_history(
     # If Expense uses employee_id (FK to employees), we should use employee.id. 
     # Let's check Expense model briefly or stick to user_id if that was working.
     # Actually, expenses usually link to Employee. Let's use employee.id if available.
-    if employee:
-         expenses_query = db.query(models.Expense).filter(models.Expense.employee_id == employee.id)
+    if emp:
+        expenses_query = db.query(models.Expense).filter(models.Expense.employee_id == emp.id)
     
-    expenses = apply_date_filter(expenses_query, models.expense.Expense.date).all()
+    expenses = apply_date_filter(expenses_query, models.Expense.date).all()
     for e in expenses:
         activities.append(UserActivityItem(
             type="Expense", activity_date=e.date,
@@ -256,31 +300,7 @@ def get_user_history(
             details={"category": e.category}
         ))
 
-    # 6. Service Requests assigned to/completed by user
-    if employee:
-        try:
-            from app.models.service_request import ServiceRequest
-            service_reqs_query = db.query(ServiceRequest).filter(ServiceRequest.employee_id == employee.id)
-            # Use created_at as base, or completed_at if available
-            # We filter by created_at for simplicity in range, or we could filter by completed_at
-            service_reqs = apply_date_filter(service_reqs_query, ServiceRequest.created_at).all()
-            
-            for sr in service_reqs:
-                # Determine date: completed_at if completed, else created_at
-                act_date = sr.completed_at if sr.status == 'completed' and sr.completed_at else sr.created_at
-                # If act_date is None (fallback), use datetime.now() or skip
-                if not act_date: act_date = datetime.now()
-    
-                activities.append(UserActivityItem(
-                    type="Task", # Reusing 'Service' type or 'Task' to match frontend filter
-                    activity_date=act_date,
-                    description=f"{sr.request_type.capitalize() if sr.request_type else 'Service'} Request: {sr.description or 'No description'}", 
-                    amount=0, 
-                    status=sr.status,
-                    details={"room_number": str(sr.room_number) if hasattr(sr, 'room_number') else "N/A"}
-                ))
-        except Exception as e:
-            print(f"Error fetching service requests for history: {e}")
+
 
     # Sort all activities by date, descending
     sorted_activities = sorted(activities, key=lambda x: x.activity_date, reverse=True)

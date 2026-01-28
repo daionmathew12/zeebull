@@ -9,10 +9,17 @@ import 'presentation/providers/leave_provider.dart';
 import 'presentation/providers/kitchen_provider.dart';
 import 'presentation/providers/notification_provider.dart';
 import 'presentation/providers/work_report_provider.dart';
+import 'presentation/providers/management_provider.dart';
+import 'presentation/providers/expense_provider.dart';
+import 'presentation/providers/package_provider.dart';
+import 'presentation/providers/food_management_provider.dart';
 import 'data/services/api_service.dart';
 import 'presentation/screens/auth/login_screen.dart';
 import 'presentation/screens/home/dashboard_screen.dart';
-// import 'core/theme/app_theme.dart'; // We can define this later or use inline for now
+import 'presentation/screens/kitchen/kot_screen.dart';
+import 'presentation/screens/housekeeping/room_list_screen.dart';
+import 'presentation/screens/waiter/waiter_dashboard.dart';
+import 'presentation/screens/maintenance/maintenance_dashboard.dart';
 
 void main() {
   runApp(const OrchidEmployeeApp());
@@ -65,6 +72,22 @@ class OrchidEmployeeApp extends StatelessWidget {
           ),
           update: (_, api, auth, previous) => previous ?? WorkReportProvider(api, auth),
         ),
+        ChangeNotifierProxyProvider<ApiService, ManagementProvider>(
+          create: (context) => ManagementProvider(context.read<ApiService>()),
+          update: (_, api, previous) => previous ?? ManagementProvider(api),
+        ),
+        ChangeNotifierProxyProvider<ApiService, ExpenseProvider>(
+          create: (context) => ExpenseProvider(context.read<ApiService>()),
+          update: (_, api, previous) => previous ?? ExpenseProvider(api),
+        ),
+        ChangeNotifierProxyProvider<ApiService, PackageProvider>(
+          create: (context) => PackageProvider(context.read<ApiService>()),
+          update: (_, api, previous) => previous ?? PackageProvider(api),
+        ),
+        ChangeNotifierProxyProvider<ApiService, FoodManagementProvider>(
+          create: (context) => FoodManagementProvider(context.read<ApiService>()),
+          update: (_, api, previous) => previous ?? FoodManagementProvider(api),
+        ),
       ],
       child: MaterialApp(
         title: 'Orchid Employee',
@@ -77,6 +100,10 @@ class OrchidEmployeeApp extends StatelessWidget {
         routes: {
           '/dashboard': (context) => const DashboardScreen(),
           '/login': (context) => const LoginScreen(),
+          '/kot': (context) => const KOTScreen(),
+          '/housekeeping/rooms': (context) => RoomListScreen(),
+          '/waiter': (context) => const WaiterDashboard(),
+          '/maintenance': (context) => const MaintenanceDashboard(),
         },
       ),
     );

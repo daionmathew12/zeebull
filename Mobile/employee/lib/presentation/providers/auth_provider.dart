@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:orchid_employee/data/services/api_service.dart';
 import 'package:orchid_employee/core/constants/app_constants.dart';
+import 'package:orchid_employee/core/constants/api_constants.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:jwt_decoder/jwt_decoder.dart'; // We might need this, or just decode manually
 
@@ -111,7 +112,7 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> _fetchEmployeeProfile() async {
     try {
-      final response = await _apiService.dio.get('/employees/me');
+      final response = await _apiService.dio.get(ApiConstants.profile);
       if (response.statusCode == 200 && response.data != null) {
           final data = response.data;
           if (data['id'] != null) {

@@ -35,6 +35,8 @@ class FoodOrderOut(BaseModel):
     items: List[FoodOrderItemOut]
     guest_name: Optional[str] = None  # Populated from room's booking
     employee_name: Optional[str] = None  # Populated from employee relationship
+    creator_name: Optional[str] = None  # Populated from creator relationship
+    chef_name: Optional[str] = None  # Populated from chef relationship
     room_number: Optional[str] = None  # Populated from room relationship
 
     model_config = ConfigDict(from_attributes=True)
@@ -43,6 +45,8 @@ class FoodOrderUpdate(BaseModel):
     room_id: Optional[int] = None
     amount: Optional[float] = None
     assigned_employee_id: Optional[int] = None
+    created_by_id: Optional[int] = None
+    prepared_by_id: Optional[int] = None
     status: Optional[str] = None
     billing_status: Optional[str] = None
     payment_method: Optional[str] = None

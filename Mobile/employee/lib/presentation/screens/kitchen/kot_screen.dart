@@ -8,6 +8,8 @@ import 'package:intl/intl.dart';
 import '../../../presentation/providers/auth_provider.dart';
 import '../../../presentation/providers/attendance_provider.dart';
 
+import '../../../presentation/widgets/app_drawer.dart';
+
 class KOTScreen extends StatefulWidget {
   const KOTScreen({super.key});
 
@@ -99,8 +101,23 @@ class _KOTScreenState extends State<KOTScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      drawer: const AppDrawer(),
       appBar: AppBar(
-        title: const Text("Kitchen Orders (KOT)"),
+        title: Consumer<AuthProvider>(
+          builder: (context, auth, _) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text("Kitchen Orders (KOT)"),
+                if (auth.userName != null)
+                  Text(
+                    "Chef: ${auth.userName}",
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.normal),
+                  ),
+              ],
+            );
+          },
+        ),
         backgroundColor: AppColors.primary,
         actions: [
           IconButton(
@@ -359,7 +376,7 @@ class _KOTScreenState extends State<KOTScreen> {
                 Expanded(
                   child: Text(
                     kot.assignedEmployeeId != null 
-                        ? "Assigned: Employee #${kot.assignedEmployeeId}" 
+                        ? (kot.orderType == 'room_service' ? "Delivered by: ${kot.waiterName}" : "Assigned: ${kot.waiterName}")
                         : "NOT ASSIGNED",
                     style: TextStyle(
                       color: kot.assignedEmployeeId != null ? Colors.blue[700] : Colors.red[700],
@@ -382,6 +399,26 @@ class _KOTScreenState extends State<KOTScreen> {
                       return const SizedBox.shrink();
                     }
                   ),
+              ],
+            ),
+          ),
+          // Additional attribution
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.edit_note, size: 14, color: Colors.grey),
+                    const SizedBox(width: 8),
+                    Text("Created by: ${kot.creatorName}", style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                    const Spacer(),
+                    const Icon(Icons.soup_kitchen, size: 14, color: Colors.grey),
+                    const SizedBox(width: 8),
+                    Text("Prepared by: ${kot.chefName}", style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                  ],
+                ),
+                const SizedBox(height: 8),
               ],
             ),
           ),

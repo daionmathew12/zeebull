@@ -4,6 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
 
+# Import Models to ensure tables are created
+from app.models.employee_inventory import EmployeeInventoryAssignment
+
 
 # API Routers
 from app.api import (
@@ -30,7 +33,8 @@ from app.api import (
     user,
     account,
     gst_reports,
-    comprehensive_reports
+    comprehensive_reports,
+    notification
 )
 
 # Import recipe router separately to catch any import errors
@@ -159,6 +163,7 @@ app.include_router(report.router, prefix="/api")
 app.include_router(account.router, prefix="/api")
 app.include_router(gst_reports.router, prefix="/api")
 app.include_router(comprehensive_reports.router, prefix="/api")
+app.include_router(notification.router, prefix="/api")
 
 # Include inventory router if it was imported successfully
 if inventory is not None:

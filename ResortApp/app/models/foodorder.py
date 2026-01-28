@@ -19,10 +19,14 @@ class FoodOrder(Base):
     gst_amount = Column(Float, nullable=True)  # GST amount (5% of food)
     total_with_gst = Column(Float, nullable=True)  # Total including GST
     is_deleted = Column(Boolean, default=False, nullable=False)  # Soft delete flag
+    created_by_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
+    prepared_by_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     items = relationship("FoodOrderItem", back_populates="order", cascade="all, delete-orphan")
-    employee = relationship("Employee")
+    employee = relationship("Employee", foreign_keys=[assigned_employee_id])
+    creator = relationship("Employee", foreign_keys=[created_by_id])
+    chef = relationship("Employee", foreign_keys=[prepared_by_id])
     room = relationship("Room", back_populates="food_orders")
 
 class FoodOrderItem(Base):

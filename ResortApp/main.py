@@ -43,7 +43,8 @@ from app.api import (
     gst_reports,
     notification,
     notification,
-    activity,
+    notification,
+    # activity,
     frontend, # Added frontend module
 )
 from app.api import reports_module
@@ -287,7 +288,7 @@ app.include_router(reports_module.router, prefix="/api", tags=["Reports Module"]
 app.include_router(attendance.router, prefix="/api", tags=["Attendance"])
 # Notification system re-enabled
 app.include_router(notification.router, prefix="/api", tags=["Notifications"])
-app.include_router(activity.router, prefix="/api/activity", tags=["Activity Logs"])
+# app.include_router(activity.router, prefix="/api/activity", tags=["Activity Logs"])
 
 # Include comprehensive reports router if it was imported successfully
 if comprehensive_reports is not None:

@@ -28,7 +28,7 @@ class _WorkReportScreenState extends State<WorkReportScreen> {
     return Scaffold(
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
-        title: const Text("Team Activity Log"),
+        title: const Text("Activity Log"),
         backgroundColor: AppColors.primary,
         elevation: 0,
       ),
@@ -43,6 +43,20 @@ class _WorkReportScreenState extends State<WorkReportScreen> {
                 }
 
                 if (provider.error != null) {
+                  if (provider.error!.contains("Server not updated")) {
+                     return Center(
+                       child: Column(
+                         mainAxisAlignment: MainAxisAlignment.center,
+                         children: [
+                           const Icon(Icons.cloud_off, size: 60, color: Colors.orange),
+                           const SizedBox(height: 16),
+                           Text(provider.error!, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                           const SizedBox(height: 8),
+                           const Text("Please deploy latest backend changes.", style: TextStyle(color: Colors.grey)),
+                         ],
+                       ),
+                     );
+                  }
                   return Center(child: Text("Error: ${provider.error}", style: const TextStyle(color: Colors.red)));
                 }
 
@@ -98,7 +112,10 @@ class _WorkReportScreenState extends State<WorkReportScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const SizedBox(height: 4),
-                            Text(item.description),
+                            Text(
+                              item.description,
+                              style: const TextStyle(height: 1.3),
+                            ),
                             const SizedBox(height: 4),
                             Text(
                               DateFormat('MMM d, h:mm a').format(item.activityDate),
@@ -107,10 +124,15 @@ class _WorkReportScreenState extends State<WorkReportScreen> {
                           ],
                         ),
                         trailing: item.amount != null
-                            ? Text(
-                                "₹${item.amount!.toStringAsFixed(2)}",
-                                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green),
-                              )
+                            ? Column( // Use column to align amount to top if description is long
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    "₹${item.amount!.toStringAsFixed(2)}",
+                                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green),
+                                  ),
+                                ],
+                              ) 
                             : null,
                         isThreeLine: true,
                       ),

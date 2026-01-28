@@ -7,6 +7,7 @@ from app.utils import auth
 from app.curd import user as crud_user
 from fastapi import Depends
 from app.utils.auth import get_current_user
+from app.models.employee import Employee
 
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -47,17 +48,16 @@ def login(request: LoginRequest, db: Session = Depends(auth.get_db)):
             raise HTTPException(status_code=400, detail="Invalid credentials")
         
         
+        # Get employee record if exists
+        employee = db.query(Employee).filter(Employee.user_id == user.id).first()
+        employee_id = employee.id if employee else None
+        
         # DEBUG LOGGING TO FILE
         try:
             with open("/tmp/auth_debug.log", "a") as f:
                 f.write(f"\n--- Login Attempt {request.email} ---\n")
                 f.write(f"DB URL: {str(db.bind.url)}\n")
                 f.write(f"User ID: {user.id}\n")
-                
-                # Get employee record if exists
-                from app.models import Employee
-                employee = db.query(Employee).filter(Employee.user_id == user.id).first()
-                employee_id = employee.id if employee else None
                 f.write(f"Employee Found: {employee}\n")
                 f.write(f"Employee ID: {employee_id}\n")
         except Exception as log_err:
@@ -83,6 +83,43 @@ def login(request: LoginRequest, db: Session = Depends(auth.get_db)):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
+
+
+@router.get("/me")
+def get_current_user_profile(
+    user=Depends(get_current_user),
+    db: Session = Depends(auth.get_db)
+):
+    """Get the current authenticated user's profile with employee details"""
+    try:
+        # Get employee record if exists
+        employee = db.query(Employee).filter(Employee.user_id == user.id).first()
+        
+        response = {
+            "id": user.id,
+            "email": user.email,
+            "role": user.role.name,
+            "employee": None
+        }
+        
+        if employee:
+            response["employee"] = {
+                "id": employee.id,
+                "name": employee.name,
+                "role": employee.role,
+                "salary": employee.salary,
+                "join_date": str(employee.join_date) if employee.join_date else None,
+                "image_url": employee.image_url,
+                "paid_leave_balance": employee.paid_leave_balance,
+                "sick_leave_balance": employee.sick_leave_balance,
+                "long_leave_balance": employee.long_leave_balance,
+                "wellness_leave_balance": employee.wellness_leave_balance
+            }
+        
+        return response
+    except Exception as e:
+        print(f"Error fetching user profile: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch profile: {str(e)}")
 
 
 @router.get("/admin-only")

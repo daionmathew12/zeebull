@@ -12,6 +12,7 @@ import 'package:orchid_employee/data/models/inventory_item_model.dart';
 import 'package:orchid_employee/presentation/providers/auth_provider.dart';
 import 'package:orchid_employee/presentation/providers/attendance_provider.dart';
 import 'package:intl/intl.dart';
+import 'package:orchid_employee/presentation/widgets/skeleton_loaders.dart';
 import 'checkout_verification_dialog.dart';
 
 class HousekeepingDashboard extends StatefulWidget {
@@ -120,6 +121,10 @@ class _HousekeepingDashboardState extends State<HousekeepingDashboard> {
     
     final auth = context.watch<AuthProvider>();
     final pendingTasks = urgentRooms.length + activeRequests.length;
+
+    if ((roomProvider.isLoading && roomProvider.rooms.isEmpty) || (requestProvider.isLoading && requestProvider.requests.isEmpty)) {
+      return const DashboardSkeleton();
+    }
 
     return Scaffold(
       backgroundColor: Colors.grey[100],

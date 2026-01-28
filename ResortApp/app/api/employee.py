@@ -393,7 +393,20 @@ def apply_leave(leave: LeaveCreate, db: Session = Depends(get_db), current_user:
 
 @router.get("/pending-leaves", response_model=list[LeaveOut])
 def get_pending_leaves(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return db.query(LeaveModel).filter(LeaveModel.status == 'pending').all()
+    return db.query(LeaveModel).filter(LeaveModel.status == 'pending').options(joinedload(LeaveModel.employee)).all()
+
+@router.get("/all-leaves", response_model=list[LeaveOut])
+def get_all_leaves(
+    status: str = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    skip: int = 0,
+    limit: int = 100
+):
+    query = db.query(LeaveModel).options(joinedload(LeaveModel.employee))
+    if status and status != 'all':
+        query = query.filter(LeaveModel.status == status)
+    return query.order_by(LeaveModel.from_date.desc()).offset(skip).limit(limit).all()
 
 @router.get("/leave/{employee_id}", response_model=list[LeaveOut])
 def view_leaves(employee_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 100):

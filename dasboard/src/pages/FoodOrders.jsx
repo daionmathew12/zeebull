@@ -217,15 +217,15 @@ export default function FoodOrders() {
     try {
       // Fetch orders, food items, employees, and inventory items in parallel
       const [ordersRes, foodItemsRes, employeesRes, inventoryRes] = await Promise.all([
-        api.get("/food-orders/?limit=10000").catch(err => {
+        api.get("/food-orders?limit=10000").catch(err => {
           console.error("Error fetching orders:", err);
           return { data: [] };
         }),
-        api.get("/food-items/").catch(err => {
+        api.get("/food-items").catch(err => {
           console.error("Error fetching food items:", err);
           return { data: [] };
         }),
-        api.get("/employees/").catch(err => {
+        api.get("/employees").catch(err => {
           console.error("Error fetching employees:", err);
           return { data: [] };
         }),
@@ -675,7 +675,7 @@ export default function FoodOrders() {
 
   const fetchFoodItems = async () => {
     try {
-      const res = await API.get("/food-items/", {
+      const res = await API.get("/food-items", {
         headers: { Authorization: `Bearer ${token}` },
       });
       setFoodItems(res.data);
@@ -914,16 +914,19 @@ export default function FoodOrders() {
     try {
       // Fetch initial page of orders, rooms, bookings, and other data
       const [ordersRes, roomsRes, employeesRes, foodItemsRes, bookingsRes, packageBookingsRes, inventoryRes] = await Promise.all([
-        api.get("/food-orders/?skip=0&limit=20"),
+        api.get("/food-orders?skip=0&limit=20").catch(err => {
+          console.error("Error fetching food orders:", err);
+          return { data: [] };
+        }),
         api.get("/rooms?limit=1000").catch(err => {
           console.error("Error fetching rooms:", err);
           return { data: [] };
         }),
-        api.get("/employees/").catch(err => {
+        api.get("/employees").catch(err => {
           console.error("Error fetching employees:", err);
           return { data: [] };
         }),
-        api.get("/food-items/").catch(err => {
+        api.get("/food-items").catch(err => {
           console.error("Error fetching food items:", err);
           return { data: [] };
         }),
@@ -940,160 +943,116 @@ export default function FoodOrders() {
           return { data: [] };
         })
       ]);
-      setOrders(ordersRes.data);
-      setHasMore(ordersRes.data.length === 20);
-      setEmployees(employeesRes.data);
-      setFoodItems(foodItemsRes.data);
-      setInventoryItemsList(inventoryRes.data || []);
+      setOrders(ordersRes?.data || []);
+      setHasMore((ordersRes?.data || []).length === 20);
+      console.log("Food Orders - Employees fetched:", employeesRes?.data);
+      setEmployees(Array.isArray(employeesRes?.data) ? employeesRes.data : []);
+      setFoodItems(foodItemsRes?.data || []);
+      setInventoryItemsList(inventoryRes?.data || []);
 
       // Fetch recipes for profitability calculation
       if (foodItemsRes.data && foodItemsRes.data.length > 0) {
         fetchRecipesForInventory(foodItemsRes.data);
       }
 
-      // Filter rooms to only show checked-in rooms (similar to Services page)
-      const allRooms = roomsRes.data;
-      const regularBookings = bookingsRes.data?.bookings || [];
-      const packageBookings = (packageBookingsRes.data || []).map(pb => ({ ...pb, is_package: true }));
+      try {
+        // Filter rooms to only show checked-in rooms (similar to Services page)
+        const allRooms = roomsRes?.data || [];
+        const regularBookings = bookingsRes?.data?.bookings || [];
+        const packageBookings = (packageBookingsRes?.data || []).map(pb => ({ ...pb, is_package: true }));
 
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const checkedInRoomIds = new Set();
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const checkedInRoomIds = new Set();
 
-      // Helper function to normalize status
-      const normalizeStatus = (status) => {
-        if (!status) return '';
-        return status.toLowerCase().replace(/[-_\s]/g, '');
-      };
+        // Helper function to normalize status
+        const normalizeStatus = (status) => {
+          if (!status) return '';
+          return status.toLowerCase().replace(/[-_\s]/g, '');
+        };
 
-      // Helper function to check if status is checked-in or booked (active booking)
-      const isActiveBooking = (status) => {
-        if (!status) return false;
-        const normalized = status.toLowerCase().replace(/[-_\s]/g, '');
-        // Accept: 'checkedin', 'checked-in', 'checked_in', 'checked in', or 'booked' (for active bookings)
-        // Exclude: 'cancelled', 'checkedout', 'checked-out', 'checked_out'
-        return (normalized === 'checkedin' || normalized === 'booked') &&
-          normalized !== 'cancelled' &&
-          !normalized.includes('checkedout');
-      };
+        // Helper function to check if status is checked-in or booked (active booking)
+        const isActiveBooking = (status) => {
+          if (!status) return false;
+          const normalized = status.toLowerCase().replace(/[-_\s]/g, '');
+          return (normalized === 'checkedin' || normalized === 'booked') &&
+            normalized !== 'cancelled' &&
+            !normalized.includes('checkedout');
+        };
 
-      // Get room IDs from active regular bookings (checked-in or booked, not cancelled)
-      regularBookings.forEach(booking => {
-        if (isActiveBooking(booking.status)) {
-          // Parse dates properly
-          const checkInDate = new Date(booking.check_in);
-          const checkOutDate = new Date(booking.check_out);
-          checkInDate.setHours(0, 0, 0, 0);
-          checkOutDate.setHours(0, 0, 0, 0);
+        // Get room IDs from active regular bookings
+        regularBookings.forEach(booking => {
+          if (isActiveBooking(booking.status)) {
+            try {
+              const checkInDate = new Date(booking.check_in);
+              const checkOutDate = new Date(booking.check_out);
+              checkInDate.setHours(0, 0, 0, 0);
+              checkOutDate.setHours(0, 0, 0, 0);
 
-          // Check if booking is active (today is between check-in and check-out)
-          // Also allow if check-out is today (room is still checked in)
-          if (checkInDate <= today && checkOutDate >= today) {
-            if (booking.rooms && Array.isArray(booking.rooms)) {
-              booking.rooms.forEach(room => {
-                // For regular bookings, room.id is the room ID directly
-                if (room && room.id) {
-                  checkedInRoomIds.add(room.id);
-                  console.log(`Added active regular room: ${room.number || room.id} (ID: ${room.id}) from booking ${booking.id}, status: ${booking.status}`);
-                } else {
-                  console.log(`Regular booking ${booking.id} room missing id:`, room);
+              if (checkInDate <= today && checkOutDate >= today) {
+                if (booking.rooms && Array.isArray(booking.rooms)) {
+                  booking.rooms.forEach(room => {
+                    if (room && room.id) checkedInRoomIds.add(room.id);
+                  });
                 }
-              });
-            } else {
-              console.log(`Regular booking ${booking.id} has active status but no rooms array or rooms is not an array`);
+              }
+            } catch (e) {
+              console.error("Error processing regular booking:", e);
             }
-          } else {
-            console.log(`Regular booking ${booking.id} is active but dates don't match: check_in=${checkInDate}, check_out=${checkOutDate}, today=${today}`);
           }
-        } else {
-          console.log(`Regular booking ${booking.id} status '${booking.status}' is not active (normalized: '${normalizeStatus(booking.status)}')`);
-        }
-      });
+        });
 
-      // Get room IDs from active package bookings (checked-in or booked, not cancelled)
-      // Note: Package bookings have rooms as PackageBookingRoomOut objects with a nested 'room' property
-      packageBookings.forEach(booking => {
-        if (isActiveBooking(booking.status)) {
-          // Parse dates properly
-          const checkInDate = new Date(booking.check_in);
-          const checkOutDate = new Date(booking.check_out);
-          checkInDate.setHours(0, 0, 0, 0);
-          checkOutDate.setHours(0, 0, 0, 0);
+        // Get room IDs from active package bookings
+        packageBookings.forEach(booking => {
+          if (isActiveBooking(booking.status)) {
+            try {
+              const checkInDate = new Date(booking.check_in);
+              const checkOutDate = new Date(booking.check_out);
+              checkInDate.setHours(0, 0, 0, 0);
+              checkOutDate.setHours(0, 0, 0, 0);
 
-          // Check if booking is active (today is between check-in and check-out)
-          // Also allow if check-out is today (room is still checked in)
-          if (checkInDate <= today && checkOutDate >= today) {
-            if (booking.rooms && Array.isArray(booking.rooms)) {
-              booking.rooms.forEach(roomLink => {
-                // Package bookings have rooms as PackageBookingRoomOut objects
-                // The actual room is nested in roomLink.room
-                // Match Services.jsx pattern exactly
-                const room = roomLink.room || roomLink;
-                // Also check room_id as fallback (direct field in PackageBookingRoomOut)
-                const roomId = room?.id || roomLink.room_id;
-                if (roomId) {
-                  checkedInRoomIds.add(roomId);
-                  console.log(`Added active package room: ${room?.number || roomId} (ID: ${roomId}) from booking ${booking.id}, status: ${booking.status}`);
-                } else {
-                  console.log(`Package booking ${booking.id} room link missing room data:`, roomLink);
+              if (checkInDate <= today && checkOutDate >= today) {
+                if (booking.rooms && Array.isArray(booking.rooms)) {
+                  booking.rooms.forEach(roomLink => {
+                    const room = roomLink.room || roomLink;
+                    const roomId = room?.id || roomLink.room_id;
+                    if (roomId) checkedInRoomIds.add(roomId);
+                  });
                 }
-              });
-            } else {
-              console.log(`Package booking ${booking.id} has active status but no rooms array`);
+              }
+            } catch (e) {
+              console.error("Error processing package booking:", e);
             }
-          } else {
-            console.log(`Package booking ${booking.id} is active but dates don't match: check_in=${checkInDate}, check_out=${checkOutDate}, today=${today}`);
           }
-        } else {
-          console.log(`Package booking ${booking.id} status '${booking.status}' is not active (normalized: '${normalizeStatus(booking.status)}')`);
-        }
-      });
+        });
 
-      // Also check room status directly as a fallback
-      // Include rooms with status: checked-in, booked, occupied (regardless of booking status)
-      allRooms.forEach(room => {
-        const roomStatusNormalized = normalizeStatus(room.status);
-        // Accept: checkedin, booked, occupied, checked-in (any variation)
-        if (roomStatusNormalized === 'checkedin' ||
-          roomStatusNormalized === 'booked' ||
-          roomStatusNormalized === 'occupied' ||
-          roomStatusNormalized.includes('checkedin')) {
-          checkedInRoomIds.add(room.id);
-        }
-      });
+        // Also check room status directly
+        allRooms.forEach(room => {
+          const roomStatusNormalized = normalizeStatus(room.status);
+          if (roomStatusNormalized === 'checkedin' ||
+            roomStatusNormalized === 'booked' ||
+            roomStatusNormalized === 'occupied' ||
+            roomStatusNormalized.includes('checkedin')) {
+            checkedInRoomIds.add(room.id);
+          }
+        });
 
-      // Filter rooms to only show checked-in/active rooms
-      const checkedInRooms = allRooms.filter(room => checkedInRoomIds.has(room.id));
-
-      // Detailed debug logging (matching Services.jsx pattern)
-      console.log(`Food Orders - Total checked-in room IDs: ${checkedInRoomIds.size}`, Array.from(checkedInRoomIds));
-      console.log(`Food Orders - Filtered checked-in rooms: ${checkedInRooms.length}`, checkedInRooms.map(r => `${r.number || r.id} (status: ${r.status})`));
-      console.log('Food Orders - Room Availability Check:', {
-        totalRooms: allRooms.length,
-        checkedInRoomIds: Array.from(checkedInRoomIds),
-        checkedInRoomsCount: checkedInRooms.length,
-        regularBookingsCount: regularBookings.length,
-        packageBookingsCount: packageBookings.length,
-        activeRegularBookings: regularBookings.filter(b => isActiveBooking(b.status)).length,
-        activePackageBookings: packageBookings.filter(b => isActiveBooking(b.status)).length,
-        today: today.toISOString(),
-        allRoomStatuses: allRooms.map(r => ({ id: r.id, number: r.number, status: r.status }))
-      });
-
-      setRooms(checkedInRooms);
+        const checkedInRooms = allRooms.filter(room => checkedInRoomIds.has(room.id));
+        setRooms(checkedInRooms);
+      } catch (roomFilterError) {
+        console.error("Error during room filtering:", roomFilterError);
+        setRooms([]);
+      }
     } catch (error) {
       console.error("Failed to fetch data:", error);
-      // Set empty arrays on error to prevent UI breakage
-      setOrders([]);
-      setRooms([]);
-      setEmployees([]);
-      setFoodItems([]);
+      // Only clear orders if the main call failed
+      setOrders(prev => prev.length ? prev : []);
     }
   };
 
   const fetchOrders = async () => {
     try {
-      const ordersRes = await api.get("/food-orders/?skip=0&limit=20");
+      const ordersRes = await api.get("/food-orders?skip=0&limit=20");
       setOrders(ordersRes.data || []);
       setPage(1);
       setHasMore(ordersRes.data?.length === 20);
@@ -1108,7 +1067,7 @@ export default function FoodOrders() {
     setIsFetchingMore(true);
     const nextPage = page + 1;
     try {
-      const res = await api.get(`/food-orders/?skip=${(nextPage - 1) * 20}&limit=20`);
+      const res = await api.get(`/food-orders?skip=${(nextPage - 1) * 20}&limit=20`);
       const newOrders = res.data || [];
       setOrders(prev => [...prev, ...newOrders]);
       setPage(nextPage);
@@ -2061,18 +2020,36 @@ export default function FoodOrders() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Assign Employee *</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Assign Employee * {employees.length > 0 && <span className="text-xs text-gray-400">({employees.length} found)</span>}
+                    </label>
                     <select
                       value={employeeId}
                       onChange={(e) => setEmployeeId(e.target.value)}
-                      className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition text-black"
+                      className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition text-black font-medium"
                     >
-                      <option value="">Choose an employee...</option>
-                      {employees.map((emp) => (
-                        <option key={emp.id} value={emp.id}>
-                          {emp.name}
-                        </option>
-                      ))}
+                      <option value="">{employees.length === 0 ? "Searching for employees..." : "Choose an employee..."}</option>
+                      {Array.isArray(employees) && [...employees]
+                        .filter(emp => emp && emp.id)
+                        .sort((a, b) => {
+                          const aOnline = a.status === 'on_duty' || a.is_clocked_in;
+                          const bOnline = b.status === 'on_duty' || b.is_clocked_in;
+                          if (aOnline && !bOnline) return -1;
+                          if (!aOnline && bOnline) return 1;
+                          return 0;
+                        })
+                        .map((emp) => {
+                          const isOnline = emp.status === 'on_duty' || emp.is_clocked_in;
+                          return (
+                            <option
+                              key={emp.id}
+                              value={emp.id}
+                              style={{ color: isOnline ? "#16a34a" : "inherit", fontWeight: isOnline ? "bold" : "normal" }}
+                            >
+                              {emp.name || `Employee ${emp.id}`} {isOnline ? " 🟢 (Online)" : `(${emp.status || 'off_duty'})`}
+                            </option>
+                          );
+                        })}
                     </select>
                   </div>
                 </div>
@@ -2907,14 +2884,29 @@ export default function FoodOrders() {
                       <select
                         value={selectedEmployeeForRequest}
                         onChange={(e) => setSelectedEmployeeForRequest(e.target.value)}
-                        className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500"
+                        className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 text-black font-medium"
                       >
                         <option value="">Choose an employee...</option>
-                        {employees.map((emp) => (
-                          <option key={emp.id} value={emp.id}>
-                            {emp.name}
-                          </option>
-                        ))}
+                        {[...employees]
+                          .sort((a, b) => {
+                            const aOnline = a.status === 'on_duty' || a.is_clocked_in;
+                            const bOnline = b.status === 'on_duty' || b.is_clocked_in;
+                            if (aOnline && !bOnline) return -1;
+                            if (!aOnline && bOnline) return 1;
+                            return 0;
+                          })
+                          .map((emp) => {
+                            const isOnline = emp.status === 'on_duty' || emp.is_clocked_in;
+                            return (
+                              <option
+                                key={emp.id}
+                                value={emp.id}
+                                style={{ color: isOnline ? "#16a34a" : "inherit", fontWeight: isOnline ? "bold" : "normal" }}
+                              >
+                                {emp.name} {isOnline ? " 🟢 (Online)" : `(${emp.status || 'off_duty'})`}
+                              </option>
+                            );
+                          })}
                       </select>
                     </div>
                     <div className="flex gap-3">

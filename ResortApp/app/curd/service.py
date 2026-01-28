@@ -10,6 +10,11 @@ from app.models.Package import PackageBooking, PackageBookingRoom
 from app.models.employee import Employee
 from app.models.room import Room
 from app.curd.notification import notify_service_assigned, notify_service_status_changed
+from app.schemas.service import (
+    ServiceInventoryItemBase, 
+    AssignedServiceCreate, 
+    AssignedServiceUpdate
+)
 
 def create_service(
     db: Session,
@@ -470,11 +475,16 @@ def create_assigned_service(db: Session, assigned: AssignedServiceCreate):
                 
                 # Check for EmployeeInventoryAssignment model
                 try:
+                    print("[DEBUG] Attempting to import EmployeeInventoryAssignment...")
                     from app.models.employee_inventory import EmployeeInventoryAssignment
                     has_emp_inv_model = True
-                except ImportError:
-                    print("[WARNING] EmployeeInventoryAssignment model not found, skipping inventory assignment tracking")
+                    print("[DEBUG] EmployeeInventoryAssignment imported successfully")
+                except ImportError as e:
+                    print(f"[WARNING] EmployeeInventoryAssignment model not found/import failed: {e}")
                     EmployeeInventoryAssignment = None
+                    has_emp_inv_model = False
+                except Exception as e:
+                    print(f"[ERROR] Unexpected error importing EmployeeInventoryAssignment: {e}")
                     has_emp_inv_model = False
 
                 for inv_data in service_inventory_items:
@@ -538,24 +548,7 @@ def create_assigned_service(db: Session, assigned: AssignedServiceCreate):
                         department=item.category.parent_department if item.category else "Housekeeping",
                         notes=f"Service: {service.name} - Room: {room.number} - From {source_location.name if source_location else 'Unknown'}",
                         created_by=None,
-                        # If InventoryTransaction supports location_id, add it here. Verify model first? 
-                        # Assuming it might not, but 'department' field is often hijacked for location name in legacy code above.
-                        # I'll stick to 'notes' and 'department' unless I'm sure about location_id column in transaction.
-                        # Actually previous code summary showed 'location_id' added to some transaction calls...
-                        # Let's check 'services.py' view didn't show 'location_id' in InventoryTransaction model usage.
-                        # But 'checkout_helpers.py' view earlier DID show: "Also added location_id to InventoryTransaction"
-                        # I'll check model definition or just be safe.
                     )
-                    # Attempt to set location_id if the model supports it (dynamic check or try/except block could be safer, but messy)
-                    # I will assume based on "Previous Session Summary" that I should probably NOT guess too much.
-                    # Wait, checkout_helpers said "Also added location_id".
-                    # Let's assume it exists. If it fails, I'll fix it.
-                    # Actually, better to check models/inventory.py... 
-                    # Line 7 of curd/inventory.py imports from app.models.inventory.
-                    # I can't view models/inventory.py right now easily without using a turn.
-                    # I'll just skip adding location_id param to constructor if not sure, to avoid 500.
-                    # But I'll put location name in notes.
-                    
                     db.add(transaction)
                     
                     # 4. Create COGS Journal Entry
@@ -576,20 +569,23 @@ def create_assigned_service(db: Session, assigned: AssignedServiceCreate):
 
                     # 5. Create Employee Inventory Assignment
                     if has_emp_inv_model and EmployeeInventoryAssignment:
-                        emp_inv_assignment = EmployeeInventoryAssignment(
-                            employee_id=assigned_dict['employee_id'],
-                            assigned_service_id=db_assigned.id,
-                            item_id=item_id,
-                            quantity_assigned=quantity,
-                            quantity_used=0.0,  # Initially 0 used? Usually service assumes consumed? 
-                            # If it is a "Service Assignment" (e.g. Cleaning), items like chemicals are consumed.
-                            # Items like "Drill Machine" (if tracked) are ASSETS and shouldn't be consumed.
-                            # But here we are processing "Inventory Items".
-                            # If `track_laundry_cycle` is true, we expect return.
-                            status="assigned", 
-                            notes=f"Assigned from {source_location.name if source_location else 'Store'} (LocID: {source_location.id if source_location else '0'})"
-                        )
-                        db.add(emp_inv_assignment)
+                        print(f"[DEBUG] Creating EmployeeInventoryAssignment for item {item.name} (AssignedService {db_assigned.id})")
+                        try:
+                            emp_inv_assignment = EmployeeInventoryAssignment(
+                                employee_id=assigned_dict['employee_id'],
+                                assigned_service_id=db_assigned.id,
+                                item_id=item_id,
+                                quantity_assigned=quantity,
+                                quantity_used=0.0,
+                                status="assigned", 
+                                notes=f"Assigned from {source_location.name if source_location else 'Store'} (LocID: {source_location.id if source_location else '0'})"
+                            )
+                            db.add(emp_inv_assignment)
+                            print(f"[DEBUG] Added EmployeeInventoryAssignment to session")
+                        except Exception as create_err:
+                            print(f"[ERROR] Failed to init EmployeeInventoryAssignment: {create_err}")
+                    else:
+                        print(f"[DEBUG] Skipping EmployeeInventoryAssignment (Model missing or flag false)")
 
             else:
                 print(f"[DEBUG] Service has no inventory items, skipping stock deduction")
@@ -842,15 +838,15 @@ def update_assigned_service_status(db: Session, assigned_id: int, update_data: A
                     
                     for return_item in update_data.inventory_returns:
                         try:
-                            print(f"[DEBUG]   - Item {return_item.assignment_id}, Qty {return_item.quantity_returned}")
+                            print(f"[DEBUG]   - Item {return_item.inventory_item_id}, Qty {return_item.quantity_returned}")
 
                             assignment = db.query(EmployeeInventoryAssignment).filter(
-                                EmployeeInventoryAssignment.id == return_item.assignment_id,
+                                EmployeeInventoryAssignment.item_id == return_item.inventory_item_id,
                                 EmployeeInventoryAssignment.assigned_service_id == assigned_id
                             ).first()
                             
                             if not assignment:
-                                print(f"[WARNING] Inventory assignment {return_item.assignment_id} not found for service {assigned_id}")
+                                print(f"[WARNING] Inventory assignment for item {return_item.inventory_item_id} not found for service {assigned_id}")
                                 continue
                             
                             # Update used quantity if provided
