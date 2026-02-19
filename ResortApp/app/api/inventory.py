@@ -1169,8 +1169,16 @@ def get_transactions(
                      )
                  )
              )
+        elif type == "laundry":
+             query = query.filter(
+                 InventoryTransaction.transaction_type == "transfer",
+                 or_(
+                     InventoryTransaction.reference_number.ilike("%LAUNDRY%"),
+                     InventoryTransaction.notes.ilike("%laundry%")
+                 )
+             )
         else:
-             # Standard types: transfer_in, transfer_out, adjustment
+             # Standard types: transfer_in, transfer_out, adjustment, transfer
              query = query.filter(InventoryTransaction.transaction_type == type)
 
     # Filter by Date

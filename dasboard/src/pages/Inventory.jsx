@@ -31,6 +31,7 @@ import {
   ArrowUpCircle,
   Trash,
   RotateCcw,
+  WashingMachine,
   Eye,
   Camera,
   FileEdit,
@@ -4503,20 +4504,35 @@ const SmartTransactionsTab = ({
         color: "text-purple-600 bg-purple-50",
         statusColor: "bg-purple-500",
       };
+    } else if (trans.transaction_type === "waste") {
+      return {
+        icon: <Trash className="w-4 h-4" />,
+        label: "Waste/Spoilage",
+        color: "text-red-600 bg-red-50",
+        statusColor: "bg-red-500",
+      };
+    } else if (trans.transaction_type === "transfer") {
+      // Laundry transfers (e.g. LAUNDRY-RET-xx, RPL-SR-xx)
+      const isLaundry = trans.reference_number?.includes("LAUNDRY") || trans.notes?.toLowerCase().includes("laundry");
+      if (isLaundry) {
+        return {
+          icon: <WashingMachine className="w-4 h-4" />,
+          label: "Laundry",
+          color: "text-cyan-600 bg-cyan-50",
+          statusColor: "bg-cyan-500",
+        };
+      }
+      return {
+        icon: <ArrowUpCircle className="w-4 h-4" />,
+        label: "Transfer",
+        color: "text-purple-600 bg-purple-50",
+        statusColor: "bg-purple-500",
+      };
     } else if (trans.transaction_type === "out") {
       if (
         trans.notes?.toLowerCase().includes("waste") ||
         trans.notes?.toLowerCase().includes("spoilage")
       ) {
-        return {
-          icon: <Trash className="w-4 h-4" />,
-          label: "Waste/Spoilage",
-          color: "text-red-600 bg-red-50",
-          statusColor: "bg-red-500",
-        };
-      }
-      // Explicit backend type check
-      else if (trans.transaction_type === "waste_spoilage") {
         return {
           icon: <Trash className="w-4 h-4" />,
           label: "Waste/Spoilage",
@@ -4542,8 +4558,8 @@ const SmartTransactionsTab = ({
     return {
       icon: <RotateCcw className="w-4 h-4" />,
       label: "Adjustment",
-      color: "text-blue-600 bg-blue-50",
-      statusColor: "bg-blue-500",
+      color: "text-gray-600 bg-gray-50",
+      statusColor: "bg-gray-500",
     };
   };
 
@@ -4680,6 +4696,11 @@ const SmartTransactionsTab = ({
                   value: "waste",
                   label: "Waste",
                   icon: <Trash className="w-4 h-4" />,
+                },
+                {
+                  value: "laundry",
+                  label: "Laundry",
+                  icon: <WashingMachine className="w-4 h-4" />,
                 },
                 {
                   value: "adjustment",
@@ -4834,7 +4855,7 @@ const SmartTransactionsTab = ({
                 filteredTransactions.map((trans) => {
                   const typeInfo = getTransactionTypeInfo(trans);
                   const itemDetails = getItemDetails(trans.item_id);
-                  const isPositive = trans.transaction_type === "in" || trans.transaction_type === "transfer_in" || trans.transaction_type === "Stock Received";
+                  const isPositive = trans.transaction_type === "in" || trans.transaction_type === "transfer_in" || trans.transaction_type === "Stock Received" || (trans.transaction_type === "transfer" && trans.destination_location_name);
 
                   return (
                     <tr key={trans.id} className="hover:bg-gray-50">
