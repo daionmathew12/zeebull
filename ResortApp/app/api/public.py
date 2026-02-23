@@ -55,9 +55,9 @@ class PublicPackageBookingOut(BaseModel):
 # Public Rooms endpoint
 @router.get("/rooms", response_model=List[RoomOut])
 def get_public_rooms(db: Session = Depends(get_db), skip: int = 0, limit: int = 100):
-    """Get all available rooms without authentication"""
+    """Get all rooms without authentication (frontend handles availability display)"""
     try:
-        rooms = db.query(Room).filter(Room.status == "Available").offset(skip).limit(limit).all()
+        rooms = db.query(Room).offset(skip).limit(limit).all()
         return rooms
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching rooms: {str(e)}")

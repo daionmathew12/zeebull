@@ -946,13 +946,11 @@ export default function App() {
     const getImageUrl = (imagePath) => {
         if (!imagePath) return ITEM_PLACEHOLDER;
         if (imagePath.startsWith('http')) return imagePath; // Already a full URL
-        const baseUrl = getMediaBaseUrl();
+        const baseUrl = getMediaBaseUrl(); // e.g. http://localhost:8011
 
-        // Strip leading /uploads or uploads/ to prevent duplication with baseUrl
-        let cleanPath = imagePath.replace(/^\/?uploads\//, '');
-
-        // Ensure cleanPath starts with / for joining
-        cleanPath = cleanPath.startsWith('/') ? cleanPath : `/${cleanPath}`;
+        // Ensure the path starts with / but don't strip /uploads/
+        // The backend serves images at /uploads/... so we must keep that prefix
+        const cleanPath = imagePath.startsWith('/') ? imagePath : `/${imagePath}`;
 
         return `${baseUrl}${cleanPath}`;
     };
