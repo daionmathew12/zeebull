@@ -1,0 +1,285 @@
+{
+  "account.py": [
+    "fix_missing_journal_entries",
+    "get_comprehensive_report",
+    "get_automatic_accounting_report",
+    "seed_chart_of_accounts"
+  ],
+  "activity.py": [
+    "get_activity_logs"
+  ],
+  "activity_logs.py": [
+    "get_activity_logs",
+    "get_activity_stats"
+  ],
+  "attendance.py": [
+    "mark_attendance",
+    "log_working_hours",
+    "clock_in",
+    "clock_out",
+    "get_work_logs_by_date",
+    "get_work_logs_for_employee",
+    "update_completed_tasks",
+    "get_monthly_report",
+    "get_aggregate_utilization",
+    "get_holidays",
+    "update_holidays",
+    "get_today_status",
+    "get_attendance_for_employee"
+  ],
+  "booking.py": [
+    "check_in_booking",
+    "cancel_booking",
+    "extend_checkout",
+    "get_booking",
+    "get_checkin_image"
+  ],
+  "checkout.py": [
+    "create_checkout_request",
+    "get_checkout_request",
+    "update_checkout_request_status",
+    "assign_employee_to_checkout_request",
+    "get_checkout_request_inventory_details",
+    "get_pre_checkout_verification_data",
+    "generate_invoice",
+    "generate_gate_pass",
+    "send_feedback_form",
+    "get_all_checkouts",
+    "cleanup_orphaned_checkouts_endpoint",
+    "repair_room_checkout_status",
+    "get_checkout_details",
+    "get_active_rooms",
+    "get_bill_for_booking",
+    "process_booking_checkout"
+  ],
+  "comprehensive_reports.py": [
+    "get_inventory_category_report",
+    "get_inventory_department_report",
+    "get_bookings_report",
+    "get_package_bookings_report",
+    "get_expenses_report",
+    "get_food_orders_report",
+    "get_purchases_report",
+    "get_vendors_report",
+    "get_services_report",
+    "get_comprehensive_summary"
+  ],
+  "dashboard.py": [
+    "get_vendor_transactions",
+    "get_department_details",
+    "get_transactions",
+    "get_pnl",
+    "get_department_details",
+    "get_vendor_stats",
+    "get_financial_trends"
+  ],
+  "employee.py": [
+    "get_leave_policy",
+    "save_leave_policy",
+    "get_employee"
+  ],
+  "expenses.py": [
+    "get_expense_image"
+  ],
+  "food_category.py": [
+    "create_category",
+    "read_all",
+    "read_all_slash",
+    "update",
+    "delete"
+  ],
+  "food_item.py": [
+    "list_items",
+    "list_items_slash",
+    "delete_item",
+    "toggle_availability"
+  ],
+  "frontend.py": [
+    "list_header_banner",
+    "list_header_banner_no_slash",
+    "delete_header_banner",
+    "list_check_availability",
+    "list_check_availability_no_slash",
+    "create_check_availability",
+    "update_check_availability",
+    "delete_check_availability",
+    "list_gallery",
+    "list_gallery_no_slash",
+    "delete_gallery",
+    "list_reviews",
+    "list_reviews_no_slash",
+    "create_review",
+    "update_review",
+    "delete_review",
+    "list_resort_info",
+    "list_resort_info_no_slash",
+    "create_resort_info",
+    "update_resort_info",
+    "delete_resort_info",
+    "list_signature_experiences",
+    "list_signature_experiences_no_slash",
+    "delete_signature_experience",
+    "list_plan_weddings",
+    "list_plan_weddings_no_slash",
+    "delete_plan_wedding",
+    "list_nearby_attractions",
+    "list_nearby_attractions_no_slash",
+    "delete_nearby_attraction",
+    "list_nearby_attraction_banners",
+    "list_nearby_attraction_banners_no_slash",
+    "list_nearby_attraction_banner_singular",
+    "delete_nearby_attraction_banner"
+  ],
+  "gst_reports.py": [
+    "get_b2b_sales_register",
+    "get_b2c_sales_register",
+    "get_hsn_sac_summary",
+    "get_itc_register",
+    "get_itc_register",
+    "get_rcm_register",
+    "get_advance_receipt_report",
+    "get_room_tariff_slab_report",
+    "get_master_gst_summary"
+  ],
+  "inventory.py": [
+    "create_category",
+    "get_categories",
+    "update_category",
+    "delete_category",
+    "delete_item",
+    "create_vendor",
+    "get_vendors",
+    "get_vendor",
+    "update_vendor",
+    "approve_requisition_quantities",
+    "update_issue_detail",
+    "update_stock_requisition",
+    "update_stock_requisition_status",
+    "get_all_recipes_endpoint",
+    "get_asset_registry"
+  ],
+  "legal.py": [
+    "get_legal_documents",
+    "delete_legal_document"
+  ],
+  "notification.py": [
+    "get_notifications",
+    "get_notifications_no_slash",
+    "get_unread_count",
+    "get_notification",
+    "create_notification",
+    "mark_as_read",
+    "mark_all_as_read",
+    "clear_all_notifications",
+    "delete_notification"
+  ],
+  "packages.py": [
+    "delete_package_api",
+    "book_package_api",
+    "book_package_guest_api",
+    "get_bookings",
+    "list_packages",
+    "list_packages_slash",
+    "get_package_api",
+    "get_package_bookings_history",
+    "delete_package_booking_api",
+    "cancel_package_booking",
+    "extend_package_booking_checkout",
+    "check_in_package_booking"
+  ],
+  "public.py": [
+    "get_public_rooms",
+    "get_public_packages",
+    "get_public_food_items",
+    "get_public_food_categories",
+    "get_public_services",
+    "get_public_bookings",
+    "get_public_package_bookings"
+  ],
+  "recipe.py": [
+    "test_recipe_router",
+    "create_recipe",
+    "get_recipes",
+    "get_recipe",
+    "update_recipe",
+    "delete_recipe"
+  ],
+  "report.py": [
+    "get_guest_profile",
+    "get_food_orders",
+    "get_user_history",
+    "get_service_charges",
+    "get_room_charges",
+    "get_rent_records",
+    "get_all_expenses",
+    "get_all_room_bookings",
+    "get_all_package_bookings",
+    "get_all_employees",
+    "get_checkin_by_employee_report",
+    "get_guest_suggestions"
+  ],
+  "reports_module.py": [
+    "get_daily_arrival_report",
+    "get_daily_departure_report",
+    "get_occupancy_report",
+    "get_police_c_form_report",
+    "get_night_audit_report",
+    "get_no_show_cancellation_report",
+    "get_in_house_guest_list",
+    "get_daily_sales_summary",
+    "get_item_wise_sales_report",
+    "get_kot_analysis",
+    "get_void_cancellation_report",
+    "get_discount_complimentary_report",
+    "get_nc_report",
+    "get_stock_status_report",
+    "get_low_stock_alert",
+    "get_expiry_aging_report",
+    "get_stock_movement_register",
+    "get_waste_spoilage_report",
+    "get_purchase_register",
+    "get_variance_report",
+    "get_room_discrepancy_report",
+    "get_laundry_cost_report",
+    "get_minibar_consumption_report",
+    "get_lost_found_register",
+    "get_maintenance_ticket_log",
+    "get_asset_audit_report",
+    "get_visitor_log",
+    "get_key_card_audit",
+    "get_staff_attendance_report",
+    "get_payroll_register",
+    "get_management_dashboard"
+  ],
+  "room.py": [
+    "test_simple"
+  ],
+  "room_activity_endpoints.py": [
+    "get_room_inventory_usage",
+    "get_room_activity_log"
+  ],
+  "service.py": [
+    "list_services",
+    "list_services_slash",
+    "delete_service",
+    "get_all_assigned_services",
+    "clear_all_services",
+    "update_assigned_status",
+    "delete_assigned_service",
+    "get_employee_inventory_assignments",
+    "return_inventory_items"
+  ],
+  "service_report.py": [
+    "get_detailed_service_usage_report"
+  ],
+  "service_request.py": [
+    "get_service_request",
+    "update_service_request",
+    "delete_service_request"
+  ],
+  "stock_reconciliation.py": [
+    "reconcile_stock",
+    "stock_audit",
+    "validate_checkout_stock"
+  ]
+}

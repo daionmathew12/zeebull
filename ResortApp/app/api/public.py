@@ -10,6 +10,7 @@ from app.models.Package import Package, PackageBooking, PackageBookingRoom
 from app.models.booking import Booking, BookingRoom
 from app.models.food_item import FoodItem
 from app.models.food_category import FoodCategory
+from app.models.branch import Branch
 from app.models.service import Service
 from app.schemas.packages import PackageOut
 from app.schemas.room import RoomOut
@@ -52,32 +53,54 @@ class PublicPackageBookingOut(BaseModel):
     class Config: from_attributes = True
 
 
+# Public Branches endpoint
+@router.get("/branches")
+def get_public_branches(db: Session = Depends(get_db)):
+    """Get all active branches without authentication"""
+    try:
+        branches = db.query(Branch).filter(Branch.is_active == True).all()
+        return branches
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching branches: {str(e)}")
+
 # Public Rooms endpoint
 @router.get("/rooms", response_model=List[RoomOut])
-def get_public_rooms(db: Session = Depends(get_db), skip: int = 0, limit: int = 100):
-    """Get all rooms without authentication (frontend handles availability display)"""
+def get_public_rooms(db: Session = Depends(get_db), branch_id: int = None, skip: int = 0, limit: int = 100):
+    """Get all rooms for a specific branch"""
     try:
-        rooms = db.query(Room).offset(skip).limit(limit).all()
+        query = db.query(Room)
+        if branch_id:
+            query = query.filter(Room.branch_id == branch_id)
+        rooms = query.offset(skip).limit(limit).all()
         return rooms
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching rooms: {str(e)}")
 
 # Public Packages endpoint
 @router.get("/packages", response_model=List[PackageOut])
-def get_public_packages(db: Session = Depends(get_db), skip: int = 0, limit: int = 100):
-    """Get all packages without authentication"""
+def get_public_packages(db: Session = Depends(get_db), branch_id: int = None, skip: int = 0, limit: int = 100):
+    """Get all packages for a specific branch"""
     try:
-        packages = db.query(Package).options(joinedload(Package.images)).offset(skip).limit(limit).all()
+        query = db.query(Package)
+        if branch_id:
+            query = query.filter(Package.branch_id == branch_id)
+        packages = query.options(
+            joinedload(Package.images),
+            joinedload(Package.branch)
+        ).offset(skip).limit(limit).all()
         return packages
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching packages: {str(e)}")
 
 # Public Food Items endpoint
 @router.get("/food-items")
-def get_public_food_items(db: Session = Depends(get_db)):
-    """Get all food items without authentication"""
+def get_public_food_items(db: Session = Depends(get_db), branch_id: int = None):
+    """Get all food items for a specific branch"""
     try:
-        food_items = db.query(FoodItem).options(
+        query = db.query(FoodItem)
+        if branch_id:
+            query = query.filter(FoodItem.branch_id == branch_id)
+        food_items = query.options(
             joinedload(FoodItem.images),
             joinedload(FoodItem.category)
         ).all()
@@ -97,20 +120,26 @@ def get_public_food_categories(db: Session = Depends(get_db)):
 
 # Public Services endpoint
 @router.get("/services")
-def get_public_services(db: Session = Depends(get_db)):
-    """Get all services without authentication"""
+def get_public_services(db: Session = Depends(get_db), branch_id: int = None):
+    """Get all services for a specific branch"""
     try:
-        services = db.query(Service).options(joinedload(Service.images)).all()
+        query = db.query(Service)
+        if branch_id:
+            query = query.filter(Service.branch_id == branch_id)
+        services = query.options(joinedload(Service.images)).all()
         return services
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching services: {str(e)}")
 
 # Public Bookings Availability
 @router.get("/bookings", response_model=List[PublicBookingOut])
-def get_public_bookings(db: Session = Depends(get_db), skip: int = 0, limit: int = 500):
-    """Get minimal booking data for availability calculation"""
+def get_public_bookings(db: Session = Depends(get_db), branch_id: int = None, skip: int = 0, limit: int = 500):
+    """Get minimal booking data for a specific branch"""
     try:
-        bookings = db.query(Booking).options(joinedload(Booking.booking_rooms)).offset(skip).limit(limit).all()
+        query = db.query(Booking)
+        if branch_id:
+            query = query.filter(Booking.branch_id == branch_id)
+        bookings = query.options(joinedload(Booking.booking_rooms)).offset(skip).limit(limit).all()
         # Manually construct to map booking_rooms -> rooms
         results = []
         for b in bookings:
@@ -134,10 +163,13 @@ def get_public_bookings(db: Session = Depends(get_db), skip: int = 0, limit: int
 
 # Public Package Bookings Availability
 @router.get("/package-bookings", response_model=List[PublicPackageBookingOut])
-def get_public_package_bookings(db: Session = Depends(get_db), skip: int = 0, limit: int = 500):
-    """Get minimal package booking data for availability calculation"""
+def get_public_package_bookings(db: Session = Depends(get_db), branch_id: int = None, skip: int = 0, limit: int = 500):
+    """Get minimal package booking data for a specific branch"""
     try:
-        bookings = db.query(PackageBooking).options(joinedload(PackageBooking.rooms)).offset(skip).limit(limit).all()
+        query = db.query(PackageBooking)
+        if branch_id:
+            query = query.filter(PackageBooking.branch_id == branch_id)
+        bookings = query.options(joinedload(PackageBooking.rooms)).offset(skip).limit(limit).all()
         # Manually construct
         results = []
         for b in bookings:

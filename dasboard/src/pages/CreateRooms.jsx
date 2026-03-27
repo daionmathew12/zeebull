@@ -8,6 +8,9 @@ import { toast } from "react-hot-toast";
 import { motion } from "framer-motion";
 import { getMediaBaseUrl } from "../utils/env";
 import { getImageUrl } from "../utils/imageUtils";
+import { useBranch } from "../contexts/BranchContext";
+import { jwtDecode } from "jwt-decode";
+import { usePermissions } from "../hooks/usePermissions";
 
 // Utility moved to utils/imageUtils.js
 
@@ -268,7 +271,9 @@ const Rooms = ({ noLayout = false }) => {
     bbq: false,
     garden: false,
     dining: false,
+    dining: false,
     breakfast: false,
+    existingImages: [], // Track existing image URLs
   });
   const [previewImages, setPreviewImages] = useState([]);
   const [bannerMessage, setBannerMessage] = useState({ type: null, text: "" });
@@ -286,6 +291,14 @@ const Rooms = ({ noLayout = false }) => {
   const [bookingCheckinFilter, setBookingCheckinFilter] = useState(""); // Check-in date filter
   const [bookingCheckoutFilter, setBookingCheckoutFilter] = useState(""); // Check-out date filter
   const [showAddRoomModal, setShowAddRoomModal] = useState(false); // Control add room modal visibility
+  const [selectedBranchForRoom, setSelectedBranchForRoom] = useState(""); // Branch for room when in enterprise view
+
+  // Branch context
+  const { branches, activeBranchId } = useBranch();
+  const token = localStorage.getItem("token");
+  const { hasPermission, isSuperadmin } = usePermissions();
+  const isEnterpriseView = isSuperadmin && activeBranchId === 'all';
+
 
   // Function to show banner message
   const showBannerMessage = (type, text) => {
@@ -495,6 +508,12 @@ const Rooms = ({ noLayout = false }) => {
         updatedImages.splice(fileIdx, 1);
         return { ...prev, images: updatedImages };
       });
+    } else {
+      // It's an existing image, remove from form.existingImages
+      setForm(prev => ({
+        ...prev,
+        existingImages: prev.existingImages.filter(url => getImageUrl(url) !== src)
+      }));
     }
 
     setPreviewImages(prev => prev.filter((_, i) => i !== idx));
@@ -515,6 +534,15 @@ const Rooms = ({ noLayout = false }) => {
       form.images.forEach(img => {
         formData.append("images", img);
       });
+    }
+
+    // Append branch_id if in enterprise view and a branch is selected
+    if (isEnterpriseView && selectedBranchForRoom) {
+      formData.append("branch_id", selectedBranchForRoom);
+    }
+
+    if (isEditing) {
+      formData.append("existing_images", JSON.stringify(form.existingImages));
     }
 
     // Append feature fields
@@ -544,7 +572,16 @@ const Rooms = ({ noLayout = false }) => {
         setEditRoomId(null);
         showBannerMessage("success", "Room updated successfully!");
       } else {
-        await API.post("/rooms/test", formData);
+        // If in enterprise view, need a specific branch selected
+        if (isEnterpriseView && !selectedBranchForRoom) {
+          toast.error("Please select a branch to assign this room to.");
+          return;
+        }
+        // Pass branch_id via custom header if in enterprise view
+        const config = isEnterpriseView && selectedBranchForRoom
+          ? { headers: { "X-Branch-ID": selectedBranchForRoom } }
+          : {};
+        await API.post("/rooms/test", formData, config);
         showBannerMessage("success", "Room created successfully!");
       }
 
@@ -605,6 +642,17 @@ const Rooms = ({ noLayout = false }) => {
       garden: room.garden || false,
       dining: room.dining || false,
       breakfast: room.breakfast || false,
+      existingImages: (() => {
+        const imgs = [];
+        if (room.image_url) imgs.push(room.image_url);
+        if (room.extra_images) {
+          try {
+            const extras = JSON.parse(room.extra_images);
+            extras.forEach(url => imgs.push(url));
+          } catch (e) { }
+        }
+        return imgs;
+      })(),
     });
 
     // Set previews for existing images
@@ -670,15 +718,44 @@ const Rooms = ({ noLayout = false }) => {
 
 
       {/* Add Room Button */}
-      <div className="mb-6">
-        <button
-          onClick={() => setShowAddRoomModal(true)}
-          className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white font-semibold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 flex items-center gap-2"
-        >
-          <i className="fas fa-plus-circle"></i>
-          Add New Room
-        </button>
-      </div>
+      {hasPermission("rooms:create") && (
+        <div className="mb-6">
+          <button
+            onClick={() => {
+              setIsEditing(false);
+              setForm({
+                number: "",
+                type: "",
+                price: "",
+                status: "Available",
+                adults: 2,
+                children: 0,
+                images: [],
+                air_conditioning: false,
+                wifi: false,
+                bathroom: false,
+                living_area: false,
+                terrace: false,
+                parking: false,
+                kitchen: false,
+                family_room: false,
+                bbq: false,
+                garden: false,
+                dining: false,
+                breakfast: false,
+                existingImages: [],
+              });
+              setPreviewImages([]);
+              setShowAddRoomModal(true);
+            }}
+            className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white font-semibold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 flex items-center gap-2"
+          >
+            <i className="fas fa-plus-circle"></i>
+            Add New Room
+          </button>
+        </div>
+      )}
+
 
       {/* Add Room Modal */}
       {showAddRoomModal && (
@@ -708,6 +785,7 @@ const Rooms = ({ noLayout = false }) => {
                     garden: false,
                     dining: false,
                     breakfast: false,
+                    existingImages: [],
                   });
                   setPreviewImages([]);
                 }
@@ -796,60 +874,82 @@ const Rooms = ({ noLayout = false }) => {
                     <option>Maintenance</option>
                   </select>
                 </div>
-                <div className="md:col-span-2 lg:col-span-3">
-                  <div className="flex justify-between items-center mb-1">
-                    <label className="block text-sm font-medium text-gray-700">Room Images</label>
-                    {previewImages.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPreviewImages([]);
-                          setForm(prev => ({ ...prev, images: [] }));
-                        }}
-                        className="text-xs text-red-600 hover:text-red-800 font-medium"
-                      >
-                        Clear All
-                      </button>
-                    )}
-                  </div>
-                  <input
-                    type="file"
-                    name="image"
-                    multiple
-                    accept="image/jpeg,image/jpg,image/png,image/webp"
-                    onChange={handleChange}
-                    className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 transition-all"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">You can select multiple images. Supported formats: JPEG, PNG, WebP</p>
+              </div>
 
+              {/* Branch selector — only shown when superadmin is in Enterprise View */}
+              {isEnterpriseView && !isEditing && (
+                <div className="md:col-span-2 lg:col-span-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    🏢 Assign to Branch <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={selectedBranchForRoom}
+                    onChange={(e) => setSelectedBranchForRoom(e.target.value)}
+                    className="w-full p-3 rounded-lg border border-indigo-300 focus:border-indigo-500 focus:ring focus:ring-indigo-200 transition-all bg-indigo-50"
+                    required
+                  >
+                    <option value="">-- Select Branch --</option>
+                    {branches.map(branch => (
+                      <option key={branch.id} value={branch.id}>{branch.name}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-indigo-500 mt-1">You are in Enterprise View. Select which branch this room belongs to.</p>
+                </div>
+              )}
+
+              <div className="md:col-span-2 lg:col-span-3">
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-sm font-medium text-gray-700">Room Images</label>
                   {previewImages.length > 0 && (
-                    <div className="mt-4 p-4 border-2 border-dashed border-indigo-200 rounded-2xl bg-indigo-50/30">
-                      <p className="text-sm font-semibold text-indigo-700 mb-3 flex items-center">
-                        <span className="mr-2">🖼️</span> Room Previews ({previewImages.length})
-                      </p>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                        {previewImages.map((src, idx) => (
-                          <div key={idx} className="group relative aspect-video bg-white rounded-lg overflow-hidden shadow-md border border-indigo-100">
-                            <img
-                              src={src}
-                              alt={`Preview ${idx + 1}`}
-                              className="w-full h-full object-cover"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => removeImage(idx)}
-                              className="absolute top-1 right-1 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg hover:bg-red-600 z-10"
-                              title="Remove image"
-                            >
-                              &times;
-                            </button>
-                            <div className="absolute inset-0 bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPreviewImages([]);
+                        setForm(prev => ({ ...prev, images: [] }));
+                      }}
+                      className="text-xs text-red-600 hover:text-red-800 font-medium"
+                    >
+                      Clear All
+                    </button>
                   )}
                 </div>
+                <input
+                  type="file"
+                  name="image"
+                  multiple
+                  accept="image/jpeg,image/jpg,image/png,image/webp"
+                  onChange={handleChange}
+                  className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 transition-all"
+                />
+                <p className="text-xs text-gray-500 mt-1">You can select multiple images. Supported formats: JPEG, PNG, WebP</p>
+
+                {previewImages.length > 0 && (
+                  <div className="mt-4 p-4 border-2 border-dashed border-indigo-200 rounded-2xl bg-indigo-50/30">
+                    <p className="text-sm font-semibold text-indigo-700 mb-3 flex items-center">
+                      <span className="mr-2">🖼️</span> Room Previews ({previewImages.length})
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                      {previewImages.map((src, idx) => (
+                        <div key={idx} className="group relative aspect-video bg-white rounded-lg overflow-hidden shadow-md border border-indigo-100">
+                          <img
+                            src={src}
+                            alt={`Preview ${idx + 1}`}
+                            className="w-full h-full object-cover"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeImage(idx)}
+                            className="absolute top-1 right-1 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg hover:bg-red-600 z-10"
+                            title="Remove image"
+                          >
+                            &times;
+                          </button>
+                          <div className="absolute inset-0 bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Room Features Section */}
@@ -1090,11 +1190,17 @@ const Rooms = ({ noLayout = false }) => {
                 </div>
                 <div className="mt-auto pt-4 border-t border-gray-200 flex flex-col gap-2">
                   <div className="flex justify-between gap-2">
-                    <button onClick={() => handleEdit(room)} className="w-1/2 bg-green-100 text-green-700 text-sm font-semibold py-2 rounded-lg hover:bg-green-200 transition">Edit</button>
-                    <button onClick={() => handleDelete(room.id)} className="w-1/2 bg-red-100 text-red-700 text-sm font-semibold py-2 rounded-lg hover:bg-red-200 transition">Delete</button>
+                    {hasPermission("rooms:edit") && (
+                      <button onClick={() => handleEdit(room)} className="w-1/2 bg-green-100 text-green-700 text-sm font-semibold py-2 rounded-lg hover:bg-green-200 transition">Edit</button>
+                    )}
+                    {hasPermission("rooms:delete") && (
+                      <button onClick={() => handleDelete(room.id)} className="w-1/2 bg-red-100 text-red-700 text-sm font-semibold py-2 rounded-lg hover:bg-red-200 transition">Delete</button>
+                    )}
                   </div>
-                  <button onClick={() => fetchBookings(room.number)} className="w-full bg-blue-100 text-blue-700 text-sm font-semibold py-2 rounded-lg hover:bg-blue-200 transition">View Bookings</button>
-                  {room.status !== "Booked" && (
+                  {hasPermission("bookings:view") && (
+                    <button onClick={() => fetchBookings(room.number)} className="w-full bg-blue-100 text-blue-700 text-sm font-semibold py-2 rounded-lg hover:bg-blue-200 transition">View Bookings</button>
+                  )}
+                  {room.status !== "Booked" && hasPermission("rooms:edit") && (
                     <select
                       value={room.status}
                       onChange={(e) => handleStatusChange(room.id, e.target.value)}
@@ -1105,6 +1211,7 @@ const Rooms = ({ noLayout = false }) => {
                     </select>
                   )}
                 </div>
+
               </div>
             </motion.div>
           ))}

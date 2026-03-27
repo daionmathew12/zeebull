@@ -13,10 +13,16 @@ const API = axios.create({
   },
 });
 
-// Automatically add token to headers and prevent caching
+// Automatically add token and branch ID to headers and prevent caching
 API.interceptors.request.use((req) => {
   const token = localStorage.getItem("token");
   if (token) req.headers.Authorization = `Bearer ${token}`;
+
+  const branchId = localStorage.getItem("activeBranchId");
+  if (branchId && !req.headers["X-Branch-ID"]) {
+    // Always send the header — send 'all' for enterprise view, numeric id for specific branch
+    req.headers["X-Branch-ID"] = branchId; // 'all' or a numeric branch id
+  }
 
   // Add cache-busting headers for GET requests to prevent browser caching
   if (req.method === 'get') {
@@ -25,7 +31,7 @@ API.interceptors.request.use((req) => {
     req.headers['Expires'] = '0';
   }
 
-  console.log("API Request:", req.method, req.url, "Base URL:", req.baseURL);
+  console.log("API Request:", req.method, req.url, "Branch ID:", branchId);
   return req;
 });
 
@@ -65,12 +71,17 @@ API.interceptors.response.use(
       const path = window.location.pathname;
       let loginPath = '/'; // Default fallback
 
-      if (path.startsWith("/orchid/admin")) loginPath = "/orchid/admin";
+      if (path.startsWith("/zeebull/admin")) loginPath = "/zeebull/admin";
+      else if (path.startsWith("/zeebulladmin")) loginPath = "/zeebulladmin";
+      else if (path.startsWith("/orchid/admin")) loginPath = "/orchid/admin";
       else if (path.startsWith("/orchidadmin")) loginPath = "/orchidadmin";
       else if (path.startsWith("/inventory/admin")) loginPath = "/inventory/admin";
       else if (path.startsWith("/pommaadmin")) loginPath = "/pommaadmin";
 
-      window.location.href = loginPath;
+      const isLoginPath = path === loginPath || path === `${loginPath}/`;
+      if (!isLoginPath) {
+        window.location.href = loginPath;
+      }
       return Promise.reject({
         ...error,
         message: "Session expired. Please log in again.",

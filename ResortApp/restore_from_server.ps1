@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$RemoteHost = "34.30.59.169"
+$RemoteHost = "34.134.50.147"
 $RemoteUser = "basilabrahamaby"
 $KeyPath = "$env:USERPROFILE\.ssh\gcp_key"
 $RemoteDBUser = "orchid_user"

@@ -2,6 +2,7 @@ from pydantic import BaseModel, validator, field_validator, model_validator
 from typing import List, Optional
 from datetime import date, datetime
 from .user import UserOut
+from .checkout import CheckoutFull
 
 # This schema is used for displaying Room details within a Booking
 class RoomOut(BaseModel):
@@ -37,6 +38,7 @@ class BookingCreate(BaseModel):
     check_out: date
     adults: int
     children: int
+    branch_id: Optional[int] = None
 
     @validator('check_out')
     def validate_booking_duration(cls, v, values):
@@ -55,10 +57,14 @@ class BookingOut(BaseModel):
     guest_mobile: Optional[str] = None
     guest_email: Optional[str] = None
     status: str
+    branch_id: Optional[int] = None
     check_in: date
     check_out: date
     adults: int
     children: int
+    checked_in_at: Optional[datetime] = None
+    checked_out_at: Optional[datetime] = None
+    checkout: Optional[CheckoutFull] = None
     # --- CRITICAL FIX: Add the missing image URL fields ---
     id_card_image_url: Optional[str] = None
     guest_photo_url: Optional[str] = None
@@ -73,10 +79,6 @@ class BookingOut(BaseModel):
     digital_signature_url: Optional[str] = None
     special_requests: Optional[str] = None
     preferences: Optional[str] = None
-    payments: List[object] = []
-    # ----------------------------------------------------
-    payments: List[object] = []
-    # ----------------------------------------------------
     rooms: List[RoomOut] = []
     created_at: Optional[datetime] = None # Added for sorting
     

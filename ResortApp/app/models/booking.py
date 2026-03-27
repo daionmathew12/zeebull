@@ -17,6 +17,7 @@ class Booking(Base):
     check_in = Column(Date, nullable=False)
     check_out = Column(Date, nullable=False)
     checked_in_at = Column(DateTime, nullable=True)  # Actual check-in timestamp
+    checked_out_at = Column(DateTime, nullable=True) # Actual check-out timestamp
     adults = Column(Integer, default=2)
     children = Column(Integer, default=0)
     id_card_image_url = Column(String, nullable=True)
@@ -25,6 +26,10 @@ class Booking(Base):
     total_amount = Column(Float, default=0.0)
     advance_deposit = Column(Float, default=0.0)  # Advance payment made during booking
     created_at = Column(DateTime, default=datetime.utcnow) # Added
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    
+    branch = relationship("Branch")
+
     
     # New Fields
     source = Column(String, default="Direct")  # Direct, OTA, Walk-in
@@ -52,6 +57,10 @@ class BookingRoom(Base):
     id = Column(Integer, primary_key=True, index=True)
     booking_id = Column(Integer, ForeignKey("bookings.id"))
     room_id = Column(Integer, ForeignKey("rooms.id"))
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    
+    branch = relationship("Branch")
+
 
     booking = relationship("Booking", back_populates="booking_rooms")
     room = relationship("Room", back_populates="booking_rooms")

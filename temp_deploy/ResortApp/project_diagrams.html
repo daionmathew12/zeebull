@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Orchid Resort - System Diagrams</title>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({ startOnLoad: true, theme: 'default' });
+    </script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; }
+        .container { max-width: 1200px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        h1 { color: #333; text-align: center; }
+        h2 { color: #2c3e50; border-bottom: 2px solid #eee; padding-bottom: 10px; margin-top: 40px; }
+        .diagram-box { border: 1px solid #ddd; padding: 10px; border-radius: 4px; overflow-x: auto; background-color: #fff; }
+        .description { font-style: italic; color: #666; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Orchid Resort Management System - DFD & ERD</h1>
+        
+        <h2>1. Context Diagram (Level 0)</h2>
+        <p class="description">Overview of system interactions with external entities.</p>
+        <div class="mermaid diagram-box">
+            graph TD
+            Guest[Guest]
+            Admin[Admin/Manager]
+            Staff[Staff/Housekeeping/Chef]
+            Vendor[Vendor]
+            
+            System((Orchid Resort <br/> Management System))
+            
+            %% Guest Interactions
+            Guest -->|Booking Request| System
+            Guest -->|Food/Service Order| System
+            Guest -->|Payment| System
+            System -->|Booking Confirmation| Guest
+            System -->|Invoice/Bill| Guest
+            
+            %% Admin Interactions
+            Admin -->|Manage Rates/Rooms| System
+            Admin -->|Approve Purchases| System
+            System -->|Financial Reports| Admin
+            System -->|Inventory Alerts| Admin
+            
+            %% Staff Interactions
+            Staff -->|Update Room Status| System
+            Staff -->|Request Stock| System
+            Staff -->|Log Maintenance| System
+            System -->|Assigned Tasks| Staff
+            
+            %% Vendor Interactions
+            Vendor -->|Supply Goods| System
+            System -->|Purchase Order| Vendor
+            System -->|Payment| Vendor
+        </div>
+
+        <h2>2. System Decomposition (Level 1)</h2>
+        <p class="description">High-level data flow between core modules.</p>
+        <div class="mermaid diagram-box">
+            graph TD
+            %% Entities
+            Guest[Guest]
+            Staff[Staff]
+            
+            %% Processes
+            P1((1.0 Booking <br/> Management))
+            P2((2.0 Service & <br/> Food Operations))
+            P3((3.0 Inventory <br/> Management))
+            P4((4.0 Billing & <br/> Checkout))
+            
+            %% Data Stores
+            D1[(Booking Data)]
+            D2[(Room Data)]
+            D3[(Service/Food DB)]
+            D4[(Inventory DB)]
+            D5[(Billing DB)]
+            
+            %% Flow
+            Guest -->|Request Room| P1
+            P1 <-->|Check Availability| D2
+            P1 -->|Create Booking| D1
+            P1 -->|Confirm| Guest
+            
+            Guest -->|Order Food/Service| P2
+            P2 <-->|Get Menu and Services| D3
+            P2 -->|Log Order| D5
+            P2 -->|Notify| Staff
+            
+            Staff -->|Request Stock| P3
+            P3 <-->|Update Stock Levels| D4
+            P3 -->|Issue Items| Staff
+            
+            Guest -->|Request Checkout| P4
+            P4 <-->|Fetch Charges| D5
+            P4 <-->|Fetch Usage| D4
+            P4 <-->|Fetch Room Rate| D1
+            P4 -->|Generate Bill| Guest
+        </div>
+
+        <h2>3. Billing & Checkout Logic (Detail)</h2>
+        <p class="description">Detailed flow of bill calculation and verification.</p>
+        <div class="mermaid diagram-box">
+            graph TB
+            %% Inputs
+            Req[Checkout Request]
+            
+            %% Processes
+            P4_1(4.1 Verify Room Status)
+            P4_2(4.2 Audit Consumables)
+            P4_3(4.3 Check Asset Damages)
+            P4_4(4.4 Aggregate Charges)
+            P4_5(4.5 Calculate Tax/GST)
+            P4_6(4.6 Generate Final Bill)
+            
+            %% Data
+            RoomDB[(Room Status)]
+            OrderDB[(Food/Service Orders)]
+            InvDB[(Inventory Audit)]
+            BillDB[(Bill Records)]
+            
+            %% Flow
+            Req --> P4_1
+            P4_1 <-->|Check Housekeeping| RoomDB
+            
+            Req --> P4_2
+            P4_2 <-->|Compare Used vs Limit| InvDB
+            P4_2 -->|Calculate Extra Charge| P4_4
+            
+            Req --> P4_3
+            P4_3 <-->|Check Fixed Assets| InvDB
+            P4_3 -->|Add Damage Cost| P4_4
+            
+            P4_4 <-->|Fetch Food and Service Charges| OrderDB
+            P4_4 --> P4_5
+            P4_5 -->|Apply GST Rules| P4_6
+            P4_6 -->|Save Bill| BillDB
+            P4_6 -->|Print| Guest[Guest]
+        </div>
+    </div>
+</body>
+</html>

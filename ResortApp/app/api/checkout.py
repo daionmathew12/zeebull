@@ -8,6 +8,7 @@ import json
 
 # Assume your utility and model imports are set up correctly
 from app.utils.auth import get_db, get_current_user
+from app.utils.branch_scope import get_branch_id
 from app.models.room import Room
 from app.models.booking import Booking, BookingRoom
 from app.models.Package import Package, PackageBooking, PackageBookingRoom
@@ -38,13 +39,14 @@ def create_checkout_request(
     room_number: str = Query(..., description="Room number to create checkout request for"),
     checkout_mode: str = Query("multiple", description="Checkout mode: 'single' or 'multiple'"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """
     Create a checkout request for inventory verification before checkout.
     """
     # Find the booking for this room
-    room = db.query(Room).filter(Room.number == room_number).first()
+    room = db.query(Room).filter(Room.number == room_number, Room.branch_id == branch_id).first()
     if not room:
         raise HTTPException(status_code=404, detail=f"Room {room_number} not found")
     
@@ -104,7 +106,8 @@ def create_checkout_request(
             guest_name=booking.guest_name,
             status="pending",
             requested_by=requested_by_name,
-            inventory_checked=False
+            inventory_checked=False,
+            branch_id=branch_id
         )
         
         db.add(new_request)
@@ -130,19 +133,20 @@ def create_checkout_request(
 def get_checkout_request(
     room_number: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """
     Get checkout request status for a room.
     """
-    room = db.query(Room).filter(Room.number == room_number).first()
+    room = db.query(Room).filter(Room.number == room_number, Room.branch_id == branch_id).first()
     if not room:
         raise HTTPException(status_code=404, detail=f"Room {room_number} not found")
     
     # Find active booking
     booking_link = (db.query(BookingRoom)
                     .join(Booking)
-                    .filter(BookingRoom.room_id == room.id, Booking.status.in_(['checked-in', 'checked_in', 'booked']))
+                    .filter(BookingRoom.room_id == room.id, Booking.status.in_(['checked-in', 'checked_in', 'booked']), Booking.branch_id == branch_id)
                     .order_by(Booking.id.desc()).first())
     
     package_link = None
@@ -154,7 +158,7 @@ def get_checkout_request(
     else:
         package_link = (db.query(PackageBookingRoom)
                         .join(PackageBooking)
-                        .filter(PackageBookingRoom.room_id == room.id, PackageBooking.status.in_(['checked-in', 'checked_in', 'booked']))
+                        .filter(PackageBookingRoom.room_id == room.id, PackageBooking.status.in_(['checked-in', 'checked_in', 'booked']), PackageBooking.branch_id == branch_id)
                         .order_by(PackageBooking.id.desc()).first())
         if package_link:
             booking = package_link.package_booking
@@ -197,7 +201,8 @@ def update_checkout_request_status(
     request_id: int,
     status: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """
     Update checkout request status directly.
@@ -232,12 +237,14 @@ def update_checkout_request_status(
     }
 
 
+
 @router.put("/checkout-request/{request_id}/assign")
 def assign_employee_to_checkout_request(
     request_id: int,
     employee_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """
     Assign an employee to a checkout request.
@@ -271,7 +278,8 @@ def assign_employee_to_checkout_request(
 def get_checkout_request_inventory_details(
     request_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """
     Get current inventory details for a checkout request room.
@@ -710,9 +718,10 @@ def get_checkout_request_inventory_details(
 @router.post("/checkout-request/{request_id}/check-inventory")
 async def handleCompleteCheckoutRequest(
     request_id: int,
-    payload: InventoryCheckRequest, # Assuming InventoryCheckRequest is the correct payload type based on original code
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    payload: InventoryCheckRequest, 
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """
     Mark inventory as checked and complete the checkout request.
@@ -931,7 +940,8 @@ async def handleCompleteCheckoutRequest(
                                     status="Incomplete Washing",
                                     sent_at=datetime.utcnow(),
                                     created_by=current_user.id,
-                                    notes=f"Checkout Room {checkout_request.room_number}"
+                                    notes=f"Checkout Room {checkout_request.room_number}",
+                                    branch_id=branch_id
                                 )
                                 db.add(laundry_entry)
                                 print(f"[CHECKOUT] Created LaundryLog entry for {unused_from_pool} units")
@@ -944,7 +954,8 @@ async def handleCompleteCheckoutRequest(
                                         request_type="replenishment",
                                         description=f"REPLACEMENT REQUIRED: {inv_item.name} sent to laundry. Fresh unit needed for Room {checkout_request.room_number}.",
                                         status="pending",
-                                        created_at=datetime.utcnow()
+                                        created_at=datetime.utcnow(),
+                                        branch_id=branch_id
                                     )
                                     db.add(new_sr)
                                     print(f"[CHECKOUT] Created replacement service request for laundry item {inv_item.name}")
@@ -979,7 +990,8 @@ async def handleCompleteCheckoutRequest(
                                     location_id=source_loc_id,
                                     item_id=item.item_id,
                                     quantity=unused_qty,
-                                    last_updated=datetime.utcnow()
+                                    last_updated=datetime.utcnow(),
+                                    branch_id=branch_id
                                 )
                                 db.add(new_source_stock)
                                 
@@ -994,7 +1006,8 @@ async def handleCompleteCheckoutRequest(
                                 notes=f"{'Laundry' if item.is_laundry else 'Stock'} return: Room {checkout_request.room_number} (Checkout #{checkout_request.id})",
                                 created_by=current_user.id,
                                 source_location_id=room_loc_id,
-                                destination_location_id=source_loc_id
+                                destination_location_id=source_loc_id,
+                                branch_id=branch_id
                             )
                             db.add(return_txn)
                             print(f"[CHECKOUT] Moved {unused_qty} units to {source_loc_id}")
@@ -1031,7 +1044,8 @@ async def handleCompleteCheckoutRequest(
                                     reference_number=f"CONSUME-CHK-{checkout_request.id}",
                                     notes=f"Consumption at checkout - Room {checkout_request.room_number}",
                                     created_by=current_user.id,
-                                    source_location_id=room_loc_id
+                                    source_location_id=room_loc_id,
+                                    branch_id=branch_id
                                 )
                                 db.add(cons_txn)
                             
@@ -1051,7 +1065,8 @@ async def handleCompleteCheckoutRequest(
                                         reference_number=f"LOST-RM{checkout_request.room_number}",
                                         notes=f"Missing/Damaged consumable at checkout - Room {checkout_request.room_number}",
                                         created_by=current_user.id,
-                                        source_location_id=room_loc_id
+                                        source_location_id=room_loc_id,
+                                        branch_id=branch_id
                                     )
                                     db.add(waste_txn)
                                     print(f"[CHECKOUT] Logged {bad_qty} {inv_item.name} as consumption (Missing/Damaged consumable)")
@@ -1062,7 +1077,7 @@ async def handleCompleteCheckoutRequest(
                                     # If marked as waste and location provided, use it
                                     assigned_waste_loc = item.waste_location_id if item.is_waste else room_loc_id
                                     
-                                    waste_log_num = generate_waste_log_number(db)
+                                    waste_log_num = generate_waste_log_number(db, branch_id)
                                     waste_log = WasteLog(
                                         log_number=waste_log_num,
                                         item_id=item.item_id,
@@ -1074,7 +1089,8 @@ async def handleCompleteCheckoutRequest(
                                         action_taken="Charged to Guest",
                                         notes=f"Checkout Room {checkout_request.room_number}{' (Sent to Waste)' if item.is_waste else ''}",
                                         reported_by=current_user.id,
-                                        waste_date=datetime.utcnow()
+                                        waste_date=datetime.utcnow(),
+                                        branch_id=branch_id
                                     )
                                     db.add(waste_log)
                                     db.flush()
@@ -1089,7 +1105,8 @@ async def handleCompleteCheckoutRequest(
                                         notes=f"Damage/Missing at checkout - Room {checkout_request.room_number}",
                                         created_by=current_user.id,
                                         source_location_id=room_loc_id,
-                                        destination_location_id=item.waste_location_id if item.is_waste else None
+                                        destination_location_id=item.waste_location_id if item.is_waste else None,
+                                        branch_id=branch_id
                                     )
                                     db.add(waste_txn)
 
@@ -1107,7 +1124,8 @@ async def handleCompleteCheckoutRequest(
                                                 location_id=item.waste_location_id,
                                                 item_id=item.item_id,
                                                 quantity=bad_qty,
-                                                last_updated=datetime.utcnow()
+                                                last_updated=datetime.utcnow(),
+                                                branch_id=branch_id
                                             )
                                             db.add(new_waste_stock)
                                     
@@ -1124,6 +1142,7 @@ async def handleCompleteCheckoutRequest(
                                             status="pending",
                                             pickup_location_id=default_store.id if default_store else None,
                                             created_at=datetime.utcnow(),
+                                            branch_id=branch_id,
                                             refill_data=json.dumps([{
                                                 "item_id": item.item_id,
                                                 "quantity": bad_qty,
@@ -1418,7 +1437,7 @@ async def handleCompleteCheckoutRequest(
                 if asset.is_damaged and not should_skip_waste_log:
                     if is_actually_asset:
                         # 2. Create Waste Log (Maintenance track for assets)
-                        waste_log_num = generate_waste_log_number(db)
+                        waste_log_num = generate_waste_log_number(db, branch_id)
                         waste_log = WasteLog(
                             log_number=waste_log_num,
                             item_id=target_item_id,
@@ -1430,7 +1449,8 @@ async def handleCompleteCheckoutRequest(
                             action_taken="Charged to Guest",
                             notes=f"Damaged asset during checkout - Room {checkout_request.room_number}. {asset.notes or ''}",
                             reported_by=current_user.id,
-                            waste_date=datetime.utcnow()
+                            waste_date=datetime.utcnow(),
+                            branch_id=branch_id
                         )
                         db.add(waste_log)
                         db.flush() # Ensure visible for next ID generation
@@ -1450,7 +1470,8 @@ async def handleCompleteCheckoutRequest(
                             reference_number=waste_log_num,
                             notes=f"WASTE: Damaged asset at checkout - Room {checkout_request.room_number}",
                             created_by=current_user.id,
-                            source_location_id=room_loc_id
+                            source_location_id=room_loc_id,
+                            branch_id=branch_id
                         )
                         db.add(damage_txn)
                     else:
@@ -1465,7 +1486,8 @@ async def handleCompleteCheckoutRequest(
                             reference_number=f"LOST-DAM-{checkout_request.id}",
                             notes=f"WASTE: Damaged item at checkout - Room {checkout_request.room_number}",
                             created_by=current_user.id,
-                            source_location_id=room_loc_id
+                            source_location_id=room_loc_id,
+                            branch_id=branch_id
                         )
                         db.add(damage_txn)
                         print(f"[CHECKOUT] Logged damaged consumable {t_item.name if t_item else ''} as waste")
@@ -1535,7 +1557,8 @@ async def handleCompleteCheckoutRequest(
                         status="Incomplete Washing",
                         sent_at=datetime.utcnow(),
                         created_by=current_user.id,
-                        notes=f"Asset movement at checkout - Room {checkout_request.room_number}"
+                        notes=f"Asset movement at checkout - Room {checkout_request.room_number}",
+                        branch_id=branch_id
                     )
                     db.add(laundry_entry)
                     print(f"[CHECKOUT] Created LaundryLog entry for asset {asset.item_name}")
@@ -1550,7 +1573,8 @@ async def handleCompleteCheckoutRequest(
                         notes=f"Linen to Laundry - Room {checkout_request.room_number}",
                         created_by=current_user.id,
                         source_location_id=target_location_id,
-                        destination_location_id=asset_laundry_id
+                        destination_location_id=asset_laundry_id,
+                        branch_id=branch_id
                     )
                     db.add(laundry_txn)
                     print(f"[CHECKOUT] Created Room→Laundry transaction for {asset.item_name}")
@@ -1567,6 +1591,7 @@ async def handleCompleteCheckoutRequest(
                             status="pending",
                             pickup_location_id=default_store.id if default_store else None,
                             created_at=datetime.utcnow(),
+                            branch_id=branch_id,
                             refill_data=json.dumps([{
                                 "item_id": target_item_id,
                                 "quantity": 1,
@@ -1594,7 +1619,7 @@ async def handleCompleteCheckoutRequest(
                     if waste_stock:
                         waste_stock.quantity += 1
                     else:
-                        db.add(LocationStock(location_id=asset.waste_location_id, item_id=target_item_id, quantity=1, last_updated=datetime.utcnow()))
+                        db.add(LocationStock(location_id=asset.waste_location_id, item_id=target_item_id, quantity=1, last_updated=datetime.utcnow(), branch_id=branch_id))
 
                 elif asset.is_returned and asset.return_location_id:
                     print(f"[CHECKOUT] Moving asset {asset.item_name} to RETURN location {asset.return_location_id}")
@@ -1611,7 +1636,7 @@ async def handleCompleteCheckoutRequest(
                     if return_stock:
                         return_stock.quantity += 1
                     else:
-                        db.add(LocationStock(location_id=asset.return_location_id, item_id=target_item_id, quantity=1, last_updated=datetime.utcnow()))
+                        db.add(LocationStock(location_id=asset.return_location_id, item_id=target_item_id, quantity=1, last_updated=datetime.utcnow(), branch_id=branch_id))
 
                 # 7. ENHANCED: Replacement Request for fixed assets (if not already handled by movement loops)
                 # This catches missing items that are not laundry/return/waste but still need replacement
@@ -1626,6 +1651,7 @@ async def handleCompleteCheckoutRequest(
                         status="pending",
                         pickup_location_id=default_store.id if default_store else None,
                         created_at=datetime.utcnow(),
+                        branch_id=branch_id,
                         refill_data=json.dumps([{
                             "item_id": target_item_id,
                             "quantity": 1,
@@ -1682,14 +1708,14 @@ async def handleCompleteCheckoutRequest(
 
 
 @router.get("/pre-checkout/{room_number}/verification-data")
-def get_pre_checkout_verification_data(room_number: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def get_pre_checkout_verification_data(room_number: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
     """
     Get pre-checkout verification data for a room:
     - Room status
     - Actual Consumables stock in room (from LocationStock)
     - Actual Fixed Assets in room (from AssetRegistry) with serial numbers
     """
-    room = db.query(Room).filter(Room.number == room_number).first()
+    room = db.query(Room).filter(Room.number == room_number, Room.branch_id == branch_id).first()
     if not room:
         raise HTTPException(status_code=404, detail=f"Room {room_number} not found")
     
@@ -2024,12 +2050,19 @@ def send_feedback_form(checkout_id: int, db: Session = Depends(get_db), current_
     }
 
 
+from app.utils.branch_scope import get_branch_id
+
 @router.get("/checkouts", response_model=List[CheckoutFull])
-def get_all_checkouts(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20):
+def get_all_checkouts(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20, branch_id: int = Depends(get_branch_id)):
     """Retrieves a list of all completed checkouts, ordered by most recent - optimized for low network"""
     from app.utils.api_optimization import optimize_limit, MAX_LIMIT_LOW_NETWORK
     limit = optimize_limit(limit, MAX_LIMIT_LOW_NETWORK)
-    checkouts = db.query(Checkout).order_by(Checkout.id.desc()).offset(skip).limit(limit).all()
+    
+    query = db.query(Checkout)
+    if branch_id is not None:
+        query = query.filter(Checkout.branch_id == branch_id)
+        
+    checkouts = query.order_by(Checkout.id.desc()).offset(skip).limit(limit).all()
     print(f"DEBUG: get_all_checkouts - Found {len(checkouts)} checkouts")
     return checkouts if checkouts else []
 
@@ -2038,7 +2071,8 @@ def cleanup_orphaned_checkouts_endpoint(
     room_number: Optional[str] = Query(None),
     booking_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """
     Manual cleanup endpoint for orphaned checkouts.
@@ -2050,7 +2084,7 @@ def cleanup_orphaned_checkouts_endpoint(
         
         if room_number:
             # Find checkouts for this room where room is still checked-in
-            room = db.query(Room).filter(Room.number == room_number).first()
+            room = db.query(Room).filter(Room.number == room_number, Room.branch_id == branch_id).first()
             if not room:
                 raise HTTPException(status_code=404, detail=f"Room {room_number} not found")
             
@@ -2092,13 +2126,13 @@ def cleanup_orphaned_checkouts_endpoint(
         raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")
 
 @router.post("/repair-room-status/{room_number}")
-def repair_room_checkout_status(room_number: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def repair_room_checkout_status(room_number: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
     """
     Repair function to fix mismatched checkout status.
     If a checkout record exists but room is not marked as Available, fix the room status.
     If room is Available but no checkout record exists, create a minimal checkout record.
     """
-    room = db.query(Room).filter(Room.number == room_number).first()
+    room = db.query(Room).filter(Room.number == room_number, Room.branch_id == branch_id).first()
     if not room:
         raise HTTPException(status_code=404, detail=f"Room {room_number} not found")
         
@@ -2145,6 +2179,7 @@ def repair_room_checkout_status(room_number: str, db: Session = Depends(get_db),
             
             if not remaining_rooms and booking.status not in ['checked_out', 'checked-out']:
                 booking.status = "checked_out"
+                booking.checked_out_at = datetime.utcnow()
                 repairs_made.append(f"Updated booking {booking.id} status to 'checked_out' (all rooms checked out)")
     
     # Case 2: Room is Available but no checkout record (might have been manually set)
@@ -2205,7 +2240,8 @@ def repair_room_checkout_status(room_number: str, db: Session = Depends(get_db),
                                         location_id=target_location.id,
                                         item_id=item_stock.item_id,
                                         quantity=qty,
-                                        last_updated=datetime.utcnow()
+                                        last_updated=datetime.utcnow(),
+                                        branch_id=branch_id
                                     ))
                                 
                                 db.add(InventoryTransaction(
@@ -2215,7 +2251,8 @@ def repair_room_checkout_status(room_number: str, db: Session = Depends(get_db),
                                     notes=f"Checkout cleanup - returned from Room {room.number} to {target_location.name}",
                                     created_by=current_user.id if current_user else None,
                                     source_location_id=room.inventory_location_id,
-                                    destination_location_id=target_location.id
+                                    destination_location_id=target_location.id,
+                                    branch_id=branch_id
                                 ))
                                 
                                 item_stock.quantity = 0
@@ -2470,7 +2507,7 @@ def get_checkout_details(checkout_id: int, db: Session = Depends(get_db), curren
     }
 
 @router.get("/active-rooms", response_model=List[dict])
-def get_active_rooms(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20):
+def get_active_rooms(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20, branch_id: int = Depends(get_branch_id)):
 
     """
     Returns a list of active rooms available for checkout with two options:
@@ -2482,18 +2519,24 @@ def get_active_rooms(db: Session = Depends(get_db), current_user: User = Depends
         # Fetch active bookings and package bookings with their rooms preloaded
         # Include both 'checked-in' and 'CHECKED-IN' status (case-insensitive matching)
         # Exclude 'booked' status - only show rooms that are already checked-in
-        active_bookings = db.query(Booking).options(
+        bookings_query = db.query(Booking).options(
             joinedload(Booking.booking_rooms).joinedload(BookingRoom.room)
         ).filter(
             func.lower(Booking.status).in_(['checked-in', 'checked_in', 'checked in'])
-        ).all()
+        )
+        if branch_id is not None:
+            bookings_query = bookings_query.filter(Booking.branch_id == branch_id)
+        active_bookings = bookings_query.all()
         
-        active_package_bookings = db.query(PackageBooking).options(
+        pkg_bookings_query = db.query(PackageBooking).options(
 
             joinedload(PackageBooking.rooms).joinedload(PackageBookingRoom.room)
         ).filter(
             func.lower(PackageBooking.status).in_(['checked-in', 'checked_in', 'checked in'])
-        ).all()
+        )
+        if branch_id is not None:
+            pkg_bookings_query = pkg_bookings_query.filter(PackageBooking.branch_id == branch_id)
+        active_package_bookings = pkg_bookings_query.all()
         
         result = []
         
@@ -2656,13 +2699,25 @@ def get_active_rooms(db: Session = Depends(get_db), current_user: User = Depends
         print(traceback.format_exc())
         return []
 
-def _calculate_bill_for_single_room(db: Session, room_number: str):
+def _calculate_bill_for_single_room(db: Session, room_number: str, branch_id: int):
     """
     Calculates bill for a single room only, regardless of how many rooms are in the booking.
     """
+    print(f"[DEBUG-BILL] Called _calculate_bill_for_single_room with room={room_number}, branch={branch_id}")
     # 1. Find the room
-    room = db.query(Room).filter(Room.number == room_number).first()
+    q = db.query(Room).filter(Room.number == room_number)
+    if branch_id is not None:
+        q = q.filter(Room.branch_id == branch_id)
+    room = q.first()
+    
     if not room:
+        print(f"[DEBUG-BILL] Room {room_number} NOT FOUND in branch {branch_id}")
+        # Probe: Does it exist in ANY branch?
+        any_room = db.query(Room).filter(Room.number == room_number).first()
+        if any_room:
+            print(f"[DEBUG-BILL] Room {room_number} exists in branch {any_room.branch_id}, but not in {branch_id}")
+        else:
+            print(f"[DEBUG-BILL] Room {room_number} does not exist in any branch.")
         raise HTTPException(status_code=404, detail="Room not found.")
     
     # 2. Find the active parent booking (regular or package) linked to this room
@@ -2835,6 +2890,11 @@ def _calculate_bill_for_single_room(db: Session, room_number: str):
         AssignedService.room_id == room.id
     )
 
+    # Use booking's actual check_in date as a fallback start (not the adjusted check_in_datetime
+    # which may have been pushed forward by a previous guest's checkout)
+    booking_check_in_datetime = datetime.combine(booking.check_in, datetime.min.time())
+    booking_check_out_datetime = datetime.combine(booking.check_out, datetime.max.time())
+
     if is_package:
          svc_query = svc_query.filter(
              or_(
@@ -2842,7 +2902,8 @@ def _calculate_bill_for_single_room(db: Session, room_number: str):
                  and_(
                      AssignedService.package_booking_id == None,
                      AssignedService.booking_id == None,
-                     AssignedService.assigned_at >= check_in_datetime
+                     AssignedService.assigned_at >= booking_check_in_datetime,
+                     AssignedService.assigned_at <= booking_check_out_datetime
                  )
              )
          )
@@ -2853,7 +2914,8 @@ def _calculate_bill_for_single_room(db: Session, room_number: str):
                  and_(
                      AssignedService.booking_id == None,
                      AssignedService.package_booking_id == None,
-                     AssignedService.assigned_at >= check_in_datetime
+                     AssignedService.assigned_at >= booking_check_in_datetime,
+                     AssignedService.assigned_at <= booking_check_out_datetime
                  )
              )
          )
@@ -3315,8 +3377,12 @@ def _calculate_bill_for_single_room(db: Session, room_number: str):
                     .all())
     
     # Calculate potential booking human-readable IDs for notes matching
-    booking_id_padded = str(booking.id).zfill(6)
-    possible_ids = [f"BK-{booking_id_padded}", f"PK-{booking_id_padded}"]
+    from app.utils.booking_id import format_display_id
+    possible_ids = [
+        format_display_id(booking.id, branch_id=branch_id, is_package=is_package),
+        f"BK-{str(booking.id).zfill(6)}", 
+        f"PK-{str(booking.id).zfill(6)}"
+    ]
     if getattr(booking, 'display_id', None):
         possible_ids.append(booking.display_id)
 
@@ -3476,13 +3542,13 @@ def _calculate_bill_for_single_room(db: Session, room_number: str):
         "effective_checkout_date": effective_checkout_date
     }
 
-def _calculate_bill_for_entire_booking(db: Session, room_number: str):
+def _calculate_bill_for_entire_booking(db: Session, room_number: str, branch_id: int):
     """
     Core logic: Finds an entire booking from a single room number and calculates the total bill
     for all associated rooms and services.
     """
     # 1. Find the initial room to identify the parent booking
-    initial_room = db.query(Room).filter(Room.number == room_number).first()
+    initial_room = db.query(Room).filter(Room.number == room_number, Room.branch_id == branch_id).first()
     if not initial_room:
         raise HTTPException(status_code=404, detail="Initial room not found.")
 
@@ -3646,10 +3712,41 @@ def _calculate_bill_for_entire_booking(db: Session, room_number: str):
     billed_food_order_items = [item for item in all_food_order_items 
                                if item.order and item.order.billing_status == "billed"]
 
+    # Use booking's actual check_in/check_out dates for filtering unlinked services
+    booking_check_in_datetime = datetime.combine(booking.check_in, datetime.min.time())
+    booking_check_out_datetime = datetime.combine(booking.check_out, datetime.max.time())
+
     # Get ALL assigned services for these rooms (both billed and unbilled)
-    all_assigned_services = db.query(AssignedService).options(joinedload(AssignedService.service)).filter(
-        AssignedService.room_id.in_(room_ids)
-    ).all()
+    # Filter by booking ID to include all services linked to this booking,
+    # OR include services with no booking link but assigned during this booking's stay
+    if is_package:
+        all_assigned_services = db.query(AssignedService).options(joinedload(AssignedService.service)).filter(
+            AssignedService.room_id.in_(room_ids)
+        ).filter(
+            or_(
+                AssignedService.package_booking_id == booking.id,
+                and_(
+                    AssignedService.package_booking_id == None,
+                    AssignedService.booking_id == None,
+                    AssignedService.assigned_at >= booking_check_in_datetime,
+                    AssignedService.assigned_at <= booking_check_out_datetime
+                )
+            )
+        ).all()
+    else:
+        all_assigned_services = db.query(AssignedService).options(joinedload(AssignedService.service)).filter(
+            AssignedService.room_id.in_(room_ids)
+        ).filter(
+            or_(
+                AssignedService.booking_id == booking.id,
+                and_(
+                    AssignedService.booking_id == None,
+                    AssignedService.package_booking_id == None,
+                    AssignedService.assigned_at >= booking_check_in_datetime,
+                    AssignedService.assigned_at <= booking_check_out_datetime
+                )
+            )
+        ).all()
     
     # Separate unbilled, paid-at-counter, and billed services
     unbilled_services = [ass for ass in all_assigned_services if ass.billing_status in ["unbilled", "unpaid"] or ass.billing_status is None]
@@ -4145,14 +4242,14 @@ def _calculate_bill_for_entire_booking(db: Session, room_number: str):
 
 
 @router.get("/{room_number}", response_model=BillSummary)
-def get_bill_for_booking(room_number: str, checkout_mode: str = "multiple", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def get_bill_for_booking(room_number: str, checkout_mode: str = "multiple", db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
     """
     Returns a bill summary for the booking associated with the given room number.
     If checkout_mode is 'single', calculates bill for that room only.
     If checkout_mode is 'multiple', calculates bill for all rooms in the booking.
     """
     if checkout_mode == "single":
-        bill_data = _calculate_bill_for_single_room(db, room_number)
+        bill_data = _calculate_bill_for_single_room(db, room_number, branch_id)
         effective_checkout = bill_data.get("effective_checkout_date", bill_data["booking"].check_out)
         return BillSummary(
             guest_name=bill_data["booking"].guest_name,
@@ -4164,7 +4261,7 @@ def get_bill_for_booking(room_number: str, checkout_mode: str = "multiple", db: 
             charges=bill_data["charges"]
         )
     else:
-        bill_data = _calculate_bill_for_entire_booking(db, room_number)
+        bill_data = _calculate_bill_for_entire_booking(db, room_number, branch_id)
         effective_checkout = bill_data.get("effective_checkout_date", bill_data["booking"].check_out)
         return BillSummary(
             guest_name=bill_data["booking"].guest_name,
@@ -4178,7 +4275,7 @@ def get_bill_for_booking(room_number: str, checkout_mode: str = "multiple", db: 
 
 
 @router.post("/checkout/{room_number}", response_model=CheckoutSuccess)
-def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
     """
     Finalizes the checkout for a room or entire booking.
     If checkout_mode is 'single', only the specified room is checked out.
@@ -4191,7 +4288,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
         checkout_mode = "multiple"  # Default to multiple if invalid
     
     # Check if checkout request exists and inventory is verified
-    room = db.query(Room).filter(Room.number == room_number).first()
+    room = db.query(Room).filter(Room.number == room_number, Room.branch_id == branch_id).first()
     if room:
         # Find active booking
         booking_link = (db.query(BookingRoom)
@@ -4238,7 +4335,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
     if checkout_mode == "single":
         # Single room checkout
         # Calculate bill first - this will validate that there's an active booking
-        bill_data = _calculate_bill_for_single_room(db, room_number)
+        bill_data = _calculate_bill_for_single_room(db, room_number, branch_id)
         booking = bill_data["booking"]
         room = bill_data["room"]
         charges = bill_data["charges"]
@@ -4310,7 +4407,8 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
         if room.status == "Available":
             # Try to find the existing checkout
             existing = db.query(Checkout).filter(
-                Checkout.room_number == room_number
+                Checkout.room_number == room_number,
+                Checkout.branch_id == branch_id
             ).order_by(Checkout.created_at.desc()).first()
             if existing:
                 return CheckoutSuccess(
@@ -4539,7 +4637,8 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                 guest_gstin=request.guest_gstin,
                 is_b2b=request.is_b2b or False,
                 invoice_number=invoice_number,
-                bill_details=bill_details_data  # Store the detailed bill
+                bill_details=bill_details_data,  # Store the detailed bill
+                branch_id=branch_id
             )
             # Add checkout to session first, then set invoice_number if needed
             db.add(new_checkout)
@@ -4567,7 +4666,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                     None
                 )
                 if room_verification:
-                    create_checkout_verification(db, new_checkout.id, room_verification, room.id)
+                    create_checkout_verification(db, new_checkout.id, room_verification, room.id, branch_id=branch_id)
             else:
                 # Fallback: Create verification from CheckoutRequest inventory_data
                 # Fetch CheckoutRequest (similar to logic in Step 12)
@@ -4645,17 +4744,18 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                     # Bypass pydantic validation for consumables list to hold our extended objects
                     room_ver_data.consumables = consumables 
                     
-                    create_checkout_verification(db, new_checkout.id, room_ver_data, room.id)
+                    create_checkout_verification(db, new_checkout.id, room_ver_data, room.id, branch_id=branch_id)
             
             # 10. Process split payments
             if request.split_payments:
-                process_split_payments(db, new_checkout.id, request.split_payments)
+                process_split_payments(db, new_checkout.id, request.split_payments, branch_id=branch_id)
             elif request.payment_method:
                 # Legacy single payment method
                 payment_record = CheckoutPayment(
                     checkout_id=new_checkout.id,
                     payment_method=request.payment_method,
                     amount=grand_total,
+                    branch_id=branch_id,
                     notes="Single payment method"
                 )
                 db.add(payment_record)
@@ -4722,7 +4822,8 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                     # Deduct consumables from inventory
                     deduct_room_consumables(
                         db, room.id, room_verification.consumables, 
-                        new_checkout.id, current_user.id if current_user else None
+                        new_checkout.id, created_by=current_user.id,
+                        branch_id=branch_id
                     )
 
             # Clear remaining consumables from room inventory
@@ -4731,7 +4832,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
             # room_items = ... (Removed)
             
             # Trigger linen cycle (move bed sheets/towels to laundry)
-            trigger_linen_cycle(db, room.id, new_checkout.id)
+            trigger_linen_cycle(db, room.id, new_checkout.id, branch_id=branch_id)
             
             # 13. Update room status
             room.status = "Available"  # Room moves to "Dirty" status (ready for housekeeping)
@@ -4785,11 +4886,11 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                 from app.curd import service_request as service_request_crud
                 # Create cleaning service request
                 service_request_crud.create_cleaning_service_request(
-                    db, room.id, room.number, booking.guest_name
+                    db, room.id, room.number, booking.guest_name, branch_id=branch_id
                 )
                 # Create refill service request with checkout_id to get consumables data
                 service_request_crud.create_refill_service_request(
-                    db, room.id, room.number, booking.guest_name, new_checkout.id
+                    db, room.id, room.number, booking.guest_name, new_checkout.id, branch_id=branch_id
                 )
                 # Note: 'return_items' service request creation is REMOVED as it is now integrated into Checkout Verification
             except Exception as service_request_error:
@@ -4804,6 +4905,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
             
             if not remaining_rooms:
                 booking.status = "checked_out"
+                booking.checked_out_at = datetime.utcnow()
             
             db.commit()
             db.refresh(new_checkout)
@@ -4861,11 +4963,13 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                     grand_total=float(new_checkout.grand_total or 0),
                     guest_name=new_checkout.guest_name or "Guest",
                     room_number=new_checkout.room_number or room_number,
-                    gst_rate=18.0,  # Default, can be calculated from tax_amount
+                    gst_rate=18.0,
                     payment_method=payment_method,
+                    branch_id=branch_id,
                     created_by=current_user.id if current_user else None,
                     advance_amount=float(new_checkout.advance_deposit or 0)
                 )
+
             except Exception as journal_error:
                 # Log error but don't fail checkout
                 import traceback
@@ -5222,7 +5326,8 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                 guest_gstin=request.guest_gstin,
                 is_b2b=request.is_b2b or False,
                 invoice_number=invoice_number,
-                bill_details=bill_details_data
+                bill_details=bill_details_data,
+                branch_id=branch_id
             )
             # If invoice_number wasn't generated, create one based on checkout ID after flush
             if not invoice_number:
@@ -5243,7 +5348,8 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                         # Deduct consumables (Moved from step 11 to avoid double trigger)
                         deduct_room_consumables(
                             db, room_obj.id, room_verification.consumables, 
-                            new_checkout.id, current_user.id if current_user else None
+                            new_checkout.id, created_by=current_user.id,
+                            branch_id=branch_id
                         )
             
             # Deduct from CheckoutRequest if available
@@ -5282,13 +5388,14 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
             
             # 9. Process split payments
             if request.split_payments:
-                process_split_payments(db, new_checkout.id, request.split_payments)
+                process_split_payments(db, new_checkout.id, request.split_payments, branch_id=branch_id)
             elif request.payment_method:
                 payment_record = CheckoutPayment(
                     checkout_id=new_checkout.id,
                     payment_method=request.payment_method,
                     amount=grand_total,
-                    notes="Single payment method"
+                    notes="Single payment method",
+                    branch_id=branch_id
                 )
                 db.add(payment_record)
             
@@ -5315,10 +5422,11 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                 for room_verification in request.room_verifications:
                     room_obj = next((r for r in all_rooms if r.number == room_verification.room_number), None)
                     if room_obj:
-                        trigger_linen_cycle(db, room_obj.id, new_checkout.id)
+                        trigger_linen_cycle(db, room_obj.id, new_checkout.id, branch_id=branch_id)
             
             # 12. Update booking and room statuses
             booking.status = "checked_out"
+            booking.checked_out_at = datetime.utcnow()
             booking.total_amount = grand_total
             db.query(Room).filter(Room.id.in_(room_ids)).update({"status": "Available"})
             
@@ -5329,11 +5437,11 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                     try:
                         # Create cleaning service request
                         service_request_crud.create_cleaning_service_request(
-                            db, room.id, room.number, booking.guest_name
+                            db, room.id, room.number, booking.guest_name, branch_id=branch_id
                         )
                         # Create refill service request with checkout_id to get consumables data
                         service_request_crud.create_refill_service_request(
-                            db, room.id, room.number, booking.guest_name, new_checkout.id
+                            db, room.id, room.number, booking.guest_name, new_checkout.id, branch_id=branch_id
                         )
                     except Exception as room_service_error:
                         # Don't fail checkout if service request creation fails for one room

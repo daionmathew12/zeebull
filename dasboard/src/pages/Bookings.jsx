@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { usePermissions } from "../hooks/usePermissions";
 import { formatCurrency } from "../utils/currency";
 import { getQuantityStep, normalizeQuantity } from "../utils/quantityValidation";
 import DashboardLayout from "../layout/DashboardLayout";
@@ -477,144 +478,7 @@ const AddExtraAllocationModal = ({
     }
   };
 
-  // Handle Damaged Asset Reporting
-  const handleReportDamage = async (item) => {
-    if (!confirm(`Are you sure you want to report damage for ${item.item_name || 'this item'}? This will remove it from inventory and add a charge to the bill.`)) return;
 
-    const baseAmount = parseFloat(item.selling_price || item.unit_price || item.rental_price || 0);
-    const amountStr = prompt(`Enter damage charge amount for ${item.item_name || 'Item'}:`, baseAmount);
-
-    if (amountStr === null) return;
-
-    const finalCharge = parseFloat(amountStr);
-    if (isNaN(finalCharge) || finalCharge < 0) {
-      alert("Invalid amount. Please enter a positive number.");
-      return;
-    }
-
-    try {
-      // 1. Resolve Room and Location
-      const mainRoom = booking.rooms && booking.rooms[0] ? booking.rooms[0] : null;
-      const roomId = mainRoom?.room_id || mainRoom?.id;
-      const roomNumber = mainRoom?.number || mainRoom?.room?.number;
-
-      if (!roomId) {
-        alert("Could not determine Room ID.");
-        return;
-      }
-
-      // 2. Resolve Location ID - Priority: Object property -> API Search
-      let locationId = mainRoom?.room?.inventory_location_id || mainRoom?.inventory_location_id;
-
-      if (!locationId) {
-        try {
-          // Fallback: Fetch locations to find match
-          const locRes = await API.get(`/inventory/locations?limit=10000`);
-          const roomLoc = locRes.data.find(l =>
-            (l.name === `Room ${roomNumber}`) ||
-            (l.room_area === `Room ${roomNumber}`)
-          );
-          if (roomLoc) locationId = roomLoc.id;
-        } catch (e) {
-          console.error("Error resolving location:", e);
-        }
-      }
-
-      if (!locationId) {
-        console.warn(`Location ID not found for Room ${roomNumber}. Inventory deduction may fail.`);
-      }
-
-      // 2. Create Waste Log (Remove from Inventory)
-      // Only if we found a location and have an item ID
-      if (locationId && item.item_id) {
-        try {
-          const wasteFormData = new FormData();
-          wasteFormData.append('item_id', item.item_id);
-          wasteFormData.append('location_id', locationId);
-          wasteFormData.append('quantity', 1);
-          wasteFormData.append('unit', item.unit || "pcs");
-          wasteFormData.append('reason_code', "Damaged by Guest");
-          wasteFormData.append('action_taken', "Billed to Guest");
-          wasteFormData.append('notes', `Damaged by guest in Room ${roomNumber}. Billed charge: ${finalCharge}`);
-
-          await API.post(`/inventory/waste-logs`, wasteFormData, {
-            headers: { 'Content-Type': 'multipart/form-data' }
-          });
-
-        } catch (wasteError) {
-          console.error("Error creating waste log:", wasteError);
-          alert("Warning: Failed to update inventory records. Billing will continue.");
-        }
-      } else {
-        console.warn("Skipping inventory update: Missing Location ID or Item ID");
-      }
-
-      // 3. Billing Logic (Find or Create "Asset Damage" Service)
-      let serviceId = null;
-      try {
-        const svcs = await API.get(`/services/?limit=1000`);
-        const damageSvc = svcs.data.find(s => s.name === "Asset Damage");
-        if (damageSvc) {
-          serviceId = damageSvc.id;
-        } else {
-          const formData = new FormData();
-          formData.append('name', "Asset Damage");
-          formData.append('description', "Charges for damaged assets");
-          formData.append('charges', 0);
-          formData.append('is_visible_to_guest', 'true');
-
-          const newSvc = await API.post(`/services`, formData, {
-            headers: { 'Content-Type': 'multipart/form-data' }
-          });
-          serviceId = newSvc.data.id;
-        }
-      } catch (svcError) {
-        console.error("Error creating/finding service:", svcError);
-        alert("Failed to initialize damage service.");
-        return;
-      }
-
-      // 4. Resolve Employee
-      let employeeId = null;
-      try {
-        const emps = await API.get('/employees/?limit=1');
-        if (emps.data && emps.data.length > 0) {
-          employeeId = emps.data[0].id;
-        }
-      } catch (e) { console.error(e); }
-
-      if (!employeeId) {
-        alert("No employees found to assign service.");
-        return;
-      }
-
-      // 5. Assign Service with Override Charge and Explicit Billing Status
-      const payload = {
-        service_id: serviceId,
-        employee_id: employeeId,
-        room_id: roomId,
-        override_charges: finalCharge,
-        billing_status: "unbilled"  // Explicitly set to ensure it appears in bill
-      };
-
-      const assignRes = await API.post(`/services/assign`, payload);
-
-      // 6. Mark as Completed (but keep billing_status as unbilled)
-      await API.patch(`/services/assigned/${assignRes.data.id}`, {
-        status: "completed",
-        billing_status: "unbilled"  // Ensure it remains unbilled
-      });
-
-      alert("Damage reported: Item removed from inventory and charge added to bill.");
-
-      // 7. Update Local State (Remove item from list)
-      setCurrentRoomItems(prev => prev.filter(i => i.item_id !== item.item_id));
-
-    } catch (error) {
-      console.error("Damage report error:", error);
-      alert("Failed to report damage: " + (error.response?.data?.detail || error.message));
-    }
-  };
 
 
 
@@ -1370,24 +1234,13 @@ const AddExtraAllocationModal = ({
                                         <button onClick={() => { const up = [...currentRoomItems]; up[actualIndex].is_present = !item.is_present; setCurrentRoomItems(up); }} className={`p-2.5 rounded-2xl transition-all shadow-sm ${item.is_present !== false ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-slate-100 text-slate-300 border border-slate-200 opacity-40'}`} title="Verify Presence"><CheckCircle className="w-4 h-4" /></button>
                                         <span className="text-[8px] font-bold uppercase tracking-tight text-slate-400">{item.is_present !== false ? 'Verified' : 'Offline'}</span>
                                       </div>
-                                      <div className="flex flex-col items-center gap-1.5">
-                                        <button onClick={() => { const up = [...currentRoomItems]; up[actualIndex].is_damaged = !item.is_damaged; setCurrentRoomItems(up); }} className={`p-2.5 rounded-2xl transition-all shadow-sm ${item.is_damaged ? 'bg-rose-50 text-rose-600 border border-rose-100' : 'bg-slate-100 text-slate-300 border border-slate-200 opacity-40'}`} title="Report Structural Issue"><AlertCircle className="w-4 h-4" /></button>
-                                        <span className="text-[8px] font-bold uppercase tracking-tight text-slate-400">{item.is_damaged ? 'Defected' : 'Stable'}</span>
-                                      </div>
                                     </div>
                                   </td>
                                   <td className="px-8 py-6 text-right">
-                                    {item.is_damaged ? (
-                                      <div className="flex flex-col items-end gap-3">
-                                        <input type="text" placeholder="Detail defects..." value={item.damage_notes || ''} onChange={(e) => { const up = [...currentRoomItems]; up[actualIndex].damage_notes = e.target.value; setCurrentRoomItems(up); }} className="w-48 px-4 py-2.5 bg-rose-50/30 border border-rose-100 rounded-2xl text-[10px] font-bold focus:ring-4 focus:ring-rose-500/10 outline-none placeholder:text-rose-300" />
-                                        <button onClick={() => handleReportDamage(item)} className="px-5 py-2.5 bg-gradient-to-r from-rose-500 to-rose-600 text-white rounded-2xl text-[9px] font-bold uppercase tracking-wider shadow-lg shadow-rose-100">Add Penalty</button>
-                                      </div>
-                                    ) : (
-                                      <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-100">
-                                        <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse"></div>
-                                        <span className="text-[9px] font-bold uppercase tracking-wider">Verified</span>
-                                      </div>
-                                    )}
+                                    <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-100">
+                                      <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse"></div>
+                                      <span className="text-[9px] font-bold uppercase tracking-wider">Verified</span>
+                                    </div>
                                   </td>
                                 </tr>
                               );
@@ -1491,10 +1344,7 @@ const AddExtraAllocationModal = ({
                                     )}
                                   </td>
                                   <td className="px-8 py-6">
-                                    <div className="flex items-center justify-center gap-5">
                                       <button onClick={() => { const up = [...currentRoomItems]; up[actualIndex].is_present = !item.is_present; setCurrentRoomItems(up); }} className={`p-2.5 rounded-2xl shadow-sm transition-all ${item.is_present !== false ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-300 opacity-40'}`}><CheckCircle className="w-4 h-4" /></button>
-                                      <button onClick={() => { const up = [...currentRoomItems]; up[actualIndex].is_damaged = !item.is_damaged; setCurrentRoomItems(up); }} className={`p-2.5 rounded-2xl shadow-sm transition-all ${item.is_damaged ? 'bg-rose-100 text-rose-600' : 'bg-slate-100 text-slate-300 opacity-40'}`}><AlertCircle className="w-4 h-4" /></button>
-                                    </div>
                                   </td>
                                   <td className="px-8 py-6">
                                     <div className="relative flex justify-center">
@@ -3241,7 +3091,21 @@ const BookingFormModal = ({
 
 const Bookings = () => {
   const navigate = useNavigate();
-  const [mainTab, setMainTab] = useState("booking"); // "dashboard", "booking", "package", or "room"
+  const { hasPermission, isAdmin } = usePermissions();
+
+  const mainTabs = useMemo(() => {
+    const tabs = [
+      { id: "dashboard", label: "Overview", permission: "bookings:view" },
+      { id: "booking", label: "Bookings", permission: "bookings:view" },
+      { id: "package", label: "Packages", permission: "packages:view" },
+      { id: "room", label: "Rooms", permission: "rooms:view" }
+    ];
+    return tabs.filter(tab => hasPermission(tab.permission));
+  }, [hasPermission]);
+
+  const [mainTab, setMainTab] = useState(() => {
+    return mainTabs.length > 0 ? mainTabs[0].id : "booking";
+  });
   const [formData, setFormData] = useState({
     guestName: "",
     guestMobile: "",
@@ -4523,8 +4387,9 @@ const Bookings = () => {
       setIsBookingModalOpen(false);
     } catch (err) {
       console.error("Booking creation error:", err);
+      // API routes in FastAPI usually place the error reason in the detail param instead of message
       const errorMessage =
-        err.response?.data?.message || "Error creating booking.";
+        err.response?.data?.detail || err.response?.data?.message || "Error creating booking.";
       showBannerMessage("error", errorMessage);
     } finally {
       setIsSubmitting(false);
@@ -5204,12 +5069,7 @@ const Bookings = () => {
         {/* Main Tabs Navigation */}
         <div className="flex justify-center mb-8 relative z-20">
           <div className="bg-white/60 backdrop-blur-xl p-2 rounded-[2rem] border border-white/50 shadow-2xl shadow-indigo-100/50 flex flex-wrap justify-center gap-2">
-            {[
-              { id: "dashboard", label: "Overview" },
-              { id: "booking", label: "Bookings" },
-              { id: "package", label: "Packages" },
-              { id: "room", label: "Rooms" }
-            ].map((tab) => (
+            {mainTabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setMainTab(tab.id)}
@@ -5668,13 +5528,15 @@ const Bookings = () => {
                 <h3 className="text-xl font-bold text-gray-800">
                   All Bookings & Guest Details ({bookings.length})
                 </h3>
-                <button
-                  onClick={() => setIsBookingModalOpen(true)}
-                  className="px-6 py-2 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center gap-2 active:scale-95"
-                >
-                  <Plus className="w-5 h-5" />
-                  Create New Booking
-                </button>
+                {hasPermission('bookings:create') && (
+                  <button
+                    onClick={() => setIsBookingModalOpen(true)}
+                    className="px-6 py-2 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center gap-2 active:scale-95"
+                  >
+                    <Plus className="w-5 h-5" />
+                    Create New Booking
+                  </button>
+                )}
               </div>
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
@@ -5821,13 +5683,15 @@ const Bookings = () => {
                     <p className="text-sm text-gray-500 font-medium">Manage and create guest reservations</p>
                   </div>
                 </div>
-                <button
-                  onClick={() => setIsBookingModalOpen(true)}
-                  className="w-full md:w-auto px-8 py-3 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 active:scale-95"
-                >
-                  <Plus className="w-5 h-5" />
-                  Create New Booking
-                </button>
+                {hasPermission('bookings:create') && (
+                  <button
+                    onClick={() => setIsBookingModalOpen(true)}
+                    className="w-full md:w-auto px-8 py-3 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 active:scale-95"
+                  >
+                    <Plus className="w-5 h-5" />
+                    Create New Booking
+                  </button>
+                )}
               </div>
 
               {/* KPI Row */}
@@ -5900,7 +5764,8 @@ const Bookings = () => {
                         <th className="px-8 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Subject ID</th>
                         <th className="px-8 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Identity Details</th>
                         <th className="px-8 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Assignment</th>
-                        <th className="px-8 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Duration</th>
+                        <th className="px-8 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Expected Duration</th>
+                        <th className="px-8 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Actual Timeline</th>
                         <th className="px-8 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
                         <th className="px-8 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Actions</th>
                       </tr>
@@ -5946,6 +5811,19 @@ const Bookings = () => {
                               </div>
                             </td>
                             <td className="px-8 py-6 bg-slate-50/50 group-hover:bg-white border-y-2 border-transparent group-hover:border-indigo-100 transition-all">
+                              <div className="flex items-center gap-2 text-slate-700">
+                                <div className="text-center min-w-[70px]">
+                                  <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mb-0.5 text-indigo-500">ACTUAL IN</p>
+                                  <p className="text-[10px] font-bold text-slate-800">{b.checked_in_at ? formatDateTimeShort(b.checked_in_at) : "-"}</p>
+                                </div>
+                                <div className="w-4 h-px bg-slate-200"></div>
+                                <div className="text-center min-w-[70px]">
+                                  <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mb-0.5 text-indigo-500">ACTUAL OUT</p>
+                                  <p className="text-[10px] font-bold text-slate-800">{b.checkout?.checkout_date ? formatDateTimeShort(b.checkout.checkout_date) : (b.checkout_date ? formatDateTimeShort(b.checkout_date) : "-")}</p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-8 py-6 bg-slate-50/50 group-hover:bg-white border-y-2 border-transparent group-hover:border-indigo-100 transition-all">
                               <BookingStatusBadge
                                 status={b.status}
                                 isPackage={b.is_package}
@@ -5961,7 +5839,7 @@ const Bookings = () => {
                                 >
                                   <Eye className="w-5 h-5" />
                                 </button>
-                                {b.status?.toLowerCase().replace(/[-_]/g, "") === "checkedin" && (
+                                {hasPermission('bookings:edit') && b.status?.toLowerCase().replace(/[-_]/g, "") === "checkedin" && (
                                   <button
                                     onClick={async () => {
                                       try {
@@ -5978,7 +5856,7 @@ const Bookings = () => {
                                     <Box className="w-5 h-5" />
                                   </button>
                                 )}
-                                {b.status?.toLowerCase().replace(/[-_]/g, "") === "booked" && (
+                                {hasPermission('bookings:edit') && b.status?.toLowerCase().replace(/[-_]/g, "") === "booked" && (
                                   <button
                                     onClick={async () => {
                                       try {
@@ -5995,8 +5873,9 @@ const Bookings = () => {
                                     <Zap className="w-5 h-5" />
                                   </button>
                                 )}
-                                <button
-                                  onClick={() => setBookingToExtend(b)}
+                                {hasPermission('bookings:edit') && (
+                                  <button
+                                    onClick={() => setBookingToExtend(b)}
                                   disabled={(() => {
                                     if (!b || !b.status) return true;
                                     const rawStatusLower = b.status.toLowerCase().trim();
@@ -6008,14 +5887,17 @@ const Bookings = () => {
                                 >
                                   <Calendar className="w-5 h-5" />
                                 </button>
-                                <button
-                                  onClick={() => cancelBooking(b.id, b.is_package)}
+                              )}
+                                {hasPermission('bookings:delete') && (
+                                  <button
+                                    onClick={() => cancelBooking(b.id, b.is_package)}
                                   disabled={b.status?.toLowerCase().replace(/[-_]/g, "") !== "booked"}
                                   className="w-10 h-10 bg-white text-slate-400 hover:text-rose-600 rounded-xl border-2 border-slate-50 hover:border-rose-100 transition-all shadow-sm flex items-center justify-center disabled:opacity-20"
                                   title="Cancel Record"
                                 >
                                   <Trash2 className="w-5 h-5" />
                                 </button>
+                              )}
                                 {b.guest_email && (
                                   <button
                                     onClick={() => shareViaEmail(b)}
@@ -6177,6 +6059,7 @@ const RoomFoodOrders = React.memo(({ booking, authHeader, API, formatCurrency })
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
 
   useEffect(() => {
     fetchOrders();
@@ -6255,13 +6138,15 @@ const RoomFoodOrders = React.memo(({ booking, authHeader, API, formatCurrency })
             >
               <RefreshCw className={`w-5 h-5 ${loading ? "animate-spin" : "group-hover:rotate-180 transition-transform duration-700"}`} />
             </button>
-            <button
-              onClick={() => navigate('/food-orders')}
-              className="px-10 py-5 bg-slate-900 text-white rounded-[2rem] text-[10px] font-bold uppercase tracking-normal shadow-2xl shadow-indigo-200 hover:bg-indigo-600 transition-all flex items-center gap-4"
-            >
-              <ExternalLink className="w-4 h-4" />
-              Go to Orders
-            </button>
+            {hasPermission('food_orders:view') && (
+              <button
+                onClick={() => navigate('/food-orders')}
+                className="px-10 py-5 bg-slate-900 text-white rounded-[2rem] text-[10px] font-bold uppercase tracking-normal shadow-2xl shadow-indigo-200 hover:bg-indigo-600 transition-all flex items-center gap-4"
+              >
+                <ExternalLink className="w-4 h-4" />
+                Go to Orders
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -6365,6 +6250,7 @@ const RoomServiceAssignments = React.memo(({ booking, authHeader, API, formatCur
   const navigate = useNavigate();
   const [assignments, setAssignments] = useState([]);
   const [loading, setLoading] = useState(false);
+  const { hasPermission } = usePermissions();
 
   useEffect(() => {
     fetchData();
@@ -6431,15 +6317,17 @@ const RoomServiceAssignments = React.memo(({ booking, authHeader, API, formatCur
               <h2 className="text-3xl font-black text-white tracking-tight">Active Service Management</h2>
               <p className="text-sm font-bold text-slate-400 uppercase tracking-[0.2em] mt-3">Advanced Assignment & Resource Orchestration Terminal</p>
             </div>
-            <motion.button
-              whileHover={{ scale: 1.05, y: -5 }}
-              whileActive={{ scale: 0.95 }}
-              onClick={() => navigate('/services')}
-              className="mt-4 px-12 py-5 bg-gradient-to-r from-indigo-500 via-indigo-600 to-violet-700 text-white rounded-full text-sm font-black uppercase tracking-[0.2em] shadow-2xl shadow-indigo-900/50 flex items-center gap-4 group transition-all"
-            >
-              <span>Assign & Manage Services</span>
-              <ArrowRight className="w-5 h-5 group-hover:translate-x-2 transition-transform" />
-            </motion.button>
+            {hasPermission('services:view') && (
+              <motion.button
+                whileHover={{ scale: 1.05, y: -5 }}
+                whileActive={{ scale: 0.95 }}
+                onClick={() => navigate('/services')}
+                className="mt-4 px-12 py-5 bg-gradient-to-r from-indigo-500 via-indigo-600 to-violet-700 text-white rounded-full text-sm font-black uppercase tracking-[0.2em] shadow-2xl shadow-indigo-900/50 flex items-center gap-4 group transition-all"
+              >
+                <span>Assign & Manage Services</span>
+                <ArrowRight className="w-5 h-5 group-hover:translate-x-2 transition-transform" />
+              </motion.button>
+            )}
           </div>
         </div>
       </div>

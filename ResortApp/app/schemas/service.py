@@ -40,6 +40,7 @@ class ServiceInventoryItemOut(BaseModel):
 
 class ServiceOut(ServiceBase):
     id: int
+    branch_id: Optional[int] = None
     created_at: datetime
     images: List[ServiceImageOut] = []
     inventory_items: List[ServiceInventoryItemOut] = []  # Include inventory items
@@ -94,6 +95,7 @@ class InventoryReturnItem(BaseModel):
     inventory_item_id: Optional[int] = None
     quantity_returned: float
     quantity_used: Optional[float] = 0.0  # Allow updating used quantity
+    quantity_damaged: Optional[float] = 0.0  # NEW: Track damaged items for waste reporting
     notes: Optional[str] = None
     return_location_id: Optional[int] = None  # Location to return item to
 
@@ -106,6 +108,7 @@ class AssignedServiceUpdate(BaseModel):
 
 class AssignedServiceOut(BaseModel):
     id: int
+    branch_id: Optional[int] = None
     service_id: int  # Add for filtering
     employee_id: int  # Add for filtering
     room_id: int  # Add for filtering

@@ -4,6 +4,8 @@ from datetime import date
 # Base schema with is_active
 class BaseSchema(BaseModel):
     is_active: bool = True
+    branch_id: int | None = None
+    branch_name: str | None = None
 
     class Config:
         from_attributes = True
@@ -14,6 +16,7 @@ class HeaderBannerBase(BaseSchema):
     title: str
     subtitle: str
     image_url: str
+    branch_id: int | None = None
 
 class HeaderBannerCreate(HeaderBannerBase):
     pass
@@ -22,6 +25,7 @@ class HeaderBannerUpdate(BaseSchema):
     title: str | None = None
     subtitle: str | None = None
     image_url: str | None = None
+    branch_id: int | None = None
 
 class HeaderBanner(HeaderBannerBase):
     id: int
@@ -89,6 +93,7 @@ class SignatureExperienceBase(BaseSchema):
     title: str
     description: str
     image_url: str
+    extra_images: str | None = None
 
 class SignatureExperienceCreate(SignatureExperienceBase):
     pass
@@ -97,6 +102,7 @@ class SignatureExperienceUpdate(BaseSchema):
     title: str | None = None
     description: str | None = None
     image_url: str | None = None
+    branch_id: int | None = None
 
 class SignatureExperience(SignatureExperienceBase):
     id: int
@@ -107,6 +113,7 @@ class PlanWeddingBase(BaseSchema):
     title: str
     description: str
     image_url: str
+    extra_images: str | None = None
 
 class PlanWeddingCreate(PlanWeddingBase):
     pass
@@ -115,6 +122,7 @@ class PlanWeddingUpdate(BaseSchema):
     title: str | None = None
     description: str | None = None
     image_url: str | None = None
+    branch_id: int | None = None
 
 class PlanWedding(PlanWeddingBase):
     id: int
@@ -125,6 +133,7 @@ class NearbyAttractionBase(BaseSchema):
     title: str
     description: str
     image_url: str
+    extra_images: str | None = None
     map_link: str | None = None
 
 
@@ -137,6 +146,7 @@ class NearbyAttractionUpdate(BaseSchema):
     description: str | None = None
     image_url: str | None = None
     map_link: str | None = None
+    branch_id: int | None = None
 
 
 class NearbyAttraction(NearbyAttractionBase):
@@ -148,6 +158,7 @@ class NearbyAttractionBannerBase(BaseSchema):
     title: str
     subtitle: str
     image_url: str
+    extra_images: str | None = None
     map_link: str | None = None
 
 
@@ -160,6 +171,7 @@ class NearbyAttractionBannerUpdate(BaseSchema):
     subtitle: str | None = None
     image_url: str | None = None
     map_link: str | None = None
+    branch_id: int | None = None
 
 
 class NearbyAttractionBanner(NearbyAttractionBannerBase):

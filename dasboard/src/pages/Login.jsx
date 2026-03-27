@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../services/api";
-import orchidLogo from "../assets/orchidlogo.png";
+import orchidLogo from "../assets/zeebulllogo.png";
 import { jwtDecode } from "jwt-decode";
 
 export default function LoginPage() {
@@ -22,14 +22,38 @@ export default function LoginPage() {
           const decoded = jwtDecode(response.data.access_token);
           const permissions = decoded.permissions || [];
           const role = decoded.role ? decoded.role.toLowerCase() : 'guest';
+          const isSuperadmin = decoded.is_superadmin || false;
+          const userBranchId = decoded.branch_id;
 
-          if (role === 'admin') {
+          // Store user info for hooks like usePermissions
+          localStorage.setItem("user", JSON.stringify({
+            role,
+            is_superadmin: isSuperadmin,
+            permissions
+          }));
+          localStorage.setItem("permissions", JSON.stringify(permissions));
+
+          // Initialize branch scoping
+          if (isSuperadmin) {
+            // Superadmins always default to Enterprise View
+            localStorage.setItem("activeBranchId", "all");
+          } else if (userBranchId) {
+            localStorage.setItem("activeBranchId", userBranchId);
+          }
+
+          if (isSuperadmin) {
+            navigate("/superadmin-dashboard", { replace: true });
+          } else if (role === 'admin') {
             navigate("/dashboard", { replace: true });
-          } else if (permissions.includes('/dashboard')) {
+          } else if (permissions.some(p => p === '/dashboard' || p === 'dashboard:view' || p === 'dashboard')) {
             navigate("/dashboard", { replace: true });
           } else if (permissions.length > 0) {
-            // Navigate to the first available permission
-            navigate(permissions[0], { replace: true });
+            // Navigate to the first available permission, converting module:action to /module
+            const firstPerm = permissions[0];
+            const redirectPath = firstPerm.startsWith('/') 
+              ? firstPerm 
+              : `/${firstPerm.split(':')[0].replace('_', '-')}`;
+            navigate(redirectPath, { replace: true });
           } else {
             // Fallback if no permissions
             navigate("/dashboard", { replace: true });
@@ -52,7 +76,7 @@ export default function LoginPage() {
 
   return (
     <div className="relative min-h-screen flex items-center justify-center overflow-hidden p-4">
-      {/* Orchid Green Gradient Background */}
+      {/* Zeebull Green Gradient Background */}
       <div className="absolute inset-0 animate-gradient bg-gradient-to-br from-[#faf8f5] via-[#e8f5e9] to-[#c5e1a5]"></div>
 
       {/* Floating natural particles */}
@@ -73,14 +97,13 @@ export default function LoginPage() {
 
       {/* Login Card */}
       <div className="relative z-10 w-full max-w-md bg-white/95 backdrop-blur-lg rounded-2xl shadow-2xl p-6 sm:p-8 space-y-6 border border-[#c5e1a5]/50">
-        <div className="flex justify-center mb-6">
+        <div className="flex justify-center mb-2">
           <div className="relative">
-            <div className="absolute inset-0 bg-gray-800/30 rounded-full blur-xl"></div>
-            <div className="relative bg-gradient-to-br from-gray-800 via-gray-900 to-black p-4 rounded-2xl shadow-lg border-2" style={{ borderColor: 'rgba(212, 175, 55, 0.3)' }}>
+            <div className="relative flex items-center justify-center p-0">
               <img
                 src={orchidLogo}
-                alt="Orchid Resort Logo"
-                className="h-28 md:h-32 w-auto object-contain drop-shadow-md"
+                alt="Zeebull Resort Logo"
+                className="h-28 md:h-36 w-auto object-contain drop-shadow-2xl"
               />
             </div>
           </div>
@@ -124,7 +147,7 @@ export default function LoginPage() {
         </form>
 
         <div className="text-center text-sm text-gray-500">
-          © 2025 Your Business. All rights reserved.
+          © {new Date().getFullYear()} Zeebull Group. All rights reserved.
         </div>
       </div>
 

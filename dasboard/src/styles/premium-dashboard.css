@@ -280,12 +280,13 @@
   }
 }
 
-/* Smooth Transitions */
+/* Smooth Transitions - REMOVED GLOBAL TRANSITION TO PREVENT SHIVERING
 * {
   transition-property: background-color, border-color, color, fill, stroke, opacity, box-shadow, transform;
   transition-duration: 200ms;
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
+*/
 
 /* Number Animation */
 @keyframes countUp {
@@ -328,4 +329,22 @@
 .tooltip:hover::after {
   opacity: 1;
   transform: translateX(-50%) translateY(-4px);
+}
+
+/* Premium Sidebar Scrollbar */
+.premium-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.premium-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.premium-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+}
+
+.premium-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
 }

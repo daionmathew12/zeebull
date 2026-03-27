@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Date, Text, Boolean, Numeric
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Date, Text, Boolean, Numeric, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
@@ -8,8 +8,10 @@ class InventoryCategory(Base):
     __tablename__ = "inventory_categories"
     
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, nullable=False, index=True)
+    name = Column(String, nullable=False, index=True)
     description = Column(Text, nullable=True)
+
+    __table_args__ = (UniqueConstraint('name', name='uix_inventory_category_name'),)
     
     # Basic Identification
     parent_department = Column(String, nullable=True)  # Restaurant, Facility, Hotel, Office, Fire & Safety, Security
@@ -35,6 +37,9 @@ class InventoryCategory(Base):
     
     created_at = Column(DateTime, default=datetime.utcnow)
     is_active = Column(Boolean, default=True, nullable=False)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    
+    branch = relationship("Branch")
     
     items = relationship("InventoryItem", back_populates="category")
 
@@ -48,7 +53,15 @@ class Vendor(Base):
     
     # Core GST Properties
     gst_registration_type = Column(String, nullable=True)  # Regular, Composition, Unregistered, Overseas, SEZ
-    gst_number = Column(String, nullable=True, unique=True, index=True)  # GSTIN (Mandatory for Regular)
+    gst_number = Column(String, nullable=True, index=True)  # GSTIN (Mandatory for Regular)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    
+    branch = relationship("Branch")
+
+    __table_args__ = (
+        UniqueConstraint('gst_number', 'branch_id', name='uix_vendor_gst_branch'),
+        UniqueConstraint('name', 'branch_id', name='uix_vendor_name_branch'),
+    )
     legal_name = Column(String, nullable=True)  # Must match GST Portal exactly (Mandatory for Regular)
     trade_name = Column(String, nullable=True)  # The name you know them by
     pan_number = Column(String, nullable=True, index=True)  # 10 chars, mandatory for Unregistered/Composition
@@ -105,7 +118,7 @@ class InventoryItem(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False, index=True)
-    item_code = Column(String, unique=True, nullable=True, index=True)  # SKU/Item Code
+    item_code = Column(String, nullable=True, index=True)  # SKU/Item Code
     description = Column(Text, nullable=True)
     category_id = Column(Integer, ForeignKey("inventory_categories.id"), nullable=False)
     sub_category = Column(String, nullable=True)  # Sub-category (e.g., Meat/Dairy/Spices)
@@ -118,7 +131,7 @@ class InventoryItem(Base):
     selling_price = Column(Float, nullable=True)  # MRP/Selling price to guests
     gst_rate = Column(Float, default=0.0, nullable=False)  # GST tax rate percentage
     location = Column(String, nullable=True)  # Storage location
-    barcode = Column(String, unique=True, nullable=True, index=True)
+    barcode = Column(String, nullable=True, index=True)
     image_path = Column(String, nullable=True)  # Item image path
     
     # Inventory settings
@@ -141,6 +154,15 @@ class InventoryItem(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    
+    branch = relationship("Branch")
+
+    __table_args__ = (
+        UniqueConstraint('item_code', name='uix_inventory_item_code'),
+        UniqueConstraint('barcode', name='uix_inventory_item_barcode'),
+        UniqueConstraint('name', name='uix_inventory_item_name'),
+    )
     
     category = relationship("InventoryCategory", back_populates="items")
     preferred_vendor = relationship("Vendor", foreign_keys=[preferred_vendor_id])
@@ -179,6 +201,10 @@ class PurchaseMaster(Base):
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    
+    branch = relationship("Branch")
+
     
     vendor = relationship("Vendor", back_populates="purchases")
     details = relationship("PurchaseDetail", back_populates="purchase_master", cascade="all, delete-orphan")
@@ -225,6 +251,10 @@ class InventoryTransaction(Base):
     source_location_id = Column(Integer, ForeignKey("locations.id"), nullable=True)
     destination_location_id = Column(Integer, ForeignKey("locations.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    
+    branch = relationship("Branch")
+
     
     item = relationship("InventoryItem", back_populates="transactions")
     purchase_master = relationship("PurchaseMaster")
@@ -249,6 +279,10 @@ class StockRequisition(Base):
     approved_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    
+    branch = relationship("Branch")
+
     
     details = relationship("StockRequisitionDetail", back_populates="requisition", cascade="all, delete-orphan")
     requester = relationship("User", foreign_keys=[requested_by])
@@ -285,6 +319,10 @@ class StockIssue(Base):
     booking_id = Column(Integer, index=True, nullable=True)
     guest_id = Column(Integer, index=True, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    
+    branch = relationship("Branch")
+
     
     details = relationship("StockIssueDetail", back_populates="issue", cascade="all, delete-orphan")
     requisition = relationship("StockRequisition")
@@ -336,6 +374,10 @@ class WasteLog(Base):
     reported_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     waste_date = Column(DateTime, default=datetime.utcnow, nullable=False)  # When the waste occurred
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    
+    branch = relationship("Branch")
+
     
     item = relationship("InventoryItem", foreign_keys=[item_id])
     food_item = relationship("FoodItem", foreign_keys=[food_item_id])  # NEW
@@ -359,6 +401,10 @@ class Location(Base):
     description = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    
+    branch = relationship("Branch")
+
     
     asset_mappings = relationship("AssetMapping", back_populates="location", cascade="all, delete-orphan")
     parent_location = relationship("Location", remote_side=[id], backref="child_locations")
@@ -382,6 +428,10 @@ class AssetRegistry(Base):
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    
+    branch = relationship("Branch")
+
     
     item = relationship("InventoryItem")
     current_location = relationship("Location")
@@ -402,6 +452,10 @@ class AssetMapping(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     unassigned_date = Column(DateTime, nullable=True)
     quantity = Column(Float, default=1.0, nullable=False) # Added quantity for bulk assignment
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    
+    branch = relationship("Branch")
+
     
     item = relationship("InventoryItem")
     location = relationship("Location", back_populates="asset_mappings")
@@ -416,6 +470,10 @@ class LocationStock(Base):
     item_id = Column(Integer, ForeignKey("inventory_items.id"), nullable=False)
     quantity = Column(Float, default=0, nullable=False)
     last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    
+    branch = relationship("Branch")
+
     
     location = relationship("Location")
     item = relationship("InventoryItem")
@@ -435,7 +493,37 @@ class LaundryLog(Base):
     returned_at = Column(DateTime, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     notes = Column(Text, nullable=True)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    
+    branch = relationship("Branch")
+
     
     item = relationship("InventoryItem")
     source_location = relationship("Location")
+
+
+class InterBranchTransfer(Base):
+    __tablename__ = "inter_branch_transfers"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    transfer_number = Column(String, unique=True, nullable=False, index=True)
+    item_id = Column(Integer, ForeignKey("inventory_items.id"), nullable=False)
+    quantity = Column(Float, nullable=False)
+    source_branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False)
+    destination_branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False)
+    source_location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
+    destination_location_id = Column(Integer, ForeignKey("locations.id"), nullable=True) # Linked upon receipt
+    status = Column(String, default="pending", nullable=False)  # pending, in_transit, received, cancelled
+    notes = Column(Text, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    item = relationship("InventoryItem")
+    source_branch = relationship("Branch", foreign_keys=[source_branch_id])
+    destination_branch = relationship("Branch", foreign_keys=[destination_branch_id])
+    source_location = relationship("Location", foreign_keys=[source_location_id])
+    destination_location = relationship("Location", foreign_keys=[destination_location_id])
+    user = relationship("User", foreign_keys=[created_by])
+
 

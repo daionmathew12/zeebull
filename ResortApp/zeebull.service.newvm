@@ -1,0 +1,15 @@
+[Unit]
+Description=Zeebull Resort Management API
+After=network.target
+
+[Service]
+User=basilabrahamaby
+Group=www-data
+WorkingDirectory=/var/www/zeebull/ResortApp
+ExecStart=/var/www/zeebull/ResortApp/venv/bin/gunicorn -c /var/www/zeebull/ResortApp/gunicorn.conf.py main:app
+Environment="PATH=/var/www/zeebull/ResortApp/venv/bin"
+EnvironmentFile=/var/www/zeebull/ResortApp/.env
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

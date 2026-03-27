@@ -1,7 +1,9 @@
 import React from "react";
 import { Edit, Eye } from "lucide-react";
+import { usePermissions } from "../../../hooks/usePermissions";
 
 const VendorsTable = ({ vendors, onEdit, onView }) => {
+    const { hasPermission } = usePermissions();
     return (
         <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
@@ -66,20 +68,24 @@ const VendorsTable = ({ vendors, onEdit, onView }) => {
                                 </td>
                                 <td className="px-4 py-3 text-sm text-right">
                                     <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
-                                        <button
-                                            onClick={() => onEdit && onEdit(vendor)}
-                                            className="p-1 text-blue-600 hover:bg-blue-50 rounded-full transition-colors"
-                                            title="Edit Vendor"
-                                        >
-                                            <Edit className="w-4 h-4" />
-                                        </button>
-                                        <button
-                                            onClick={() => onView && onView(vendor)}
-                                            className="p-1 text-gray-600 hover:bg-gray-50 rounded-full transition-colors"
-                                            title="View Details"
-                                        >
-                                            <Eye className="w-4 h-4" />
-                                        </button>
+                                        {hasPermission('inventory_vendor:edit') && (
+                                            <button
+                                                onClick={() => onEdit && onEdit(vendor)}
+                                                className="p-1 text-blue-600 hover:bg-blue-50 rounded-full transition-colors"
+                                                title="Edit Vendor"
+                                            >
+                                                <Edit className="w-4 h-4" />
+                                            </button>
+                                        )}
+                                        {hasPermission('inventory_vendor:view') && (
+                                            <button
+                                                onClick={() => onView && onView(vendor)}
+                                                className="p-1 text-gray-600 hover:bg-gray-50 rounded-full transition-colors"
+                                                title="View Details"
+                                            >
+                                                <Eye className="w-4 h-4" />
+                                            </button>
+                                        )}
                                     </div>
                                 </td>
                             </tr>

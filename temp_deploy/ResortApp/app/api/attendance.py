@@ -1,0 +1,486 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+
+from typing import List, Optional, Any, Dict
+from datetime import date, time, datetime, timedelta
+from pydantic import BaseModel
+import pytz
+
+from calendar import monthrange
+from app.utils.auth import get_db, get_current_user
+from app.models.employee import Attendance, WorkingLog, Employee, Leave
+from app.models.settings import SystemSetting
+from app.models.user import User
+import json
+
+router = APIRouter(prefix="/attendance", tags=["Attendance"])
+
+# --- Pydantic Schemas ---
+class AttendanceRecord(BaseModel):
+    id: int
+    date: date
+    status: str
+    class Config: from_attributes = True
+
+class WorkingLogRecord(BaseModel):
+    id: int
+    employee_id: int
+    date: date
+    check_in_time: Optional[time]
+    check_out_time: Optional[time]
+    location: Optional[str]
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    duration_hours: Optional[float] = None
+    completed_tasks: Optional[str] = None
+    class Config: from_attributes = True
+
+class TasksUpdate(BaseModel):
+    completed_tasks: str
+
+class AttendanceCreate(BaseModel):
+    employee_id: int
+    date: date
+    status: str
+    leave_type: Optional[str] = 'Paid'
+
+class WorkingLogCreate(BaseModel):
+    employee_id: int
+    date: date
+    check_in_time: Optional[time] = None
+    check_out_time: Optional[time] = None
+    location: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+class HolidayItem(BaseModel):
+    date: str
+    name: str
+
+class UtilizationRecord(BaseModel):
+    month: str
+    hours: float
+
+class TodayStatus(BaseModel):
+    on_leave: int
+    active_today: int
+    currently_online: int
+
+class MonthlyReport(BaseModel):
+    month: int
+    year: int
+    total_days: int
+    present_days: int
+    absent_days: int
+    paid_leaves_taken: int
+    sick_leaves_taken: int
+    unpaid_leaves: int
+    total_paid_leaves_year: int
+    total_sick_leaves_year: int
+    paid_leave_balance: int
+    sick_leave_balance: int
+    base_salary: float
+    deductions: float
+    net_salary: float
+
+class ClockInCreate(BaseModel):
+    employee_id: int
+    location: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+class ClockOutCreate(BaseModel):
+    employee_id: int
+
+# --- API Endpoints ---
+
+@router.post("/mark", response_model=AttendanceRecord)
+def mark_attendance(record: AttendanceCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    db_record = Attendance(**record.model_dump())
+    db.add(db_record)
+    db.commit()
+    db.refresh(db_record)
+    return db_record
+
+@router.post("/log-work", response_model=WorkingLogRecord)
+def log_working_hours(log: WorkingLogCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    db_log = WorkingLog(**log.model_dump())
+    db.add(db_log)
+    db.commit()
+    db.refresh(db_log)
+    return db_log
+
+@router.post("/clock-in", response_model=WorkingLogRecord)
+def clock_in(clock_in_data: ClockInCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    try:
+        # Use Indian Standard Time (IST)
+        ist = pytz.timezone('Asia/Kolkata')
+        now = datetime.now(ist)
+        
+        # Check if there's an open clock-in for this employee today
+        open_log = db.query(WorkingLog).filter(
+            WorkingLog.employee_id == clock_in_data.employee_id,
+            WorkingLog.date == now.date(),
+            WorkingLog.check_out_time.is_(None)
+        ).first()
+
+        if open_log:
+            raise HTTPException(status_code=400, detail="Employee is already clocked in. Please clock out first.")
+
+        new_log = WorkingLog(
+            employee_id=clock_in_data.employee_id,
+            date=now.date(),
+            check_in_time=now.time(),
+            location=clock_in_data.location,
+            latitude=clock_in_data.latitude,
+            longitude=clock_in_data.longitude
+        )
+        db.add(new_log)
+        db.commit()
+        db.refresh(new_log)
+        return new_log
+    except Exception as e:
+        import traceback
+        print(f"ERROR: Clock-in failed for employee {clock_in_data.employee_id}: {str(e)}")
+        traceback.print_exc()
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=f"Internal Server Error during clock-in: {str(e)}")
+
+@router.post("/clock-out", response_model=WorkingLogRecord)
+def clock_out(clock_out_data: ClockOutCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # Use Indian Standard Time (IST)
+    ist = pytz.timezone('Asia/Kolkata')
+    now = datetime.now(ist)
+    
+    # Find the last open clock-in for this employee
+    log_to_close = db.query(WorkingLog).filter(
+        WorkingLog.employee_id == clock_out_data.employee_id, 
+        WorkingLog.check_out_time.is_(None)
+    ).order_by(WorkingLog.check_in_time.desc()).first()
+
+    if not log_to_close:
+        raise HTTPException(status_code=404, detail="No open clock-in found to clock out.")
+        
+    employee = db.query(Employee).filter(Employee.id == clock_out_data.employee_id).first()
+    if employee and employee.daily_tasks:
+        try:
+            assigned_tasks = json.loads(employee.daily_tasks)
+            if not isinstance(assigned_tasks, list):
+                assigned_tasks = [employee.daily_tasks]
+        except:
+            assigned_tasks = [employee.daily_tasks]
+            
+        if assigned_tasks:
+            try:
+                completed_tasks = json.loads(log_to_close.completed_tasks or "[]")
+            except:
+                completed_tasks = []
+                
+            all_completed = all(task in completed_tasks for task in assigned_tasks)
+            if not all_completed:
+                raise HTTPException(status_code=400, detail="Please complete all assigned active shift tasks before clocking out.")
+
+    log_to_close.check_out_time = now.time()
+    
+    # If clocking out on a different day, update the date to the check-out date
+    if log_to_close.date != now.date():
+        log_to_close.date = now.date()
+
+    db.commit()
+    db.refresh(log_to_close)
+    
+    # Calculate duration hours for the response
+    log_data = WorkingLogRecord.model_validate(log_to_close)
+    log_data.duration_hours = _calculate_duration(log_to_close.date, log_to_close.check_in_time, log_to_close.check_out_time)
+            
+    return log_data
+
+def _calculate_duration(log_date, check_in_time, check_out_time):
+    if not check_in_time or not check_out_time:
+        return None
+    start_dt = datetime.combine(log_date, check_in_time)
+    end_dt = datetime.combine(log_date, check_out_time)
+    if end_dt < start_dt:
+        end_dt += timedelta(days=1)
+    return (end_dt - start_dt).total_seconds() / 3600
+
+@router.get("/work-logs/date/{log_date}", response_model=List[WorkingLogRecord])
+def get_work_logs_by_date(log_date: date, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    try:
+        work_logs = db.query(WorkingLog).filter(WorkingLog.date == log_date).all()
+        results = []
+        for log in work_logs:
+            duration_hours = _calculate_duration(log.date, log.check_in_time, log.check_out_time)
+            try:
+                log_data = WorkingLogRecord.model_validate(log)
+                log_data.duration_hours = duration_hours
+                results.append(log_data)
+            except Exception as validation_error:
+                continue
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/work-logs/{employee_id}", response_model=List[WorkingLogRecord])
+def get_work_logs_for_employee(employee_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    try:
+        work_logs = db.query(WorkingLog).filter(WorkingLog.employee_id == employee_id).order_by(WorkingLog.date.desc(), WorkingLog.check_in_time.desc()).all()
+        
+        results = []
+        for log in work_logs:
+            duration_hours = _calculate_duration(log.date, log.check_in_time, log.check_out_time)
+            try:
+                log_data = WorkingLogRecord.model_validate(log)
+                log_data.duration_hours = duration_hours
+                results.append(log_data)
+            except Exception as validation_error:
+                print(f"Validation error for log {log.id}: {validation_error}")
+                continue # Skip invalid records instead of crashing
+            
+        return results
+    except Exception as e:
+        import traceback
+        print(f"ERROR: Fetching work logs failed for employee {employee_id}: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Internal Server Error fetching work logs: {str(e)}")
+
+@router.put("/work-logs/{log_id}/tasks", response_model=WorkingLogRecord)
+def update_completed_tasks(log_id: int, tasks_update: TasksUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    log = db.query(WorkingLog).filter(WorkingLog.id == log_id).first()
+    if not log:
+        raise HTTPException(status_code=404, detail="Working log not found")
+        
+    log.completed_tasks = tasks_update.completed_tasks
+    db.commit()
+    db.refresh(log)
+    
+    # Needs to match WorkingLogRecord output logic
+    log_data = WorkingLogRecord.model_validate(log)
+    log_data.duration_hours = _calculate_duration(log.date, log.check_in_time, log.check_out_time)
+    
+    return log_data
+
+@router.get("/monthly-report/{employee_id}", response_model=MonthlyReport)
+def get_monthly_report(employee_id: int, year: int, month: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    employee = db.query(Employee).filter(Employee.id == employee_id).first()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    # --- Date and Day Calculations ---
+    _, total_days_in_month = monthrange(year, month)
+    start_of_month = date(year, month, 1)
+    end_of_month = date(year, month, total_days_in_month)
+
+    # Calculate present days based on duration (>= 4 hours)
+    working_logs = db.query(WorkingLog).filter(
+        WorkingLog.employee_id == employee_id,
+        WorkingLog.date >= start_of_month,
+        WorkingLog.date <= end_of_month
+    ).all()
+    
+    daily_hours = {}
+    for log in working_logs:
+        duration = 0
+        if log.check_in_time and log.check_out_time:
+             # Calculate duration
+             start_dt = datetime.combine(log.date, log.check_in_time)
+             end_dt = datetime.combine(log.date, log.check_out_time)
+             if end_dt > start_dt:
+                 duration = (end_dt - start_dt).total_seconds() / 3600
+        
+        d_str = str(log.date)
+        daily_hours[d_str] = daily_hours.get(d_str, 0) + duration
+        
+    # Count days with at least 4 hours of work as "Present" (Half day or Full day)
+    present_days = sum(1 for hours in daily_hours.values() if hours >= 4)
+
+    # --- Leave Calculation for the Month ---
+    approved_leaves_month = db.query(Leave).filter(
+        Leave.employee_id == employee_id,
+        Leave.status == 'approved',
+        Leave.from_date <= end_of_month,
+        Leave.to_date >= start_of_month
+    ).all()
+
+    paid_leaves_taken_month = 0
+    sick_leaves_taken_month = 0
+    for leave in approved_leaves_month:
+        # Calculate overlap with the current month
+        overlap_start = max(leave.from_date, start_of_month)
+        overlap_end = min(leave.to_date, end_of_month)
+        if overlap_end >= overlap_start:
+            leave_days_in_month = (overlap_end - overlap_start).days + 1
+            if leave.leave_type == 'Paid':
+                paid_leaves_taken_month += leave_days_in_month
+            elif leave.leave_type == 'Sick':
+                sick_leaves_taken_month += leave_days_in_month
+
+    # --- Leave Balance Calculation for the Year ---
+    policy_row = db.query(SystemSetting).filter(SystemSetting.key == "leave_policy").first()
+    policy = json.loads(policy_row.value) if policy_row else {
+        "paid_leave_monthly": 4,
+        "paid_leave_yearly": 48,
+        "sick_leave_monthly": 1,
+        "sick_leave_yearly": 12,
+    }
+
+    # Robust handling for missing join_date
+    if employee.join_date:
+        months_of_service = (datetime.now().year - employee.join_date.year) * 12 + datetime.now().month - employee.join_date.month + 1
+    else:
+        # Fallback if join_date is missing
+        months_of_service = 1 # Assume at least 1 month
+    
+    # Calculate accrued leaves based on monthly rate, capped by yearly max
+    accrued_paid = months_of_service * policy.get("paid_leave_monthly", 4)
+    total_paid_leaves_year = min(accrued_paid, policy.get("paid_leave_yearly", 48))
+    
+    accrued_sick = months_of_service * policy.get("sick_leave_monthly", 1)
+    total_sick_leaves_year = min(accrued_sick, policy.get("sick_leave_yearly", 12))
+
+    approved_leaves_year = db.query(Leave).filter(Leave.employee_id == employee_id, Leave.status == 'approved').all()
+    paid_leaves_used_year = sum([(l.to_date - l.from_date).days + 1 for l in approved_leaves_year if l.leave_type == 'Paid'])
+    sick_leaves_used_year = sum([(l.to_date - l.from_date).days + 1 for l in approved_leaves_year if l.leave_type == 'Sick'])
+
+    # --- Final Report ---
+    # Assuming non-working days are not tracked. Absent days are total days minus present and on-leave days.
+    # This is a simplification; a real system would exclude weekends/holidays.
+    absent_days = total_days_in_month - present_days - paid_leaves_taken_month - sick_leaves_taken_month
+    unpaid_leaves = max(0, absent_days)
+
+    # --- Salary Calculation ---
+    base_salary = employee.salary or 0.0
+    if total_days_in_month > 0:
+        per_day_salary = base_salary / total_days_in_month
+        deductions = per_day_salary * unpaid_leaves
+    else:
+        deductions = 0
+    net_salary = base_salary - deductions
+
+
+    return MonthlyReport(
+        month=month, year=year, total_days=total_days_in_month, present_days=present_days,
+        absent_days=unpaid_leaves, paid_leaves_taken=paid_leaves_taken_month, sick_leaves_taken=sick_leaves_taken_month,
+        unpaid_leaves=unpaid_leaves, total_paid_leaves_year=total_paid_leaves_year, total_sick_leaves_year=total_sick_leaves_year,
+        paid_leave_balance=total_paid_leaves_year - paid_leaves_used_year,
+        sick_leave_balance=total_sick_leaves_year - sick_leaves_used_year,
+        base_salary=base_salary, deductions=deductions, net_salary=net_salary
+    )
+
+from app.utils.branch_scope import get_branch_id
+
+@router.get("/utilization/aggregate", response_model=List[UtilizationRecord])
+def get_aggregate_utilization(db: Session = Depends(get_db), current_user: Any = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+    """Calculates aggregate working hours per month for the last 12 months for all staff."""
+    now = datetime.now()
+    results = []
+    for i in range(11, -1, -1):
+        # Calculate month and year correctly
+        m = (now.month - i - 1) % 12 + 1
+        y = now.year + (now.month - i - 1) // 12
+        
+        start_date = date(y, m, 1)
+        _, last_day = monthrange(y, m)
+        end_date = date(y, m, last_day)
+        
+        query = db.query(WorkingLog).filter(
+            WorkingLog.date >= start_date,
+            WorkingLog.date <= end_date
+        )
+        if branch_id is not None:
+            query = query.filter(WorkingLog.branch_id == branch_id)
+            
+        logs = query.all()
+        
+        total_month_hours = 0
+        for log in logs:
+            if log.check_in_time and log.check_out_time:
+                # Direct subtraction of time objects isn't supported, combine with dummy date
+                start_dt = datetime.combine(date.today(), log.check_in_time)
+                end_dt = datetime.combine(date.today(), log.check_out_time)
+                if end_dt > start_dt:
+                    total_month_hours += (end_dt - start_dt).total_seconds() / 3600
+        
+        results.append({
+            "month": start_date.strftime("%b"),
+            "hours": round(total_month_hours, 1)
+        })
+    return results
+
+@router.get("/holidays", response_model=List[HolidayItem])
+def get_holidays(db: Session = Depends(get_db)):
+    """Retrieves the institutional calendar (holidays) from system settings."""
+    setting = db.query(SystemSetting).filter(SystemSetting.key == "institutional_calendar").first()
+    if not setting:
+        # Default holidays if none set
+        defaults = [
+            {"date": "DEC 25", "name": "Christmas"},
+            {"date": "JAN 01", "name": "New Year"},
+            {"date": "JAN 26", "name": "Republic Day"}
+        ]
+        return defaults
+    try:
+        data = json.loads(setting.value)
+        if isinstance(data, list):
+            # Filtering to ensure each item has the required fields
+            return [item for item in data if isinstance(item, dict) and "date" in item and "name" in item]
+        return []
+    except:
+        return []
+
+@router.post("/holidays")
+def update_holidays(holidays: List[HolidayItem], db: Session = Depends(get_db), current_user: Any = Depends(get_current_user)):
+    """Updates the institutional calendar (holidays) in system settings."""
+    setting = db.query(SystemSetting).filter(SystemSetting.key == "institutional_calendar").first()
+    holidays_data = [h.model_dump() for h in holidays]
+    if not setting:
+        setting = SystemSetting(key="institutional_calendar", value=json.dumps(holidays_data), description="Institutional Calendar Holidays")
+        db.add(setting)
+    else:
+        setting.value = json.dumps(holidays_data)
+    db.commit()
+    return {"message": "Holidays updated successfully"}
+
+@router.get("/status/today", response_model=TodayStatus)
+def get_today_status(db: Session = Depends(get_db), current_user: Any = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+    """Returns the count of employees on leave and active today."""
+    today = date.today()
+    
+    # Employees on leave today
+    query_leave = db.query(func.count(Leave.id)).filter(
+        Leave.status == 'approved',
+        Leave.from_date <= today,
+        Leave.to_date >= today
+    )
+    if branch_id is not None:
+        query_leave = query_leave.filter(Leave.branch_id == branch_id)
+    on_leave_count = query_leave.scalar() or 0
+    
+    # Active today (have a clock-in today)
+    query_active = db.query(func.count(func.distinct(WorkingLog.employee_id))).filter(
+        WorkingLog.date == today
+    )
+    if branch_id is not None:
+        query_active = query_active.filter(WorkingLog.branch_id == branch_id)
+    active_count = query_active.scalar() or 0
+    
+    # Currently online (clocked in and not clocked out)
+    query_online = db.query(func.count(func.distinct(WorkingLog.employee_id))).filter(
+        WorkingLog.date == today,
+        WorkingLog.check_out_time.is_(None)
+    )
+    if branch_id is not None:
+        query_online = query_online.filter(WorkingLog.branch_id == branch_id)
+    online_count = query_online.scalar() or 0
+    
+    return {
+        "on_leave": on_leave_count,
+        "active_today": active_count,
+        "currently_online": online_count
+    }
+
+@router.get("/{employee_id}", response_model=List[AttendanceRecord])
+def get_attendance_for_employee(employee_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return db.query(Attendance).filter(Attendance.employee_id == employee_id).order_by(Attendance.date.desc()).all()

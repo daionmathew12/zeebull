@@ -21,6 +21,7 @@ import PayrollManagement from "../components/PayrollManagement";
 import LeavePolicyManagement from "../components/LeavePolicyManagement";
 import RoleManagementTab from "../components/RoleManagementTab";
 import DailyTaskReport from "../components/DailyTaskReport";
+import { usePermissions } from "../hooks/usePermissions";
 
 const EmployeeOverview = () => {
   const [date, setDate] = useState(new Date());
@@ -192,7 +193,7 @@ const EmployeeOverview = () => {
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Payroll Est.</p>
             <div className="flex items-baseline gap-2">
               <span className="text-2xl font-black text-gray-800">
-                {formatCurrency(employees.reduce((acc, emp) => acc + (emp?.salary || 0), 0))}
+                {Array.isArray(employees) ? formatCurrency(employees.reduce((acc, emp) => acc + (emp?.salary || 0), 0)) : formatCurrency(0)}
               </span>
               <span className="text-[10px] text-gray-400">Monthly</span>
             </div>
@@ -458,7 +459,8 @@ const UserHistory = () => {
       const response = await api.get("/reports/user-history", { params });
       setHistory(response.data);
     } catch (err) {
-      setError(err.response?.data?.detail || "An error occurred.");
+      const detail = err.response?.data?.detail;
+      setError(typeof detail === 'string' ? detail : (detail ? JSON.stringify(detail) : "An error occurred."));
     } finally {
       setLoading(false);
     }
@@ -1989,7 +1991,37 @@ const HolidayManagement = () => {
 
 
 const EmployeeManagement = () => {
-  const [activeTab, setActiveTab] = useState('overview');
+  const { hasPermission, isAdmin } = usePermissions();
+
+  const generalTabs = [
+    { id: 'overview', label: 'Overview', icon: <TrendingUp size={18} />, permission: 'employee_management:view' },
+    { id: 'manage-employees', label: 'Directory', icon: <Users size={18} />, permission: 'employee_management:view' },
+    { id: 'report', label: 'Activity Tracking', icon: <Search size={18} />, permission: 'reports_global:view' },
+  ].filter(tab => hasPermission(tab.permission) || isAdmin);
+
+  const operationsTabs = [
+    { id: 'attendance', label: 'Attendance', icon: <Clock size={18} />, permission: 'employee_attendance:view' },
+    { id: 'daily-tasks', label: 'Daily Task Report', icon: <CheckSquare size={18} />, permission: 'employee_management:view' },
+    { id: 'leave', label: 'Leave Mgt', icon: <UserCheck size={18} />, permission: 'employee_leave:view' },
+    { id: 'payroll', label: 'Payroll', icon: <DollarSign size={18} />, permission: 'employee_management:view' }, // Payroll usually under employee_management or special perm
+  ].filter(tab => hasPermission(tab.permission) || isAdmin);
+
+  const configTabs = [
+    { id: 'roles', label: 'Permissions', icon: <ShieldCheck size={18} />, permission: 'roles:view' },
+    { id: 'leave-policy', label: 'Policy', icon: <Settings size={18} />, permission: 'employee_management:view' },
+    { id: 'holidays', label: 'Holidays', icon: <CalendarIcon size={18} />, permission: 'employee_attendance:view' },
+    { id: 'monthly-report', label: 'Reports', icon: <CalendarIcon size={18} />, permission: 'reports_global:view' },
+    { id: 'status-overview', label: 'Org Status', icon: <Briefcase size={18} />, permission: 'employee_management:view' },
+  ].filter(tab => hasPermission(tab.permission) || isAdmin);
+
+  const allVisibleTabs = [...generalTabs, ...operationsTabs, ...configTabs];
+  const [activeTab, setActiveTab] = useState(() => allVisibleTabs[0]?.id || 'overview');
+
+  useEffect(() => {
+    if (allVisibleTabs.length > 0 && !allVisibleTabs.find(t => t.id === activeTab)) {
+      setActiveTab(allVisibleTabs[0].id);
+    }
+  }, [allVisibleTabs, activeTab]);
 
   const renderContent = () => {
     switch (activeTab) {
@@ -2030,29 +2062,32 @@ const EmployeeManagement = () => {
         </div>
 
         <div className="flex flex-wrap gap-6 items-start">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1.5 flex flex-wrap gap-1">
-            <div className="px-3 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider w-full mb-1">General</div>
-            <TabButton id="overview" label="Overview" icon={<TrendingUp size={18} />} />
-            <TabButton id="manage-employees" label="Directory" icon={<Users size={18} />} />
-            <TabButton id="report" label="Activity Tracking" icon={<Search size={18} />} />
-          </div>
+          {generalTabs.length > 0 && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1.5 flex flex-wrap gap-1">
+              <div className="px-3 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider w-full mb-1">General</div>
+              {generalTabs.map(tab => (
+                <TabButton key={tab.id} id={tab.id} label={tab.label} icon={tab.icon} />
+              ))}
+            </div>
+          )}
 
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1.5 flex flex-wrap gap-1">
-            <div className="px-3 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider w-full mb-1">Operations</div>
-            <TabButton id="attendance" label="Attendance" icon={<Clock size={18} />} />
-            <TabButton id="daily-tasks" label="Daily Task Report" icon={<CheckSquare size={18} />} />
-            <TabButton id="leave" label="Leave Mgt" icon={<UserCheck size={18} />} />
-            <TabButton id="payroll" label="Payroll" icon={<DollarSign size={18} />} />
-          </div>
+          {operationsTabs.length > 0 && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1.5 flex flex-wrap gap-1">
+              <div className="px-3 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider w-full mb-1">Operations</div>
+              {operationsTabs.map(tab => (
+                <TabButton key={tab.id} id={tab.id} label={tab.label} icon={tab.icon} />
+              ))}
+            </div>
+          )}
 
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1.5 flex flex-wrap gap-1">
-            <div className="px-3 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider w-full mb-1">Configuration</div>
-            <TabButton id="roles" label="Permissions" icon={<ShieldCheck size={18} />} />
-            <TabButton id="leave-policy" label="Policy" icon={<Settings size={18} />} />
-            <TabButton id="holidays" label="Holidays" icon={<CalendarIcon size={18} />} />
-            <TabButton id="monthly-report" label="Reports" icon={<CalendarIcon size={18} />} />
-            <TabButton id="status-overview" label="Org Status" icon={<Briefcase size={18} />} />
-          </div>
+          {configTabs.length > 0 && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1.5 flex flex-wrap gap-1">
+              <div className="px-3 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider w-full mb-1">Configuration</div>
+              {configTabs.map(tab => (
+                <TabButton key={tab.id} id={tab.id} label={tab.label} icon={tab.icon} />
+              ))}
+            </div>
+          )}
         </div>
 
         <div>

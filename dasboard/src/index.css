@@ -105,3 +105,24 @@ input[type="date"]:focus:hover {
 .animate-fadeIn {
   animation: fadeIn 0.3s ease-out forwards;
 }
+
+/* Scroll Utilities */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scroll-smooth {
+  scroll-behavior: smooth;
+}
+
+/* Horizontal Scroll Snap for nicer sliders */
+.scroll-snap-x {
+  scroll-snap-type: x mandatory;
+}
+.scroll-snap-align-start {
+  scroll-snap-align: start;
+}

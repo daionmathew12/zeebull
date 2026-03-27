@@ -1,15 +1,20 @@
 from fastapi import APIRouter, UploadFile, File, Form, Depends
+import os
+# Absolute project root path (ResortApp/)
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_UPLOAD_ROOT = os.path.join(_BASE_DIR, "uploads")
+import os, shutil, uuid
 from sqlalchemy.orm import Session
 
 from app.curd import food_item
 from app.schemas.food_item import FoodItemCreate, FoodItemUpdate, FoodItemOut
 from app.models.user import User
-import os, shutil, uuid
 from app.utils.auth import get_db, get_current_user
+from app.utils.branch_scope import get_branch_id
 from typing import List
 
 router = APIRouter(prefix="/food-items", tags=["FoodItem"])
-UPLOAD_DIR = "uploads/food_items"
+UPLOAD_DIR = os.path.join(_UPLOAD_ROOT, "food_items")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
@@ -28,7 +33,8 @@ def _create_item_impl(
     room_service_price: float,
     extra_inventory_items: str,
     db: Session,
-    current_user: User
+    current_user: User,
+    branch_id: int
 ):
     """Helper function for create_item"""
     image_paths = []
@@ -40,8 +46,7 @@ def _create_item_impl(
             with open(path, "wb") as buffer:
                 shutil.copyfileobj(image.file, buffer)
             # Store with leading slash for proper URL construction
-            web_path = f"/{UPLOAD_DIR}/{filename}".replace("\\", "/")
-            image_paths.append(web_path)
+            image_paths.append(f"/uploads/food_items/{filename}")
 
     item_data = FoodItemCreate(
         name=name, description=description, price=price,
@@ -53,7 +58,7 @@ def _create_item_impl(
         room_service_price=room_service_price,
         extra_inventory_items=extra_inventory_items
     )
-    return food_item.create_food_item(db, item_data, image_paths)
+    return food_item.create_food_item(db, item_data, image_paths, branch_id=branch_id)
 
 @router.post("", response_model=FoodItemOut)
 async def create_item(
@@ -70,7 +75,8 @@ async def create_item(
     room_service_price: float = Form(0.0),
     extra_inventory_items: str = Form(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     # Convert string booleans to actual booleans
     def str_to_bool(val):
@@ -84,7 +90,7 @@ async def create_item(
     return _create_item_impl(
         name, description, price, available, category_id, images, 
         always_available, available_from_time, available_to_time, 
-        time_wise_prices, room_service_price, extra_inventory_items, db, current_user
+        time_wise_prices, room_service_price, extra_inventory_items, db, current_user, branch_id
     )
 
 @router.post("/", response_model=FoodItemOut)  # Handle trailing slash
@@ -102,7 +108,8 @@ async def create_item_slash(
     room_service_price: float = Form(0.0),
     extra_inventory_items: str = Form(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     # Convert string booleans to actual booleans
     def str_to_bool(val):
@@ -116,13 +123,13 @@ async def create_item_slash(
     return _create_item_impl(
         name, description, price, available, category_id, images, 
         always_available, available_from_time, available_to_time, 
-        time_wise_prices, room_service_price, extra_inventory_items, db, current_user
+        time_wise_prices, room_service_price, extra_inventory_items, db, current_user, branch_id
     )
 
-def _list_items_impl(db: Session, skip: int = 0, limit: int = 20):
+def _list_items_impl(db: Session, skip: int = 0, limit: int = 20, branch_id: int = None):
     """Helper function for list_items"""
     try:
-        return food_item.get_all_food_items(db, skip=skip, limit=limit)
+        return food_item.get_all_food_items(db, skip=skip, limit=limit, branch_id=branch_id)
     except Exception as e:
         import traceback
         error_detail = f"Failed to fetch food items: {str(e)}\n{traceback.format_exc()}"
@@ -133,20 +140,20 @@ def _list_items_impl(db: Session, skip: int = 0, limit: int = 20):
         return []
 
 @router.get("", response_model=List[FoodItemOut])
-def list_items(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20):
-    return _list_items_impl(db, skip, limit)
+def list_items(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id), skip: int = 0, limit: int = 20):
+    return _list_items_impl(db, skip, limit, branch_id=branch_id)
 
 @router.get("/", response_model=List[FoodItemOut])  # Handle trailing slash
-def list_items_slash(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20):
-    return _list_items_impl(db, skip, limit)
+def list_items_slash(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id), skip: int = 0, limit: int = 20):
+    return _list_items_impl(db, skip, limit, branch_id=branch_id)
 
 @router.delete("/{item_id}")
-def delete_item(item_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return food_item.delete_food_item(db, item_id)
+def delete_item(item_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+    return food_item.delete_food_item(db, item_id, branch_id=branch_id)
 
 @router.patch("/{item_id}/toggle-availability")
-def toggle_availability(item_id: int, available: bool, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return food_item.update_food_item_availability(db, item_id, available)
+def toggle_availability(item_id: int, available: bool, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+    return food_item.update_food_item_availability(db, item_id, available, branch_id=branch_id)
 
 def _update_item_impl(
     item_id: int,
@@ -163,7 +170,8 @@ def _update_item_impl(
     room_service_price: float,
     extra_inventory_items: str,
     db: Session,
-    current_user: User
+    current_user: User,
+    branch_id: int
 ):
     """Helper function for update_item"""
     image_paths = None
@@ -180,8 +188,7 @@ def _update_item_impl(
                 with open(path, "wb") as buffer:
                     shutil.copyfileobj(image.file, buffer)
                 # Store with leading slash for proper URL construction
-                web_path = f"/{UPLOAD_DIR}/{filename}".replace("\\", "/")
-                image_paths.append(web_path)
+                image_paths.append(f"/uploads/food_items/{filename}")
     
     item_update = FoodItemUpdate(
         name=name, description=description, price=price,
@@ -193,7 +200,7 @@ def _update_item_impl(
         room_service_price=room_service_price,
         extra_inventory_items=extra_inventory_items
     )
-    return food_item.update_food_item(db, item_id, item_update, image_paths)
+    return food_item.update_food_item(db, item_id, item_update, image_paths, branch_id=branch_id)
 
 @router.put("/{item_id}", response_model=FoodItemOut)
 async def update_item(
@@ -211,7 +218,8 @@ async def update_item(
     room_service_price: float = Form(0.0),
     extra_inventory_items: str = Form(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     # Convert string booleans to actual booleans (frontend sends "true"/"false" as strings)
     def str_to_bool(val):
@@ -226,7 +234,7 @@ async def update_item(
     return _update_item_impl(
         item_id, name, description, price, available, category_id, images_list,
         always_available, available_from_time, available_to_time, 
-        time_wise_prices, room_service_price, extra_inventory_items, db, current_user
+        time_wise_prices, room_service_price, extra_inventory_items, db, current_user, branch_id
     )
 
 @router.put("/{item_id}/", response_model=FoodItemOut)  # Handle trailing slash
@@ -245,7 +253,8 @@ async def update_item_slash(
     room_service_price: float = Form(0.0),
     extra_inventory_items: str = Form(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     # Convert string booleans to actual booleans (frontend sends "true"/"false" as strings)
     def str_to_bool(val):
@@ -260,5 +269,5 @@ async def update_item_slash(
     return _update_item_impl(
         item_id, name, description, price, available, category_id, images_list,
         always_available, available_from_time, available_to_time, 
-        time_wise_prices, room_service_price, extra_inventory_items, db, current_user
+        time_wise_prices, room_service_price, extra_inventory_items, db, current_user, branch_id
     )

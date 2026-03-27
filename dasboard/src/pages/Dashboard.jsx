@@ -683,7 +683,7 @@ const Dashboard = () => {
       <div className="relative max-w-[1400px] mx-auto px-2 sm:px-4 py-4 sm:py-6 space-y-4 sm:space-y-6">
         <header className="flex items-end justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-800">Orchid Resort Admin Dashboard</h1>
+            <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-800">Zeebull Resort Admin Dashboard</h1>
             <p className="text-sm sm:text-base text-gray-500">Overview of bookings, rooms, revenue, expenses & operations</p>
           </div>
           <div className="text-xs sm:text-sm text-gray-500">
@@ -729,10 +729,10 @@ const Dashboard = () => {
         <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2 sm:gap-4">
           <KPICard label="Bookings (Active)" value={`${bookingCounts.active}`} sub={`Cancelled: ${bookingCounts.cancelled}`} />
           <KPICard label="Package Bookings" value={packageBookingsMetrics.total} sub={fmtCurrency(packageBookingsMetrics.totalRevenue)} />
-          <KPICard label="Total Packages" value={packages.length} sub="Available" />
-          <KPICard label="Rooms" value={`${roomCounts.occupied}/${roomCounts.total}`} sub="Occupied / Total" />
-          <KPICard label="Available Rooms" value={roomCounts.available} sub="Ready" />
-          <KPICard label="Maintenance Rooms" value={roomCounts.maintenance} sub="Under repair" />
+          <KPICard label="Total Packages" value={summary?.package_bookings ?? packages.length} sub="Booked / Available" />
+          <KPICard label="Rooms" value={`${summary?.booked_rooms ?? roomCounts.occupied}/${summary?.total_rooms ?? roomCounts.total}`} sub="Occupied / Total" />
+          <KPICard label="Available Rooms" value={summary?.available_rooms ?? roomCounts.available} sub="Ready" />
+          <KPICard label="Maintenance Rooms" value={summary?.maintenance_rooms ?? roomCounts.maintenance} sub="Under repair" />
         </section>
 
         {/* KPI Cards - Row 3: Food & Services */}
@@ -740,18 +740,18 @@ const Dashboard = () => {
           <KPICard label="Food Orders" value={foodOrdersMetrics.total} sub={`Completed: ${foodOrdersMetrics.completed}`} />
           <KPICard label="Food Revenue" value={fmtCurrency(foodOrdersMetrics.totalRevenue)} sub={`Avg: ${fmtCurrency(foodOrdersMetrics.averageOrderValue)}`} />
           <KPICard label="Food Items" value={foodItems.length} sub="Menu items" />
-          <KPICard label="Services" value={servicesMetrics.totalServices} sub="Available" />
-          <KPICard label="Assigned Services" value={servicesMetrics.totalAssigned} sub={`Completed: ${servicesMetrics.completed}`} />
-          <KPICard label="Service Revenue" value={fmtCurrency(servicesMetrics.totalRevenue)} sub={`Avg: ${fmtCurrency(servicesMetrics.averageServiceValue)}`} />
+          <KPICard label="Services" value={summary?.services_count ?? servicesMetrics.totalServices} sub="Available" />
+          <KPICard label="Assigned Services" value={summary?.assigned_services ?? servicesMetrics.totalAssigned} sub={`Completed: ${summary?.completed_services ?? servicesMetrics.completed}`} />
+          <KPICard label="Service Revenue" value={fmtCurrency(summary?.total_service_revenue ?? servicesMetrics.totalRevenue)} sub={`Avg: ${fmtCurrency(summary?.total_service_revenue / (summary?.assigned_services || 1))}`} />
         </section>
 
         {/* KPI Cards - Row 4: Inventory & Employees */}
         <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2 sm:gap-4">
           <KPICard label="Inventory Items" value={summary?.inventory_items ?? inventoryMetrics.totalItems} sub={`Categories: ${summary?.inventory_categories ?? inventoryMetrics.categories}`} />
           <KPICard label="Inventory Value" value={fmtCurrency(summary?.total_inventory_value ?? inventoryMetrics.totalValue)} sub="Total stock value" />
-          <KPICard label="Sellable Items" value={summary?.sellable_items_count ?? inventoryMetrics.sellableItems} sub={fmtCurrency(inventoryMetrics.totalSellingValue)} />
-          <KPICard label="Low Stock Items" value={summary?.low_stock_items_count ?? inventoryMetrics.lowStock} sub="Needs attention" />
-          <KPICard label="Out of Stock" value={inventoryMetrics.outOfStock} sub="Critical" />
+          <KPICard label="Sellable Items" value={summary?.sellable_items ?? inventoryMetrics.sellableItems} sub={fmtCurrency(inventoryMetrics.totalSellingValue)} />
+          <KPICard label="Low Stock Items" value={summary?.low_stock_items ?? inventoryMetrics.lowStock} sub="Needs attention" />
+          <KPICard label="Out of Stock" value={summary?.out_of_stock_items ?? inventoryMetrics.outOfStock} sub="Critical" />
           <KPICard label="Employees" value={summary?.active_employees ?? employeeMetrics.total} sub={`Active: ${employeeMetrics.active}`} />
         </section>
 

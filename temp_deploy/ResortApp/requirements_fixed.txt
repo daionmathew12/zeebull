@@ -1,0 +1,4 @@
+bcrypt==3.2.2
+cffi==2.0.0
+passlib==1.7.4
+pycparser==2.23

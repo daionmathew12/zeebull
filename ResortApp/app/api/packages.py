@@ -1,12 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from sqlalchemy.orm import Session, joinedload
-from typing import List, Union
 import os
+# Absolute project root path (ResortApp/)
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_UPLOAD_ROOT = os.path.join(_BASE_DIR, "uploads")
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_, and_, func
+from typing import List, Union, Optional
 from app.models.user import User
 from app.models.room import Room
 from app.models.Package import Package, PackageBooking, PackageBookingRoom
 from app.utils.auth import get_db, get_current_user
-from app.utils.booking_id import parse_display_id
+from app.utils.branch_scope import get_branch_id
+from app.utils.booking_id import parse_display_id, format_display_id
 from app.schemas.packages import PackageBookingCreate, PackageOut, PackageBookingOut
 from fastapi.responses import FileResponse
 from app.curd import packages as crud_package
@@ -15,11 +20,12 @@ from app.schemas.foodorder import FoodOrderCreate, FoodOrderItemCreate
 from app.utils.employee_helpers import get_fallback_employee_id
 import shutil
 import uuid
+import json
 
 router = APIRouter(prefix="/packages", tags=["Packages"])
 
-UPLOAD_DIR = "uploads/packages"
-CHECKIN_UPLOAD_DIR = "uploads/checkin_proofs"
+UPLOAD_DIR = os.path.join(_UPLOAD_ROOT, "packages")
+CHECKIN_UPLOAD_DIR = os.path.join(_UPLOAD_ROOT, "checkin_proofs")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(CHECKIN_UPLOAD_DIR, exist_ok=True)
 
@@ -42,7 +48,8 @@ async def create_package_api(
     complimentary: str = Form(None),
     images: List[UploadFile] = File([]),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     try:
         # Validate booking_type
@@ -78,8 +85,7 @@ async def create_package_api(
                         shutil.copyfileobj(img.file, buffer)
                 
                 # Store with leading slash for proper URL construction
-                normalized_path = file_path.replace('\\', '/')
-                image_urls.append(f"/{normalized_path}")
+                image_urls.append(f"/uploads/packages/{filename}")
         except Exception as img_error:
             import traceback
             error_detail = f"Failed to save package images: {str(img_error)}\n{traceback.format_exc()}"
@@ -89,7 +95,7 @@ async def create_package_api(
             raise HTTPException(status_code=500, detail=f"Failed to upload images: {str(img_error)}")
 
         try:
-            return crud_package.create_package(db, title, description, price, image_urls, booking_type, room_types, theme, default_adults, default_children, max_stay_days, food_included, food_timing, complimentary)
+            return crud_package.create_package(db, title, description, price, image_urls, booking_type, room_types, theme, default_adults, default_children, max_stay_days, food_included, food_timing, complimentary, branch_id=branch_id)
         except Exception as db_error:
             import traceback
             error_detail = f"Failed to create package in database: {str(db_error)}\n{traceback.format_exc()}"
@@ -134,7 +140,8 @@ async def create_package_api_slash(
     complimentary: str = Form(None),
     images: List[UploadFile] = File([]),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """Handle POST /packages/ with trailing slash"""
     try:
@@ -171,8 +178,7 @@ async def create_package_api_slash(
                         shutil.copyfileobj(img.file, buffer)
                 
                 # Store with leading slash for proper URL construction
-                normalized_path = file_path.replace('\\', '/')
-                image_urls.append(f"/{normalized_path}")
+                image_urls.append(f"/uploads/packages/{filename}")
         except Exception as img_error:
             import traceback
             error_detail = f"Failed to save package images: {str(img_error)}\n{traceback.format_exc()}"
@@ -182,7 +188,7 @@ async def create_package_api_slash(
             raise HTTPException(status_code=500, detail=f"Failed to upload images: {str(img_error)}")
 
         try:
-            return crud_package.create_package(db, title, description, price, image_urls, booking_type, room_types, theme, default_adults, default_children, max_stay_days, food_included, food_timing, complimentary)
+            return crud_package.create_package(db, title, description, price, image_urls, booking_type, room_types, theme, default_adults, default_children, max_stay_days, food_included, food_timing, complimentary, branch_id=branch_id)
         except Exception as db_error:
             import traceback
             error_detail = f"Failed to create package in database: {str(db_error)}\n{traceback.format_exc()}"
@@ -227,6 +233,7 @@ async def update_package_api(
     food_timing: str = Form(None),
     complimentary: str = Form(None),
     images: List[UploadFile] = File([]),
+    existing_images: str = Form(None), # JSON list of image URLs to keep
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -261,7 +268,27 @@ async def update_package_api(
     package.food_included = food_included
     package.food_timing = food_timing
     
-    # Add new images if provided
+    # --- IMAGE HANDLING ---
+    from app.models.Package import PackageImage
+    
+    # 1. Handle selective deletion if existing_images is provided
+    if existing_images is not None:
+        try:
+            keep_urls = json.loads(existing_images)
+            # Find images to delete
+            for img_record in package.images:
+                if img_record.image_url not in keep_urls:
+                    # Delete file from disk
+                    path = img_record.image_url.lstrip("/")
+                    if os.path.exists(path):
+                        try: os.remove(path)
+                        except: pass
+                    # Delete record from DB
+                    db.delete(img_record)
+        except Exception as e:
+            print(f"Error parsing existing_images in package update: {e}")
+
+    # 2. Add new images if provided
     if images:
         image_urls = []
         for img in images:
@@ -271,14 +298,12 @@ async def update_package_api(
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(img.file, buffer)
             # Store with leading slash for proper URL construction
-            normalized_path = file_path.replace('\\', '/')
-            image_urls.append(f"/{normalized_path}")
+            image_urls.append(f"/uploads/packages/{filename}")
         
         # Add new images to existing ones
         for url in image_urls:
-            from app.models.Package import PackageImage
-            img = PackageImage(package_id=package.id, image_url=url)
-            db.add(img)
+            img_rec = PackageImage(package_id=package.id, image_url=url)
+            db.add(img_rec)
     
     db.commit()
     db.refresh(package)
@@ -297,9 +322,10 @@ def delete_package_api(package_id: int, db: Session = Depends(get_db), current_u
 def book_package_api(
     booking: PackageBookingCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
-    result = crud_package.book_package(db, booking)
+    result = crud_package.book_package(db, booking, branch_id=branch_id)
     
     # Calculate booking charges and send confirmation email if email address is provided
     if booking.guest_email and result:
@@ -329,8 +355,8 @@ def book_package_api(
                         'price': pbr.room.price or 0
                     })
             
-            # Format booking ID (PK-000001)
-            formatted_booking_id = f"PK-{str(result.id).zfill(6)}"
+            # Format booking ID (PK-1-000001)
+            formatted_booking_id = format_display_id(result.id, branch_id=branch_id, is_package=True)
             
             email_html = create_booking_confirmation_email(
                 guest_name=result.guest_name,
@@ -368,7 +394,10 @@ def book_package_guest_api(
     Public endpoint for guests to book a package without authentication.
     """
     try:
-        result = crud_package.book_package(db, booking)
+        # Prioritize branch_id from the JSON body
+        branch_id = booking.branch_id
+        
+        result = crud_package.book_package(db, booking, branch_id=branch_id)
         
         # Calculate booking charges and send confirmation email if email address is provided
         if result:
@@ -407,8 +436,9 @@ def book_package_guest_api(
                                 'price': pbr.room.price or 0
                             })
                     
-                    # Format booking ID (PK-000001)
-                    formatted_booking_id = f"PK-{str(result.id).zfill(6)}"
+                    # Format booking ID (PK-1-000001)
+                    # For guest booking without explicit branch_id in dependencies, try to use result.branch_id
+                    formatted_booking_id = format_display_id(result.id, branch_id=getattr(result, 'branch_id', 1), is_package=True)
                     
                     email_html = create_booking_confirmation_email(
                         guest_name=result.guest_name,
@@ -454,7 +484,7 @@ def book_package_guest_api(
         )
 
 @router.get("/bookingsall", response_model=List[PackageBookingOut])
-def get_bookings(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20):
+def get_bookings(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20, branch_id: Optional[int] = Depends(get_branch_id)):
     try:
         # Optimized for low network - reduced to 50
         if limit > 50:
@@ -465,10 +495,16 @@ def get_bookings(db: Session = Depends(get_db), current_user: User = Depends(get
         # Simplified query - removed nested eager loading to prevent hangs
         # It's possible for a package to be deleted, leaving an orphaned booking.
         # We must filter to only include bookings that still have a valid package_id.
-        result = db.query(PackageBooking).options(
+        query = db.query(PackageBooking).options(
             joinedload(PackageBooking.package),
+            joinedload(PackageBooking.checkout),
             joinedload(PackageBooking.rooms).joinedload(PackageBookingRoom.room)
-        ).filter(PackageBooking.package_id.is_not(None)).order_by(PackageBooking.id.desc()).offset(skip).limit(limit).all()
+        ).filter(PackageBooking.package_id.is_not(None))
+        
+        if branch_id is not None:
+            query = query.filter(PackageBooking.branch_id == branch_id)
+            
+        result = query.order_by(PackageBooking.id.desc()).offset(skip).limit(limit).all()
         
         # Fallback: Calculate total amount if 0 (for legacy data)
         for booking in result:
@@ -522,7 +558,8 @@ def get_bookings(db: Session = Depends(get_db), current_user: User = Depends(get
         return []
 
 
-def _list_packages_impl(db: Session, skip: int = 0, limit: int = 20, status: str = None):
+
+def _list_packages_impl(db: Session, skip: int = 0, limit: int = 20, status: str = None, branch_id: int = None):
     """Helper function for list_packages"""
     try:
         # Optimized for low network - reduced to 50
@@ -535,6 +572,10 @@ def _list_packages_impl(db: Session, skip: int = 0, limit: int = 20, status: str
         # Eager-load images relationship to include them in the response
         query = db.query(Package).options(joinedload(Package.images))
         
+        if branch_id is not None:
+            # Show branch-specific packages PLUS global packages (NULL branch_id)
+            query = query.filter(or_(Package.branch_id == branch_id, Package.branch_id == None))
+            
         if status:
             query = query.filter(Package.status == status)
             
@@ -551,12 +592,12 @@ def _list_packages_impl(db: Session, skip: int = 0, limit: int = 20, status: str
         return []
 
 @router.get("", response_model=List[PackageOut])
-def list_packages(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20, status: str = None):
-    return _list_packages_impl(db, skip, limit, status)
+def list_packages(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20, status: str = None, branch_id: int = Depends(get_branch_id)):
+    return _list_packages_impl(db, skip, limit, status, branch_id)
 
 @router.get("/", response_model=List[PackageOut])  # Handle trailing slash
-def list_packages_slash(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20, status: str = None):
-    return _list_packages_impl(db, skip, limit, status)
+def list_packages_slash(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20, status: str = None, branch_id: int = Depends(get_branch_id)):
+    return _list_packages_impl(db, skip, limit, status, branch_id)
 
 
 @router.get("/{package_id}", response_model=PackageOut)
@@ -570,6 +611,7 @@ def get_package_bookings_history(package_id: int, db: Session = Depends(get_db),
     bookings = db.query(PackageBooking).options(
         joinedload(PackageBooking.rooms).joinedload(PackageBookingRoom.room),
         joinedload(PackageBooking.user),
+        joinedload(PackageBooking.checkout),
         joinedload(PackageBooking.package).joinedload(Package.images)
     ).filter(PackageBooking.package_id == package_id).order_by(desc(PackageBooking.created_at)).all()
     return bookings
@@ -801,212 +843,13 @@ def check_in_package_booking(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    try:
-        with open("debug_pkg_checkin.txt", "a") as f:
-            f.write(f"\n--- NEW REQUEST {datetime.now()} ---\n")
-            f.write(f"Booking ID: {booking_id}\n")
-            f.write(f"Amenity Allocation Raw: {amenityAllocation}\n")
-    except Exception as e:
-        print(f"Log error: {e}")
-
     # Parse display ID (PK-000001) or accept numeric ID
     numeric_id, booking_type = parse_display_id(str(booking_id))
     if numeric_id is None:
         raise HTTPException(status_code=400, detail=f"Invalid booking ID format: {booking_id}")
-    if booking_type and booking_type != "package":
-        raise HTTPException(status_code=400, detail=f"Invalid booking type. Expected package booking, got: {booking_id}")
     booking_id = numeric_id
     
-    booking = (
-        db.query(PackageBooking)
-        .options(joinedload(PackageBooking.rooms).joinedload(PackageBookingRoom.room))
-        .filter(PackageBooking.id == booking_id).first()
-    )
-    if not booking:
-        raise HTTPException(status_code=404, detail="Package booking not found")
-
-    # Normalize status to be robust against case/whitespace/underscore differences
-    normalized_status = (booking.status or "").strip().lower().replace("_", "-")
-    # Allow check-in when:
-    #  - status is 'booked' (normal case), OR
-    #  - status is 'checked-out' but no check-in images were ever saved (recover-from-state issue)
-    # This prevents lock-out when UI shows BOOKED but DB flipped due to earlier process.
-    recoverable_checked_out = (
-        normalized_status == "checked-out" and not booking.id_card_image_url and not booking.guest_photo_url
-    )
-    if normalized_status != "booked" and not recoverable_checked_out:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Package booking {booking_id} cannot be checked in. Expected status 'booked', found '{booking.status}'."
-        )
-
-    # PROCESS AMENITY ALLOCATION AND SCHEDULED FOOD ORDERS
-    if amenityAllocation:
-        print(f"[DEBUG] Received amenityAllocation: {amenityAllocation}")
-
-        print(f"DEBUG: Received amenityAllocation: {amenityAllocation}")
-        try:
-            import json
-            from app.models.foodorder import FoodOrder, FoodOrderItem
-            from app.models.food_item import FoodItem
-            from datetime import datetime, timedelta, date
-            
-            alloc_data = json.loads(amenityAllocation)
-            if not alloc_data:
-                print("DEBUG: alloc_data is empty or None")
-            else:
-                items = alloc_data.get("items", [])
-                
-                # Find the first room ID for assignment
-                room_id = None
-                if booking.rooms and len(booking.rooms) > 0:
-                    room_id = booking.rooms[0].room_id
-                
-                print(f"[DEBUG] Processing {len(items)} items for room_id {room_id}")
-                
-                print(f"DEBUG: Processing {len(items)} items for room_id {room_id}")
-                
-                if items and room_id:
-                    check_in_date = date.today()
-                    
-                    for item in items:
-                        name = item.get("name")
-                        scheduled_time = item.get("scheduledTime")
-                        scheduled_date_str = item.get("scheduledDate")
-                        
-                        print(f"[DEBUG] Item {name}, Time: {scheduled_time}, Date: {scheduled_date_str}")
-                        
-                        print(f"DEBUG: Item {name}, Time: {scheduled_time}, Date: {scheduled_date_str}")
-                        
-                        # Only create Food Order if it has a specific schedule
-                        if name and scheduled_time:
-                            try:
-                                 # Construct datetime for the schedule
-                                 # scheduled_time is usually "HH:MM"
-                                 # Sanitize time string just in case
-                                 scheduled_time = scheduled_time.strip()
-                                 if " " in scheduled_time:
-                                     # Handle "07:20 PM" format if it comes up (though type='time' shouldn't send it)
-                                     try:
-                                         t = datetime.strptime(scheduled_time, "%I:%M %p")
-                                         sh, sm = t.hour, t.minute
-                                     except ValueError:
-                                         # Try standard fallback
-                                         sh, sm = map(int, scheduled_time.split(":")[:2])
-                                 else:
-                                     sh, sm = map(int, scheduled_time.split(":")[:2])
-                                 
-                                 if scheduled_date_str:
-                                     # Use provided date
-                                     s_year, s_month, s_day = map(int, scheduled_date_str.split("-"))
-                                     scheduled_dt = datetime(s_year, s_month, s_day, sh, sm)
-                                 else:
-                                     # Fallback to smart logic: today or tomorrow
-                                     now_ist = datetime.utcnow() + timedelta(hours=5, minutes=30)
-                                     scheduled_dt = datetime.combine(check_in_date, datetime.min.time().replace(hour=sh, minute=sm))
-                                     if scheduled_dt < now_ist:
-                                         scheduled_dt = scheduled_dt + timedelta(days=1)
-                                 
-                                 schedule_str = scheduled_dt.strftime("%Y-%m-%d %H:%M:%S")
-                                 
-                                 # Try to find a matching Food Item to link properly, otherwise just use note
-                                 food_item = db.query(FoodItem).filter(FoodItem.name.ilike(name)).first()
-                                 
-                                 # Build items list
-                                 items_to_add = []
-                                 specific_items = item.get("specificFoodItems", [])
-                                 
-                                 if specific_items and len(specific_items) > 0:
-                                     for spec_item in specific_items:
-                                         f_id = spec_item.get("foodItemId")
-                                         qty = spec_item.get("quantity", 1)
-                                         if f_id:
-                                             items_to_add.append(FoodOrderItemCreate(food_item_id=int(f_id), quantity=int(qty)))
-                                 
-                                 # Fallback: find by name if no specific items
-                                 if not items_to_add:
-                                     # Try direct match
-                                     found_item = db.query(FoodItem).filter(FoodItem.name.ilike(name)).first()
-                                     
-                                     # Improved matching for common package meals
-                                     if not found_item:
-                                         if "breakfast" in name.lower():
-                                             found_item = db.query(FoodItem).filter(FoodItem.name.ilike("%breakfast%")).first()
-                                         elif "lunch" in name.lower():
-                                             found_item = db.query(FoodItem).filter(FoodItem.name.ilike("%lunch%")).first()
-                                         elif "dinner" in name.lower():
-                                             found_item = db.query(FoodItem).filter(FoodItem.name.ilike("%dinner%")).first()
-                                         elif "tea" in name.lower() or "snack" in name.lower():
-                                             found_item = db.query(FoodItem).filter(FoodItem.name.ilike("%tea%") | FoodItem.name.ilike("%snack%")).first()
-
-                                     if found_item:
-                                         qty = item.get("complimentaryPerNight", 1)
-                                         items_to_add.append(FoodOrderItemCreate(food_item_id=found_item.id, quantity=int(qty)))
-                                 
-                                 # Create the order via CRUD to ensure ServiceRequest is created
-                                 assigned_emp_id = item.get("assigned_employee_id")
-                                 if not assigned_emp_id:
-                                     assigned_emp_id = get_fallback_employee_id(db, current_user.employee.id if current_user.employee else None)
-                                 
-                                 order_data = FoodOrderCreate(
-                                     room_id=room_id,
-                                     amount=0.0,
-                                     assigned_employee_id=int(assigned_emp_id) if assigned_emp_id else None,
-                                     items=items_to_add,
-                                     status="scheduled",
-                                     billing_status="unbilled",
-                                     order_type="room_service",
-                                     delivery_request=f"SCHEDULED_FOR: {schedule_str} -- Package Meal: {name}"
-                                 )
-                                 
-                                 new_order = crud_food_order.create_food_order(db, order_data)
-                                 print(f"[DEBUG] Created scheduled order {new_order.id} via CRUD")
-                                 
-                            except Exception as e:
-                                print(f"[ERROR] Error creating scheduled order for {name}: {e}")
-                                import traceback
-                                traceback.print_exc()
-                            
-        except Exception as e:
-            print(f"[ERROR] Error processing amenity allocation in check-in: {e}")
-            print(f"Error processing amenity allocation in check-in: {e}")
-            import traceback
-            traceback.print_exc()
-
-    # Save ID card image
-    id_card_filename = f"id_pkg_{booking_id}_{uuid.uuid4().hex}.jpg"
-    id_card_path = os.path.join(CHECKIN_UPLOAD_DIR, id_card_filename)
-    with open(id_card_path, "wb") as buffer:
-        shutil.copyfileobj(id_card_image.file, buffer)
-    booking.id_card_image_url = id_card_filename
-
-    # Save guest photo
-    guest_photo_filename = f"guest_pkg_{booking_id}_{uuid.uuid4().hex}.jpg"
-    guest_photo_path = os.path.join(CHECKIN_UPLOAD_DIR, guest_photo_filename)
-    with open(guest_photo_path, "wb") as buffer:
-        shutil.copyfileobj(guest_photo.file, buffer)
-    booking.guest_photo_url = guest_photo_filename
-
-    booking.status = "checked-in"
-    # Set the actual check-in timestamp for strict bill scoping
-    from datetime import datetime
-    booking.checked_in_at = datetime.utcnow()
-    booking.user_id = current_user.id
-
-    if booking.rooms:
-        room_ids = [br.room_id for br in booking.rooms]
-        db.query(Room).filter(Room.id.in_(room_ids)).update({"status": "Checked-in"}, synchronize_session=False)
-
-    db.commit()
-    db.refresh(booking)
-    return booking
-
-# -------------------------------
-# GET check-in images for packages
-# -------------------------------
-@router.get("/booking/checkin-image/{filename}")
-def get_package_checkin_image(filename: str):
-    filepath = os.path.join(CHECKIN_UPLOAD_DIR, filename)
-    if not os.path.exists(filepath) or not os.path.isfile(filepath):
-        raise HTTPException(status_code=404, detail="Image not found")
-    return FileResponse(filepath)
+    success, result = crud_package.check_in_package(db, booking_id, id_card_image, guest_photo, amenityAllocation)
+    if not success:
+        raise HTTPException(status_code=400, detail=result)
+    return result

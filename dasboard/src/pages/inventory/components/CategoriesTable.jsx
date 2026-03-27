@@ -1,8 +1,10 @@
 import React from "react";
 import { formatDateIST } from "../../../utils/dateUtils";
 import { Trash2, Edit } from "lucide-react";
+import { usePermissions } from "../../../hooks/usePermissions";
 
 const CategoriesTable = ({ categories, onEdit, onDelete }) => {
+    const { hasPermission } = usePermissions();
     return (
         <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
@@ -42,18 +44,22 @@ const CategoriesTable = ({ categories, onEdit, onDelete }) => {
                                     {formatDateIST(cat.created_at)}
                                 </td>
                                 <td className="px-4 py-3 text-sm">
-                                    <button
-                                        onClick={() => onEdit(cat)}
-                                        className="text-blue-600 hover:text-blue-800 mr-2"
-                                    >
-                                        <Edit className="w-4 h-4" />
-                                    </button>
-                                    <button
-                                        onClick={() => onDelete(cat.id)}
-                                        className="text-red-600 hover:text-red-800"
-                                    >
-                                        <Trash2 className="w-4 h-4" />
-                                    </button>
+                                    {hasPermission('inventory_category:edit') && (
+                                        <button
+                                            onClick={() => onEdit(cat)}
+                                            className="text-blue-600 hover:text-blue-800 mr-2"
+                                        >
+                                            <Edit className="w-4 h-4" />
+                                        </button>
+                                    )}
+                                    {hasPermission('inventory_category:delete') && (
+                                        <button
+                                            onClick={() => onDelete(cat.id)}
+                                            className="text-red-600 hover:text-red-800"
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                        </button>
+                                    )}
                                 </td>
                             </tr>
                         ))

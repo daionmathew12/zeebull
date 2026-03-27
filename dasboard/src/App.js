@@ -2,9 +2,13 @@ import React from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
 import { NotificationProvider } from "./contexts/NotificationContext";
-import Login from "./pages/Login.jsx";
+import { jwtDecode } from "jwt-decode";
+import { BranchProvider } from "./contexts/BranchContext";
+import BranchManagement from "./pages/BranchManagement.jsx";
 import { ProtectedRoute } from "./layout/DashboardLayout";
 import Dashboard from "./pages/Dashboard.jsx";
+import SuperAdminDashboard from "./pages/SuperAdminDashboard.jsx";
+import Login from "./pages/Login.jsx";
 
 import Bookings from "./pages/Bookings.jsx";
 import CreateRooms from "./pages/CreateRooms.jsx";
@@ -35,11 +39,11 @@ const getRouterBasename = () => {
   }
   const path = window.location.pathname || "";
   // Check path first to determine basename, even on localhost
-  if (path.startsWith("/orchid/admin")) {
-    return "/orchid/admin";
+  if (path.startsWith("/zeebull/admin")) {
+    return "/zeebull/admin";
   }
-  if (path.startsWith("/orchidadmin")) {
-    return "/orchidadmin";
+  if (path.startsWith("/zeebulladmin")) {
+    return "/zeebulladmin";
   }
   if (path.startsWith("/inventory/admin")) {
     return "/inventory/admin";
@@ -50,12 +54,15 @@ const getRouterBasename = () => {
   if (path.startsWith("/pommaadmin")) {
     return "/pommaadmin";
   }
+  if (path.startsWith("/orchidadmin")) {
+    return "/orchidadmin";
+  }
   // For local development without path prefix, use empty basename
   const hostname = window.location.hostname || "";
   if (hostname === "localhost" || hostname === "127.0.0.1" || hostname.startsWith("192.168.") || hostname.startsWith("10.")) {
-    return "";
+    return "/orchidadmin";
   }
-  return "/orchid/admin";
+  return "/zeebull/admin";
 };
 
 function App() {
@@ -63,180 +70,195 @@ function App() {
   console.log("App component initializing with basename:", basename);
   return (
     <Router basename={basename}>
-      <NotificationProvider>
-        <Routes>
-          <Route path="/" element={<Login />} />
-          <Route path="/dashboard" element={
-            <ProtectedRoute requiredPermission="/dashboard">
-              <Dashboard />
-            </ProtectedRoute>
-          } />
-          <Route path="/bookings" element={
-            <ProtectedRoute requiredPermission="/bookings">
-              <Bookings />
-            </ProtectedRoute>
-          } />
-          <Route path="/rooms" element={
-            <ProtectedRoute requiredPermission="/rooms">
-              <CreateRooms />
-            </ProtectedRoute>
-          } />
-          <Route path="/users" element={
-            <ProtectedRoute requiredPermission="/users">
-              <Users />
-            </ProtectedRoute>
-          } />
-          <Route path="/services" element={
-            <ProtectedRoute requiredPermission="/services">
-              <Services />
-            </ProtectedRoute>
-          } />
-          <Route path="/expenses" element={
-            <ProtectedRoute requiredPermission="/expenses">
-              <Expenses />
-            </ProtectedRoute>
-          } />
-          {/* Protected Routes */}
-          <Route
-            path="/roles"
-            element={<Navigate to="/employee-management" replace />}
-          />
+      <BranchProvider>
+        <NotificationProvider>
+          <Routes>
+            <Route path="/" element={<Login />} />
+            <Route path="/dashboard" element={
+              <ProtectedRoute requiredPermission="/dashboard">
+                <Dashboard />
+              </ProtectedRoute>
+            } />
+            <Route path="/superadmin-dashboard" element={
+              <ProtectedRoute>
+                <SuperAdminDashboard />
+              </ProtectedRoute>
+            } />
+            <Route path="/bookings" element={
+              <ProtectedRoute requiredPermission="/bookings">
+                <Bookings />
+              </ProtectedRoute>
+            } />
+            <Route path="/rooms" element={
+              <ProtectedRoute requiredPermission="/rooms">
+                <CreateRooms />
+              </ProtectedRoute>
+            } />
+            <Route path="/users" element={
+              <ProtectedRoute requiredPermission="/users">
+                <Users />
+              </ProtectedRoute>
+            } />
+            <Route path="/services" element={
+              <ProtectedRoute requiredPermission="/services">
+                <Services />
+              </ProtectedRoute>
+            } />
+            <Route path="/expenses" element={
+              <ProtectedRoute requiredPermission="/expenses">
+                <Expenses />
+              </ProtectedRoute>
+            } />
+            {/* Protected Routes */}
+            <Route
+              path="/roles"
+              element={<Navigate to="/employee-management" replace />}
+            />
 
-          <Route
-            path="/billing"
-            element={
-              <ProtectedRoute requiredPermission="/billing">
-                <Billing />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/food-orders"
-            element={
-              <ProtectedRoute requiredPermission="/food-orders">
-                <FoodOrder />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/food-categories"
-            element={
-              <ProtectedRoute requiredPermission="/food-categories">
-                <FoodOrder />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/food-items"
-            element={
-              <ProtectedRoute requiredPermission="/food-items">
-                <FoodOrder />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/account"
-            element={
-              <ProtectedRoute requiredPermission="/account">
-                <Account />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/accounting"
-            element={<Navigate to="/account" replace />}
-          />
-          <Route
-            path="/Userfrontend_data"
-            element={
-              <ProtectedRoute requiredPermission="/Userfrontend_data">
-                <Userfrontend_data />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/packages"
-            element={
-              <ProtectedRoute requiredPermission="/package">
-                <Package />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/report"
-            element={
-              <ProtectedRoute requiredPermission="/report">
-                <ComprehensiveReport />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/guestprofiles"
-            element={
-              <ProtectedRoute requiredPermission="/guestprofiles">
-                <GuestProfile />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/user-history"
-            element={
-              <ProtectedRoute requiredPermission="/user-history">
-                <UserHistory />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/employee-management"
-            element={
-              <ProtectedRoute requiredPermission="/employee-management">
-                <EmployeeManagement />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/employee-dashboard"
-            element={
-              <ProtectedRoute requiredPermission="/employee-dashboard">
-                <EmployeeDashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/inventory"
-            element={
-              <ProtectedRoute requiredPermission="/inventory">
-                <Inventory />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/laundry"
-            element={
-              <ProtectedRoute requiredPermission="/inventory">
-                <Laundry />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/settings"
-            element={
-              <ProtectedRoute requiredPermission="/settings">
-                <Settings />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/activity-logs"
-            element={
-              <ProtectedRoute requiredPermission="/activity-logs">
-                <ActivityLogs />
-              </ProtectedRoute>
-            }
-          />
-        </Routes>
-        <Toaster position="top-right" />
-      </NotificationProvider>
+            <Route
+              path="/billing"
+              element={
+                <ProtectedRoute requiredPermission="/billing">
+                  <Billing />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/food-orders"
+              element={
+                <ProtectedRoute requiredPermission="/food-orders">
+                  <FoodOrder />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/food-categories"
+              element={
+                <ProtectedRoute requiredPermission="/food-categories">
+                  <FoodOrder />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/food-items"
+              element={
+                <ProtectedRoute requiredPermission="/food-items">
+                  <FoodOrder />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/account"
+              element={
+                <ProtectedRoute requiredPermission="/account">
+                  <Account />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/accounting"
+              element={<Navigate to="/account" replace />}
+            />
+            <Route
+              path="/Userfrontend_data"
+              element={
+                <ProtectedRoute requiredPermission="/Userfrontend_data">
+                  <Userfrontend_data />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/packages"
+              element={
+                <ProtectedRoute requiredPermission="/package">
+                  <Package />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/report"
+              element={
+                <ProtectedRoute requiredPermission="/report">
+                  <ComprehensiveReport />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/guestprofiles"
+              element={
+                <ProtectedRoute requiredPermission="/guestprofiles">
+                  <GuestProfile />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/user-history"
+              element={
+                <ProtectedRoute requiredPermission="/user-history">
+                  <UserHistory />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/employee-management"
+              element={
+                <ProtectedRoute requiredPermission="/employee-management">
+                  <EmployeeManagement />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/employee-dashboard"
+              element={
+                <ProtectedRoute requiredPermission="/employee-dashboard">
+                  <EmployeeDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/inventory"
+              element={
+                <ProtectedRoute requiredPermission="/inventory">
+                  <Inventory />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/laundry"
+              element={
+                <ProtectedRoute requiredPermission="/inventory">
+                  <Laundry />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <ProtectedRoute requiredPermission="/settings">
+                  <Settings />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/branch-management"
+              element={
+                <ProtectedRoute requiredPermission="/branch-management">
+                  <BranchManagement />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/activity-logs"
+              element={
+                <ProtectedRoute requiredPermission="/activity-logs">
+                  <ActivityLogs />
+                </ProtectedRoute>
+              }
+            />
+          </Routes>
+          <Toaster position="top-right" />
+        </NotificationProvider>
+      </BranchProvider>
     </Router>
   );
 }

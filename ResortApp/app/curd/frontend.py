@@ -10,7 +10,9 @@ def get_one(db: Session, model, item_id: int):
     return db.query(model).filter(model.id == item_id).first()
 
 def create(db: Session, model, obj_in):
-    db_obj = model(**obj_in.dict())
+    data = obj_in.dict()
+    data.pop('branch_name', None)  # exclude schema-only fields
+    db_obj = model(**data)
     db.add(db_obj)
     db.commit()
     db.refresh(db_obj)
@@ -20,7 +22,9 @@ def update(db: Session, model, item_id: int, obj_in):
     db_obj = db.query(model).filter(model.id == item_id).first()
     if not db_obj:
         return None
-    for key, value in obj_in.dict(exclude_unset=True).items():
+    data = obj_in.dict(exclude_unset=True)
+    data.pop('branch_name', None)  # exclude schema-only fields
+    for key, value in data.items():
         setattr(db_obj, key, value)
     db.commit()
     db.refresh(db_obj)

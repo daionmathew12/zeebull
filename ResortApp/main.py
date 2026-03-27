@@ -1,4 +1,4 @@
-# app/main.py - Trigger Reload
+# app/main.py - Trigger Reload 3
 from fastapi import FastAPI, Request, HTTPException, Depends
 print(">>> STARTING WITH NEW MAIN.PY - DEBUG VERSION 2 <<<") # Confirm file load
 # Force Reload Fix 14 (Trigger Reload for Bill Filter Fix)
@@ -19,6 +19,37 @@ from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
+
+# GCP Instance ID Lock
+INSTANCE_ID_LOCK = "4726854500094706993"
+
+def check_instance_id():
+    """Verify that the application is running on the authorized GCP instance."""
+    import urllib.request
+    import sys
+    
+    # Skip check if not on Linux (for local development/testing if needed)
+    if os.name != "posix":
+        print(">>> [SECURITY] Skipping Instance ID check on non-Linux OS <<<")
+        return
+
+    try:
+        url = "http://metadata.google.internal/computeMetadata/v1/instance/id"
+        headers = {"Metadata-Flavor": "Google"}
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=5) as response:
+            actual_id = response.read().decode('utf-8').strip()
+            if actual_id != INSTANCE_ID_LOCK:
+                print(f"CRITICAL SECURITY ERROR: Instance ID mismatch! Expected {INSTANCE_ID_LOCK}, got {actual_id}")
+                sys.exit(1)
+            print(f">>> [SECURITY] Instance ID Verified: {actual_id} <<<")
+    except Exception as e:
+        print(f"CRITICAL SECURITY ERROR: Could not verify Instance ID: {e}")
+        # In a strict production environment, we should exit here.
+        # sys.exit(1)
+
+# Execute security check
+check_instance_id()
 
 # Import all API routers
 from app.api import (
@@ -44,11 +75,9 @@ from app.api import (
     service_request,
     account,
     gst_reports,
+    branch,
     notification,
-    notification,
-    notification,
-    # activity,
-    frontend, # Added frontend module
+    activity_logs,
 )
 from app.api.settings import router as settings_router
 from app.api import reports_module
@@ -192,9 +221,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Temporarily disabled - requires PyJWT installation
-# from app.core.middleware import ActivityLoggingMiddleware
-# app.add_middleware(ActivityLoggingMiddleware)
+# Activity Logging Middleware
+from app.core.middleware import ActivityLoggingMiddleware
+app.add_middleware(ActivityLoggingMiddleware)
 
 
 # Performance monitoring and caching middleware
@@ -231,9 +260,14 @@ class PerformanceMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(PerformanceMiddleware)
 
-# Static file directories
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Static file directories - use absolute paths so they work regardless of working directory
+_MAIN_DIR = os.path.dirname(os.path.abspath(__file__))
+_UPLOADS_DIR = os.path.join(_MAIN_DIR, "uploads")
+_STATIC_DIR = os.path.join(_MAIN_DIR, "static")
+os.makedirs(_UPLOADS_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=_UPLOADS_DIR), name="uploads")
+if os.path.exists(_STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
 # Mount landing page static files
 landing_page_path = Path("../landingpage")
@@ -300,6 +334,7 @@ app.include_router(report.router, prefix="/api", tags=["Report"])
 app.include_router(reports.router, prefix="/api", tags=["Reports"])
 app.include_router(role.router, prefix="/api", tags=["Role"])
 app.include_router(service.router, prefix="/api", tags=["Service"])
+app.include_router(branch.router, prefix="/api", tags=["Branches"])
 app.include_router(service_request.router, prefix="/api", tags=["Service Requests"])
 app.include_router(account.router, prefix="/api", tags=["Accounts"])
 app.include_router(gst_reports.router, prefix="/api", tags=["GST Reports"])
@@ -308,7 +343,7 @@ app.include_router(attendance.router, prefix="/api", tags=["Attendance"])
 
 # Notification system re-enabled
 app.include_router(notification.router, prefix="/api", tags=["Notifications"])
-# app.include_router(activity.router, prefix="/api/activity", tags=["Activity Logs"])
+app.include_router(activity_logs.router, prefix="/api", tags=["Activity Logs"])
 
 # Include comprehensive reports router if it was imported successfully
 if comprehensive_reports is not None:

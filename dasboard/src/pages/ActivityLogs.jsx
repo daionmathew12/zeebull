@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import DashboardLayout from '../layout/DashboardLayout';
-import axios from 'axios';
+import API from '../services/api';
 import { getApiBaseUrl } from '../utils/env';
 import { formatDateTimeLong } from '../utils/dateUtils';
 
@@ -75,9 +75,7 @@ const ActivityLogs = () => {
             params.append('limit', limit);
             params.append('skip', currentOffset);
 
-            const response = await axios.get(`${API_BASE_URL}/activity-logs?${params.toString()}`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            const response = await API.get(`/activity-logs?${params.toString()}`);
 
             const newLogs = response.data.logs || [];
 
@@ -101,9 +99,7 @@ const ActivityLogs = () => {
             const token = localStorage.getItem('token');
             const hours = filters.hours || '24';
 
-            const response = await axios.get(`${API_BASE_URL}/activity-logs/stats?hours=${hours}`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            const response = await API.get(`/activity-logs/stats?hours=${hours}`);
 
             setStats(response.data);
         } catch (error) {
@@ -153,12 +149,18 @@ const ActivityLogs = () => {
     };
 
     const humanizeLog = (log) => {
-        const { method, path, status_code, user_name } = log;
-        const user = user_name || 'A guest';
+        // If the backend provided a friendly action label, use it
+        if (log.action && log.action.includes('/') && !log.action.includes(' ')) {
+            // Seems like raw method path, use local humanize
+        } else if (log.action) {
+            return log.action.toLowerCase();
+        }
 
-        if (status_code === 401) return `tried to access a restricted area (${path.split('/').pop() || 'endpoint'}) but was blocked.`;
-        if (status_code === 403) return `was denied permission to perform an action on ${path}.`;
-        if (status_code >= 500) return `encountered a system error while accessing ${path}.`;
+        const { method, path, status_code } = log;
+
+        if (status_code === 401) return `tried to access a restricted area but was blocked.`;
+        if (status_code === 403) return `was denied permission for this action.`;
+        if (status_code >= 500) return `encountered a system error.`;
 
         const isView = method === 'GET';
         const isCreate = method === 'POST';
@@ -166,24 +168,26 @@ const ActivityLogs = () => {
         const isDelete = method === 'DELETE';
 
         let entity = 'the system';
-        if (path.includes('bookings')) entity = 'bookings';
-        else if (path.includes('inventory')) entity = 'inventory items';
-        else if (path.includes('stock')) entity = 'stock levels';
-        else if (path.includes('food')) entity = 'food orders';
-        else if (path.includes('expenses')) entity = 'expenses';
-        else if (path.includes('gst')) entity = 'GST reports';
-        else if (path.includes('rooms')) entity = 'room data';
-        else if (path.includes('service')) entity = 'service requests';
-        else if (path.includes('attendance')) entity = 'attendance records';
-        else if (path.includes('auth/login')) return `logged into the system.`;
-        else if (path.includes('auth/logout')) return `logged out.`;
+        const p = path.toLowerCase();
+        if (p.includes('bookings')) entity = 'bookings';
+        else if (p.includes('inventory')) entity = 'inventory';
+        else if (p.includes('stock')) entity = 'stock levels';
+        else if (p.includes('food')) entity = 'food items';
+        else if (p.includes('order')) entity = 'orders';
+        else if (p.includes('expenses')) entity = 'expenses';
+        else if (p.includes('gst')) entity = 'tax reports';
+        else if (p.includes('rooms')) entity = 'room settings';
+        else if (p.includes('service')) entity = 'service requests';
+        else if (p.includes('attendance')) entity = 'attendance logs';
+        else if (p.includes('login')) return `signed in to the dashboard.`;
+        else if (p.includes('logout')) return `signed out.`;
 
         if (isView) return `viewed ${entity}.`;
-        if (isCreate) return `created a new entry in ${entity}.`;
-        if (isUpdate) return `updated ${entity}.`;
-        if (isDelete) return `deleted an entry from ${entity}.`;
+        if (isCreate) return `created a new ${entity} entry.`;
+        if (isUpdate) return `modified ${entity} details.`;
+        if (isDelete) return `removed ${entity} data.`;
 
-        return `performed ${method} on ${path}.`;
+        return `accessed ${path}.`;
     };
 
     const StatusIndicator = ({ code }) => {
@@ -209,6 +213,21 @@ const ActivityLogs = () => {
 
     const LogRow = ({ log, isLast, refProp }) => {
         const tag = getActionTag(log.path);
+
+        // Pretty parse details if it's JSON
+        let displayDetails = log.details;
+        try {
+            if (log.details && log.details.startsWith('{')) {
+                const parsed = JSON.parse(log.details);
+                if (parsed.process_time_ms) {
+                    displayDetails = `${parsed.process_time_ms}ms response`;
+                    if (parsed.query_params && parsed.query_params !== "{}") {
+                        displayDetails += ` | query: ${parsed.query_params}`;
+                    }
+                }
+            }
+        } catch (e) { }
+
         return (
             <tr ref={refProp} className="hover:bg-gray-50 border-b border-gray-100 transition-colors">
                 <td className="px-4 py-4 text-xs text-gray-400 whitespace-nowrap">
@@ -223,7 +242,7 @@ const ActivityLogs = () => {
                     <div className="flex flex-col gap-0.5">
                         <div className="text-sm text-gray-800 flex items-center gap-2">
                             <span className="font-bold text-gray-900">{log.user_name || 'Guest'}</span>
-                            <span>{humanizeLog(log)}</span>
+                            <span className="text-gray-600">{humanizeLog(log)}</span>
                             {log.groupCount > 1 && (
                                 <span className="bg-indigo-100 text-indigo-600 text-[10px] px-1.5 py-0.5 rounded-full font-bold">
                                     ×{log.groupCount}
@@ -231,8 +250,8 @@ const ActivityLogs = () => {
                             )}
                         </div>
                         <div className="text-[10px] text-gray-400 font-mono flex items-center gap-2">
-                            <span className="bg-gray-100 px-1 rounded">{log.method}</span>
-                            <span>{log.path}</span>
+                            <span className="bg-gray-100 px-1 rounded font-bold text-gray-600">{log.method}</span>
+                            <span className="truncate max-w-md">{log.path}</span>
                         </div>
                     </div>
                 </td>
@@ -243,7 +262,7 @@ const ActivityLogs = () => {
                     {log.client_ip}
                 </td>
                 <td className="px-4 py-4 text-[10px] text-gray-400 max-w-[120px] truncate italic hidden lg:table-cell">
-                    {log.details || "-"}
+                    {displayDetails || "-"}
                 </td>
             </tr>
         );

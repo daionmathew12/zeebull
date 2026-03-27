@@ -1,0 +1,54 @@
+==================================================
+ZEEBULL DEPLOYMENT REPORT - NEW SERVER
+==================================================
+IP Address: 34.71.114.198
+Date: 2026-03-16
+--------------------------------------------------
+
+1. SERVICE ENDPOINTS
+--------------------
+- User Frontend: http://34.71.114.198/
+- Admin Dashboard: http://34.71.114.198/zeebulladmin/
+- API Base URL: http://34.71.114.198/zeebullapi/
+- API Health Check: http://34.71.114.198/zeebullapi/health
+
+2. DATABASE DETAILS
+-------------------
+- Database Name: zeebulldb
+- DB User: zeebull
+- DB Password: zeebullpass
+- DB Host: localhost:5432
+
+3. INITIAL ACCESS (Superadmin)
+------------------------------
+- Email: admin@orchid.com
+- Password: admin123
+- Role: Superadmin
+- Branch: Main Branch
+
+4. SERVER ARCHITECTURE
+----------------------
+- App Path: /var/www/zeebull/ResortApp
+- Dashboard Path: /var/www/zeebull/dasboard/build
+- Userend Path: /var/www/zeebull/userend/build
+- Service Name: zeebull.service
+- Nginx Config: /etc/nginx/sites-available/zeebull
+- Python Venv: /var/www/zeebull/ResortApp/venv (Python 3.12+)
+
+5. SECURITY & ENVIRONMENT LOCKING
+---------------------------------
+The application is cryptographically bound to this specific VM instance.
+- Instance ID Locked: 4726854500094706993
+- Security Check: Native GCP Metadata Binding
+- Result: The code CANNOT be migrated to another server or resold without
+  detection and automatic service termination.
+
+6. OPTIMIZATIONS
+----------------
+- Swap File: 2GB (for stability and potential instance downsizing)
+- Reverse Proxy: Nginx (handling static assets and SSL-readiness)
+- Cleanup: All deployment .zip files have been deleted from the server.
+
+==================================================
+Deployment Status: SUCCESSFUL & SECURE
+==================================================

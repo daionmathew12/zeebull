@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import DashboardLayout from "../layout/DashboardLayout";
+import { usePermissions } from "../hooks/usePermissions";
 import API from "../services/api";
 import api from "../services/api";
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from "recharts";
@@ -263,7 +264,23 @@ const DetailTable = ({ title, headers, data, loading, hasMore, loadMore, isSubmi
 const CHART_COLORS = ["#4f46e5", "#10b981", "#f59e0b", "#ef4444", "#3b82f6"];
 
 export default function ReportsDashboard() {
-  const [activeMainTab, setActiveMainTab] = useState("reports"); // "reports" or "accounting"
+  const { hasPermission, isAdmin } = usePermissions();
+  const mainTabs = [
+    { id: "reports", label: "Operational Reports", permission: "account_reports:view", icon: <TrendingUp className="inline mr-2" size={18} /> },
+    { id: "accounting", label: "Financial Accounting", permission: "account:view", icon: <BookOpen className="inline mr-2" size={18} /> }
+  ].filter(tab => hasPermission(tab.permission) || isAdmin);
+
+  const accountingTabsList = [
+    { id: "chart-of-accounts", label: "Chart of Accounts", permission: "account_chart:view", icon: <BookOpen className="inline mr-2" size={18} /> },
+    { id: "journal-entries", label: "Journal Entries", permission: "account_journal:view", icon: <FileText className="inline mr-2" size={18} /> },
+    { id: "trial-balance", label: "Trial Balance", permission: "account_trial:view", icon: <Calculator className="inline mr-2" size={18} /> },
+    { id: "gst-reports", label: "GST Reports", permission: "account_gst_reports:view", icon: <Receipt className="inline mr-2" size={18} /> },
+    { id: "auto-report", label: "Auto Report", permission: "account_auto_report:view", icon: <Database className="inline mr-2" size={18} /> },
+    { id: "comprehensive-report", label: "Comprehensive Report", permission: "account_comprehensive_report:view", icon: <Activity className="inline mr-2" size={18} /> }
+  ].filter(tab => hasPermission(tab.permission) || isAdmin);
+
+  const [activeMainTab, setActiveMainTab] = useState(() => mainTabs[0]?.id || "reports");
+  const [activeAccountingTab, setActiveAccountingTab] = useState(() => accountingTabsList[0]?.id || "gst-reports");
 
   // Reports Tab State
   const [loading, setLoading] = useState(true);
@@ -294,7 +311,6 @@ export default function ReportsDashboard() {
   const PAGE_LIMIT = 10;
 
   // Accounting Tab State
-  const [activeAccountingTab, setActiveAccountingTab] = useState("gst-reports");
   const [accountGroups, setAccountGroups] = useState([]);
   const [accountLedgers, setAccountLedgers] = useState([]);
   const [selectedGroup, setSelectedGroup] = useState(null);
@@ -1062,26 +1078,19 @@ export default function ReportsDashboard() {
         <div className="flex items-center justify-between">
           <h1 className="text-3xl font-bold text-gray-800">Account Management</h1>
           <div className="flex space-x-2 border-b border-gray-200">
-            <button
-              onClick={() => setActiveMainTab("reports")}
-              className={`px-4 py-2 font-medium ${activeMainTab === "reports"
-                ? "border-b-2 border-indigo-600 text-indigo-600"
-                : "text-gray-600 hover:text-gray-800"
-                }`}
-            >
-              <TrendingUp className="inline mr-2" size={18} />
-              Reports
-            </button>
-            <button
-              onClick={() => setActiveMainTab("accounting")}
-              className={`px-4 py-2 font-medium ${activeMainTab === "accounting"
-                ? "border-b-2 border-indigo-600 text-indigo-600"
-                : "text-gray-600 hover:text-gray-800"
-                }`}
-            >
-              <BookOpen className="inline mr-2" size={18} />
-              Accounting
-            </button>
+            {mainTabs.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveMainTab(tab.id)}
+                className={`px-4 py-2 font-medium ${activeMainTab === tab.id
+                    ? "border-b-2 border-indigo-600 text-indigo-600"
+                    : "text-gray-600 hover:text-gray-800"
+                  }`}
+              >
+                {tab.icon}
+                {tab.label}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -1377,67 +1386,20 @@ export default function ReportsDashboard() {
         {activeMainTab === "accounting" && (
           <div className="space-y-6">
             {/* Accounting Sub-Tabs */}
-            <div className="flex space-x-2 border-b border-gray-200">
-              <button
-                onClick={() => setActiveAccountingTab("chart-of-accounts")}
-                className={`px-4 py-2 font-medium ${activeAccountingTab === "chart-of-accounts"
-                  ? "border-b-2 border-indigo-600 text-indigo-600"
-                  : "text-gray-600 hover:text-gray-800"
-                  }`}
-              >
-                <BookOpen className="inline mr-2" size={18} />
-                Chart of Accounts
-              </button>
-              <button
-                onClick={() => setActiveAccountingTab("journal-entries")}
-                className={`px-4 py-2 font-medium ${activeAccountingTab === "journal-entries"
-                  ? "border-b-2 border-indigo-600 text-indigo-600"
-                  : "text-gray-600 hover:text-gray-800"
-                  }`}
-              >
-                <FileText className="inline mr-2" size={18} />
-                Journal Entries
-              </button>
-              <button
-                onClick={() => setActiveAccountingTab("trial-balance")}
-                className={`px-4 py-2 font-medium ${activeAccountingTab === "trial-balance"
-                  ? "border-b-2 border-indigo-600 text-indigo-600"
-                  : "text-gray-600 hover:text-gray-800"
-                  }`}
-              >
-                <Calculator className="inline mr-2" size={18} />
-                Trial Balance
-              </button>
-              <button
-                onClick={() => setActiveAccountingTab("auto-report")}
-                className={`px-4 py-2 font-medium ${activeAccountingTab === "auto-report"
-                  ? "border-b-2 border-indigo-600 text-indigo-600"
-                  : "text-gray-600 hover:text-gray-800"
-                  }`}
-              >
-                <Activity className="inline mr-2" size={18} />
-                Automatic Reports
-              </button>
-              <button
-                onClick={() => setActiveAccountingTab("comprehensive-report")}
-                className={`px-4 py-2 font-medium ${activeAccountingTab === "comprehensive-report"
-                  ? "border-b-2 border-indigo-600 text-indigo-600"
-                  : "text-gray-600 hover:text-gray-800"
-                  }`}
-              >
-                <Database className="inline mr-2" size={18} />
-                Comprehensive Report
-              </button>
-              <button
-                onClick={() => setActiveAccountingTab("gst-reports")}
-                className={`px-4 py-2 font-medium ${activeAccountingTab === "gst-reports"
-                  ? "border-b-2 border-indigo-600 text-indigo-600"
-                  : "text-gray-600 hover:text-gray-800"
-                  }`}
-              >
-                <Receipt className="inline mr-2" size={18} />
-                GST Reports
-              </button>
+            <div className="flex space-x-2 border-b border-gray-200 overflow-x-auto scrollbar-hide">
+              {accountingTabsList.map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveAccountingTab(tab.id)}
+                  className={`px-4 py-2 font-medium whitespace-nowrap ${activeAccountingTab === tab.id
+                      ? "border-b-2 border-indigo-600 text-indigo-600"
+                      : "text-gray-600 hover:text-gray-800"
+                    }`}
+                >
+                  {tab.icon}
+                  {tab.label}
+                </button>
+              ))}
             </div>
 
             {/* Info Panel Integration */}

@@ -1,9 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+import os
+# Absolute project root path (ResortApp/)
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_UPLOAD_ROOT = os.path.join(_BASE_DIR, "uploads")
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import select, text
 from typing import List, Optional
 from datetime import datetime
-import os
 import shutil
 import uuid
 import json
@@ -13,11 +16,13 @@ from app.models.service import Service, AssignedService, service_inventory_item
 from app.models.inventory import InventoryItem
 from app.curd import service as service_crud
 from app.utils.auth import get_db, get_current_user
+from app.utils.branch_scope import get_branch_id
+
 from app.curd.notification import notify_service_assigned, notify_service_status_changed
 
 router = APIRouter(prefix="/services", tags=["Services"])
 
-UPLOAD_DIR = "uploads/services"
+UPLOAD_DIR = os.path.join(_UPLOAD_ROOT, "services")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
@@ -68,6 +73,40 @@ def _load_inventory_items_for_service(db: Session, service_id: int):
     return items
 
 
+def _load_assigned_inventory_items(db: Session, assigned_id: int):
+    """
+    Load inventory items actually assigned to a specific service instance
+    (includes template items + extra items added at time of assignment).
+    """
+    from app.models.employee_inventory import EmployeeInventoryAssignment
+    items = []
+    try:
+        print(f"[DEBUG _load_assigned_inventory_items] Loading inventory for assigned service {assigned_id}")
+        assignments = db.query(EmployeeInventoryAssignment).filter(
+            EmployeeInventoryAssignment.assigned_service_id == assigned_id
+        ).all()
+        
+        for a in assignments:
+            inv_item = a.item
+            if inv_item:
+                item_data = {
+                    "id": int(inv_item.id),
+                    "name": str(inv_item.name),
+                    "item_code": getattr(inv_item, "item_code", None),
+                    "unit": str(getattr(inv_item, "unit", "pcs") or "pcs"),
+                    "quantity": float(a.quantity_assigned),
+                    "unit_price": float(inv_item.unit_price) if inv_item.unit_price is not None else 0.0,
+                    "selling_price": float(inv_item.selling_price) if hasattr(inv_item, "selling_price") and inv_item.selling_price is not None else None,
+                    "assignment_id": int(a.id), # Helpful for return processing
+                    "quantity_used": float(a.quantity_used)
+                }
+                items.append(item_data)
+                print(f"[DEBUG _load_assigned_inventory_items] Added assigned item: {item_data['name']} (Qty: {item_data['quantity']})")
+    except Exception as e:
+        print(f"[ERROR _load_assigned_inventory_items] {str(e)}")
+    return items
+
+
 def _serialize_service(service: Service, db: Session):
     if not service:
         return None
@@ -83,6 +122,7 @@ def _serialize_service(service: Service, db: Session):
         "is_visible_to_guest": bool(getattr(service, "is_visible_to_guest", False)),
         "average_completion_time": str(service.average_completion_time) if getattr(service, "average_completion_time", None) else None,
         "created_at": service.created_at,
+        "branch_id": getattr(service, "branch_id", None),
         "images": [
             {"id": int(img.id), "image_url": str(img.image_url)}
             for img in (service.images or [])
@@ -117,7 +157,8 @@ async def create_service(
     is_visible_to_guest: str = Form("false"),  # Accept as string, convert to bool
     average_completion_time: Optional[str] = Form(None),  # e.g., "30 minutes", "1 hour"
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """
     Create a new service with optional images and inventory items.
@@ -158,8 +199,7 @@ async def create_service(
                 if not os.path.exists(file_path):
                     raise HTTPException(status_code=500, detail=f"Failed to save image: {original_filename}")
 
-                normalized_path = file_path.replace("\\", "/")
-                image_urls.append(f"/{normalized_path}")
+                image_urls.append(f"/uploads/services/{filename}")
         except HTTPException:
             raise
         except Exception as img_error:
@@ -193,7 +233,9 @@ async def create_service(
                 inventory_items_list,
                 is_visible_bool,
                 average_completion_time,
+                branch_id=branch_id
             )
+
         except Exception as db_error:
             error_detail = f"Failed to create service in database: {str(db_error)}\n{traceback.format_exc()}"
             print(f"[ERROR create_service] {error_detail}")
@@ -228,6 +270,7 @@ async def update_service_endpoint(
     average_completion_time: Optional[str] = Form(None),  # e.g., "30 minutes", "1 hour"
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """Update an existing service, allowing image and inventory adjustments."""
     import traceback
@@ -287,8 +330,7 @@ async def update_service_endpoint(
             if not os.path.exists(file_path):
                 raise HTTPException(status_code=500, detail=f"Failed to save image: {original_filename}")
 
-            normalized_path = file_path.replace("\\", "/")
-            new_image_urls.append(f"/{normalized_path}")
+            new_image_urls.append(f"/uploads/services/{filename}")
     except HTTPException:
         for url in new_image_urls:
             _delete_file(url)
@@ -334,11 +376,12 @@ async def update_service_endpoint(
     print(f"[DEBUG update_service] Service {service_id} updated successfully")
     return _serialize_service(service, db)
 
-def _list_services_impl(db: Session, skip: int = 0, limit: int = 20):
+
+def _list_services_impl(db: Session, skip: int = 0, limit: int = 20, branch_id: Optional[int] = None):
     """Helper function for list_services with inventory items and quantities"""
     try:
         # Get services with eager loading
-        services = service_crud.get_services(db, skip=skip, limit=limit)
+        services = service_crud.get_services(db, skip=skip, limit=limit, branch_id=branch_id)
         
         if not services:
             return []
@@ -363,6 +406,7 @@ def _list_services_impl(db: Session, skip: int = 0, limit: int = 20):
                     "is_visible_to_guest": bool(service.is_visible_to_guest if hasattr(service, 'is_visible_to_guest') else False),
                     "average_completion_time": getattr(service, 'average_completion_time', None),
                     "created_at": service.created_at,  # Keep as datetime for Pydantic
+                    "branch_id": getattr(service, 'branch_id', None),
                     "images": images_list,
                     "inventory_items": []
                 }
@@ -434,7 +478,7 @@ def _list_services_impl(db: Session, skip: int = 0, limit: int = 20):
         # Fallback: return services without inventory items
         try:
             print("[INFO] Attempting fallback: returning services without inventory items")
-            services = service_crud.get_services(db, skip=skip, limit=limit)
+            services = service_crud.get_services(db, skip=skip, limit=limit, branch_id=branch_id)
             fallback_result = []
             for service in services:
                 try:
@@ -457,10 +501,11 @@ def _list_services_impl(db: Session, skip: int = 0, limit: int = 20):
             # Re-raise original error
             raise e
 
+
 @router.get("", response_model=List[service_schema.ServiceOut])
-def list_services(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20):
+def list_services(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20, branch_id: Optional[int] = Depends(get_branch_id)):
     try:
-        print(f"[DEBUG] list_services called with skip={skip}, limit={limit}")
+        print(f"[DEBUG] list_services called with skip={skip}, limit={limit}, branch_id={branch_id}")
         
         # Cap limit to prevent performance issues
         if limit > 1000:
@@ -470,7 +515,7 @@ def list_services(db: Session = Depends(get_db), current_user: User = Depends(ge
         
         # Try the full implementation first
         try:
-            result = _list_services_impl(db, skip, limit)
+            result = _list_services_impl(db, skip, limit, branch_id=branch_id)
             if result:
                 print(f"[DEBUG] Full implementation returned {len(result)} services")
                 return result
@@ -481,7 +526,7 @@ def list_services(db: Session = Depends(get_db), current_user: User = Depends(ge
         
         # Fallback: Simple approach - return services directly
         print("[INFO] Using simple fallback: returning services directly")
-        services = service_crud.get_services(db, skip=skip, limit=limit)
+        services = service_crud.get_services(db, skip=skip, limit=limit, branch_id=branch_id)
         
         print(f"[DEBUG] Found {len(services) if services else 0} services from database")
         
@@ -530,6 +575,7 @@ def list_services(db: Session = Depends(get_db), current_user: User = Depends(ge
                     "is_visible_to_guest": bool(getattr(service, 'is_visible_to_guest', False)),
                     "average_completion_time": getattr(service, 'average_completion_time', None),
                     "created_at": service.created_at,  # Keep as datetime object
+                    "branch_id": getattr(service, 'branch_id', None),
                     "images": [{"id": int(img.id), "image_url": str(img.image_url)} for img in (service.images or [])],
                     "inventory_items": inventory_items_list
                 }
@@ -552,13 +598,20 @@ def list_services(db: Session = Depends(get_db), current_user: User = Depends(ge
         return []
 
 @router.get("/", response_model=List[service_schema.ServiceOut])  # Handle trailing slash
-def list_services_slash(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20):
+def list_services_slash(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20, branch_id: Optional[int] = Depends(get_branch_id)):
     # Use the same implementation as the main endpoint
-    return list_services(db, skip, limit)
+    return list_services(db, current_user, skip, limit, branch_id)
 
 @router.delete("/{service_id}")
-def delete_service(service_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def delete_service(service_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: Optional[int] = Depends(get_branch_id)):
     try:
+        # Check if service belongs to branch
+        service = db.query(Service).filter(Service.id == service_id).first()
+        if not service:
+             raise HTTPException(status_code=404, detail="Service not found")
+        if branch_id and service.branch_id != branch_id:
+             raise HTTPException(status_code=403, detail="Access denied to this branch")
+
         image_paths = service_crud.delete_service(db, service_id)
         for path in image_paths:
             _delete_file(path)
@@ -580,7 +633,8 @@ def delete_service(service_id: int, db: Session = Depends(get_db), current_user:
 def assign_service(
     payload: service_schema.AssignedServiceCreate, 
     db: Session = Depends(get_db), 
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """
     Assign a service to an employee for a specific room.
@@ -599,7 +653,16 @@ def assign_service(
         if not payload.room_id:
             raise HTTPException(status_code=400, detail="room_id is required")
         
-        result = service_crud.create_assigned_service(db, payload)
+        # Validate and safeguard branch_id
+        if branch_id is None:
+            # Fallback to current_user branch or 1
+            branch_id = getattr(current_user, 'branch_id', 1) or 1
+            print(f"[DEBUG assign_service] branch_id was None, falling back to {branch_id}")
+        elif branch_id < 1:
+            print(f"[WARNING] Invalid branch_id {branch_id} received. Overriding to 1.")
+            branch_id = 1
+
+        result = service_crud.create_assigned_service(db, payload, branch_id=branch_id)
         db.commit() # Force commit to ensure visibility
         print(f"[DEBUG assign_service] Successfully created assigned service ID: {result.id}")
         
@@ -610,7 +673,8 @@ def assign_service(
                 service_name=result.service.name if result.service else "Unknown Service",
                 employee_name=result.employee.name if result.employee else "Unknown Employee", 
                 room_number=result.room.number if result.room else "Unknown Room", 
-                assigned_id=result.id
+                assigned_id=result.id,
+                branch_id=branch_id
             )
         except Exception as notif_error:
             print(f"[WARNING] Failed to send assignment notification: {notif_error}")
@@ -626,9 +690,11 @@ def assign_service(
                 "is_visible_to_guest": result.service.is_visible_to_guest if result.service else False,
                 "average_completion_time": getattr(result.service, 'average_completion_time', None) if result.service else None,
                 "created_at": result.service.created_at.isoformat() if result.service and result.service.created_at else None,
+                "branch_id": getattr(result.service, "branch_id", None) if result.service else None,
                 "images": [],
                 "inventory_items": []
             },
+            "branch_id": getattr(result, "branch_id", None),
             "employee": {
                 "id": result.employee.id if result.employee else None,
                 "name": result.employee.name if result.employee else "Unknown"
@@ -639,7 +705,8 @@ def assign_service(
             },
             "assigned_at": result.assigned_at.isoformat() if result.assigned_at else None,
             "status": result.status.value if hasattr(result.status, 'value') else str(result.status),
-            "billing_status": result.billing_status if hasattr(result, 'billing_status') else "unbilled"
+            "billing_status": result.billing_status if hasattr(result, 'billing_status') else "unbilled",
+            "inventory_items_used": _load_assigned_inventory_items(db, result.id)
         }
         
         print(f"[DEBUG assign_service] ===== SUCCESS ======")
@@ -670,7 +737,8 @@ def get_all_assigned_services(
     status: Optional[str] = None,
     room_id: Optional[int] = None,
     booking_id: Optional[int] = None,
-    package_booking_id: Optional[int] = None
+    package_booking_id: Optional[int] = None,
+    branch_id: int = Depends(get_branch_id)
 ):
     try:
         # Cap limit to prevent performance issues
@@ -679,378 +747,160 @@ def get_all_assigned_services(
             limit = 200
         if limit < 1:
             limit = 50
-        assigned_services = service_crud.get_assigned_services(db, skip=skip, limit=limit, employee_id=employee_id, status=status, room_id=room_id, booking_id=booking_id, package_booking_id=package_booking_id)
+
+        print(f"[DEBUG] Fetching assigned services. Employee: {employee_id}, Status: {status}, Room: {room_id}, Branch: {branch_id}")
+        assigned_services = service_crud.get_assigned_services(db, skip=skip, limit=limit, employee_id=employee_id, status=status, room_id=room_id, booking_id=booking_id, package_booking_id=package_booking_id, branch_id=branch_id)
+        print(f"[DEBUG] Found {len(assigned_services)} assigned services.")
         
-        # Manually construct response to ensure proper serialization
         result = []
         for assigned in assigned_services:
-            # Ensure all relationships are loaded
-            if not assigned.service or not assigned.employee or not assigned.room:
-                # Skip incomplete records
-                print(f"[WARNING] Skipping assigned service {assigned.id} due to missing relationships")
-                continue
-            
-            # Use status enum directly (Pydantic will handle conversion)
-            status_enum = assigned.status
-            
-            # Load inventory items for the service
-            service_inventory_items = _load_inventory_items_for_service(db, assigned.service.id)
-            print(f"[DEBUG get_all_assigned_services] Service {assigned.service.id} has {len(service_inventory_items)} inventory items")
-            
-            # Fetch actual inventory items used from EmployeeInventoryAssignment (includes extra items)
-            items_used_list = []
             try:
-                from app.models.employee_inventory import EmployeeInventoryAssignment
-                from app.models.inventory import InventoryItem
+                # Convert enum status to string for response
+                status_enum = assigned.status
+                if hasattr(status_enum, 'value'):
+                    status_enum = status_enum.value
                 
-                print(f"[DEBUG] Querying EmployeeInventoryAssignment for service search {assigned.id}")
-                emp_inv_assignments = db.query(EmployeeInventoryAssignment).filter(
-                    EmployeeInventoryAssignment.assigned_service_id == assigned.id
-                ).all()
-                print(f"[DEBUG] Found {len(emp_inv_assignments)} assignments for service {assigned.id}")
-                
-                if emp_inv_assignments:
-                    for eia in emp_inv_assignments:
-                        # Fetch item details (optimize with joinedload if needed, but loop is small)
-                        inv_item = db.query(InventoryItem).filter(InventoryItem.id == eia.item_id).first()
-                        if inv_item:
-                            items_used_list.append({
-                                "id": int(inv_item.id),
-                                "name": str(inv_item.name),
-                                "item_code": getattr(inv_item, 'item_code', None),
-                                "unit": getattr(inv_item, 'unit', 'pcs') or 'pcs',
-                                "quantity": float(eia.quantity_assigned),
-                                "quantity_assigned": float(eia.quantity_assigned),
-                                "quantity_returned": float(eia.quantity_returned or 0.0),
-                                "unit_price": float(inv_item.unit_price) if inv_item.unit_price is not None else 0.0,
-                                "selling_price": float(inv_item.selling_price) if hasattr(inv_item, 'selling_price') and inv_item.selling_price is not None else None,
-                                "assignment_id": int(eia.id),
-                                "item": {
-                                    "id": int(inv_item.id),
-                                    "name": str(inv_item.name),
-                                    "unit": getattr(inv_item, 'unit', 'pcs') or 'pcs',
-                                    "item_code": getattr(inv_item, 'item_code', None)
-                                }
-                            })
-                    print(f"[DEBUG] Constructed {len(items_used_list)} items_used_list entries")
-            except Exception as e:
-                print(f"[WARNING] Failed to fetch inventory items used for assigned service {assigned.id}: {e}")
+                # Fetch inventory items used (template + extra)
+                items_used_list = []
+                try:
+                    # Load from actual assignments linked to this assigned service
+                    items_used_list = _load_assigned_inventory_items(db, assigned.id)
+                    if not items_used_list:
+                        # Fallback to template if no assignments found (legacy support)
+                        items_used_list = _load_inventory_items_for_service(db, assigned.service.id) or []
+                except Exception as inv_e:
+                    print(f"[DEBUG-ERROR] Error loading inventory for assigned service {assigned.id}: {inv_e}")
+
+                # Check for relationships safely
+                if assigned.service is None or assigned.employee is None or assigned.room is None:
+                    print(f"[DEBUG-ERROR] Missing mandatory relationships for assigned service {assigned.id}")
+                    continue
+
+                result.append({
+                    "id": assigned.id,
+                    "service_id": assigned.service.id,
+                    "employee_id": assigned.employee.id,
+                    "room_id": assigned.room.id,
+                    "booking_id": assigned.booking_id,
+                    "package_booking_id": assigned.package_booking_id,
+                    "service": {
+                        "id": assigned.service.id,
+                        "name": assigned.service.name,
+                        "description": assigned.service.description,
+                        "charges": assigned.service.charges,
+                        "is_visible_to_guest": assigned.service.is_visible_to_guest,
+                        "average_completion_time": assigned.service.average_completion_time,
+                        "created_at": assigned.service.created_at,
+                        "branch_id": getattr(assigned.service, "branch_id", None),
+                        "images": [{"id": img.id, "image_url": img.image_url} for img in assigned.service.images] if hasattr(assigned.service, 'images') else [],
+                        "inventory_items": []
+                    },
+                    "branch_id": getattr(assigned, "branch_id", None),
+                    "employee": {
+                        "id": assigned.employee.id,
+                        "name": assigned.employee.name
+                    },
+                    "room": {
+                        "id": assigned.room.id,
+                        "number": assigned.room.number
+                    },
+                    "assigned_at": assigned.assigned_at,
+                    "status": status_enum,
+                    "started_at": assigned.started_at,
+                    "completed_at": assigned.completed_at,
+                    "last_used_at": assigned.last_used_at,
+                    "override_charges": assigned.override_charges,
+                    "inventory_items_used": items_used_list
+                })
+            except Exception as loop_e:
+                print(f"[DEBUG-ERROR] Error serializing assigned service {assigned.id}: {str(loop_e)}")
                 import traceback
                 traceback.print_exc()
-            
-            # Fallback to template items if no specific assignment records found
-            if not items_used_list:
-                print(f"[DEBUG] items_used_list empty, falling back to service_inventory_items ({len(service_inventory_items)} items)")
-                items_used_list = service_inventory_items or []
-            
-            print(f"[DEBUG] Final items_used_list for {assigned.id}: {json.dumps(items_used_list, default=str)}")
-            
-            result.append({
-                "id": assigned.id,
-                "service_id": assigned.service.id,  # Add service_id for filtering
-                "employee_id": assigned.employee.id,  # Add employee_id for filtering
-                "room_id": assigned.room.id,  # Add room_id for filtering
-                "service": {
-                    "id": assigned.service.id,
-                    "name": assigned.service.name,
-                    "description": assigned.service.description,
-                    "charges": assigned.service.charges,
-                    "is_visible_to_guest": assigned.service.is_visible_to_guest if hasattr(assigned.service, 'is_visible_to_guest') else False,
-                    "average_completion_time": getattr(assigned.service, 'average_completion_time', None),
-                    "created_at": assigned.service.created_at,
-                    "images": [{"id": img.id, "image_url": img.image_url} for img in assigned.service.images] if hasattr(assigned.service, 'images') else [],
-                    "inventory_items": service_inventory_items
-                },
-                "employee": {
-                    "id": assigned.employee.id,
-                    "name": assigned.employee.name
-                },
-                "room": {
-                    "id": assigned.room.id,
-                    "number": assigned.room.number
-                },
-                "assigned_at": assigned.assigned_at,
-                "started_at": assigned.started_at,
-                "completed_at": assigned.completed_at,
-                "status": status_enum,
-                "last_used_at": assigned.last_used_at,
-                "inventory_items_used": items_used_list,
-                "debug_items": items_used_list # Bypass schema filtering check
-            })
+                if "InFailedSqlTransaction" in str(loop_e):
+                    db.rollback()
+                    raise HTTPException(status_code=500, detail=f"Database transaction failed: {str(loop_e)}")
+                continue
         
         return result
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
+        db.rollback()
         import traceback
         print(f"[ERROR] Error in get_all_assigned_services endpoint: {str(e)}")
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Failed to fetch assigned services: {str(e)}")
 
-
-@router.delete("/clear-all", tags=["Services"])
-def clear_all_services(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """
-    TEMPORARY ENDPOINT: Clear all services, assigned services, images, and inventory links.
-    Use with caution - this cannot be undone!
-    """
-    try:
-        # Delete in correct order to avoid foreign key violations
-        print("[WARNING] Clearing all services and assigned services...")
-        
-        # 1. Delete assigned services first
-        deleted_assigned = db.execute(text("DELETE FROM assigned_services")).rowcount
-        print(f"Deleted {deleted_assigned} assigned services")
-        
-        # 2. Delete service inventory item links
-        deleted_inventory = db.execute(text("DELETE FROM service_inventory_items")).rowcount
-        print(f"Deleted {deleted_inventory} service inventory item links")
-        
-        # 3. Delete service images
-        deleted_images = db.execute(text("DELETE FROM service_images")).rowcount
-        print(f"Deleted {deleted_images} service images")
-        
-        # 4. Finally delete services
-        deleted_services = db.execute(text("DELETE FROM services")).rowcount
-        print(f"Deleted {deleted_services} services")
-        
-        db.commit()
-        
-        return {
-            "detail": "All services and assigned services cleared successfully",
-            "deleted": {
-                "assigned_services": deleted_assigned,
-                "services": deleted_services,
-                "service_images": deleted_images,
-                "service_inventory_items": deleted_inventory
-            }
-        }
-    except Exception as e:
-        db.rollback()
-        import traceback
-        error_detail = f"Failed to clear services: {str(e)}\n{traceback.format_exc()}"
-        print(f"[ERROR] {error_detail}")
-        raise HTTPException(status_code=500, detail=f"Failed to clear services: {str(e)}")
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Failed to fetch assigned services: {str(e)}")
-
-@router.patch("/assigned/{assigned_id}")
+@router.api_route("/assigned/{assigned_id}", methods=["PATCH", "PUT"])
 def update_assigned_status(
     assigned_id: int,
-    status_update: service_schema.AssignedServiceUpdate,
+    update_data: service_schema.AssignedServiceUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     try:
-        updated_service = service_crud.update_assigned_service_status(db, assigned_id, status_update)
+        updated_service = service_crud.update_assigned_service_status(db, assigned_id, update_data)
+        if not updated_service:
+            raise HTTPException(status_code=404, detail="Assigned service not found")
         
-        if updated_service and status_update.status:
-            # Send Notification if status changed
-            try:
-                # Ensure relationships are loaded for notification message
-                service_name = updated_service.service.name if updated_service.service else "Unknown Service"
-                
-                notify_service_status_changed(
-                    db,
-                    service_name=service_name,
-                    status=str(updated_service.status),
-                    assigned_id=updated_service.id
-                )
-            except Exception as notif_error:
-                print(f"[WARNING] Failed to send status notification: {notif_error}")
+        # Ensure relationships are loaded for the response
+        db.refresh(updated_service)
         
+        items_used_list = []
+        try:
+            # Load from actual assignments
+            items_used_list = _load_assigned_inventory_items(db, updated_service.id)
+            if not items_used_list:
+                items_used_list = _load_inventory_items_for_service(db, updated_service.service_id) or []
+        except Exception:
+            pass
+
         return {
             "id": updated_service.id,
+            "service_id": updated_service.service_id,
+            "employee_id": updated_service.employee_id,
+            "room_id": updated_service.room_id,
+            "booking_id": updated_service.booking_id,
+            "package_booking_id": getattr(updated_service, "package_booking_id", None),
+            "service": {
+                "id": updated_service.service.id if updated_service.service else None,
+                "name": updated_service.service.name if updated_service.service else "Unknown",
+                "charges": updated_service.service.charges if updated_service.service else 0
+            },
+            "employee": {
+                "id": updated_service.employee.id if updated_service.employee else None,
+                "name": updated_service.employee.name if updated_service.employee else "Unassigned"
+            },
+            "room": {
+                "id": updated_service.room.id if updated_service.room else None,
+                "number": updated_service.room.number if updated_service.room else "N/A"
+            },
+            "assigned_at": updated_service.assigned_at,
+            "started_at": getattr(updated_service, 'started_at', None),
+            "completed_at": getattr(updated_service, 'completed_at', None),
             "status": updated_service.status.value if hasattr(updated_service.status, 'value') else str(updated_service.status),
-            "billing_status": updated_service.billing_status
+            "billing_status": getattr(updated_service, 'billing_status', 'unbilled'),
+            "inventory_items_used": items_used_list
         }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         print(f"[ERROR] Error updating assigned service status: {str(e)}")
         print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Failed to update service status: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to update assigned service status")
 
-@router.delete("/assigned/{assigned_id}")
-def delete_assigned_service(assigned_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    success = service_crud.delete_assigned_service(db, assigned_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Assigned service not found")
-    return {"detail": "Deleted successfully"}
-
-# Employee Inventory Management Endpoints
-@router.get("/employee-inventory/{employee_id}")
-def get_employee_inventory_assignments(
-    employee_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    status: Optional[str] = None
-):
-    """Get all inventory assignments for an employee"""
+@router.delete("/clear-all", tags=["Services"])
+def clear_all_services(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     try:
-        from app.models.employee_inventory import EmployeeInventoryAssignment
-        from app.schemas.employee_inventory import EmployeeInventoryAssignmentOut
-        from app.models.inventory import LocationStock, Location
-        
-        query = db.query(EmployeeInventoryAssignment).filter(
-            EmployeeInventoryAssignment.employee_id == employee_id
-        )
-        
-        if status:
-            # Support comma-separated status values
-            status_list = [s.strip() for s in status.split(',')]
-            if len(status_list) > 1:
-                query = query.filter(EmployeeInventoryAssignment.status.in_(status_list))
-            else:
-                query = query.filter(EmployeeInventoryAssignment.status == status_list[0])
-        
-        assignments = query.options(
-            joinedload(EmployeeInventoryAssignment.item),
-            joinedload(EmployeeInventoryAssignment.assigned_service).joinedload(AssignedService.service),
-            joinedload(EmployeeInventoryAssignment.assigned_service).joinedload(AssignedService.room)
-        ).all()
-        
-        result = []
-        for assignment in assignments:
-            # Fetch active stock locations
-            stock_locations = []
-            if assignment.item_id:
-                active_stocks = db.query(LocationStock).join(Location).filter(
-                    LocationStock.item_id == assignment.item_id,
-                    LocationStock.quantity > 0
-                ).all()
-                
-                stock_locations = [
-                    {
-                        "id": stock.location.id,
-                        "name": stock.location.name,
-                        "location_code": stock.location.location_code
-                    } for stock in active_stocks if stock.location
-                ]
-
-            result.append({
-                "id": assignment.id,
-                "employee_id": assignment.employee_id,
-                "assigned_service_id": assignment.assigned_service_id,
-                "item_id": assignment.item_id,
-                "item": {
-                    "id": assignment.item.id if assignment.item else None,
-                    "name": assignment.item.name if assignment.item else "Unknown",
-                    "item_code": assignment.item.item_code if assignment.item else None,
-                    "unit": assignment.item.unit if assignment.item else "pcs",
-                    "location": assignment.item.location if assignment.item else None,
-                    "stock_locations": stock_locations,
-                } if assignment.item else None,
-                "item_name": assignment.item.name if assignment.item else "Unknown",
-                "item_code": assignment.item.item_code if assignment.item else None,
-                "unit": assignment.item.unit if assignment.item else "pcs",
-                "quantity_assigned": assignment.quantity_assigned,
-                "quantity_used": assignment.quantity_used,
-                "quantity_returned": assignment.quantity_returned,
-                "balance_quantity": assignment.balance_quantity,
-                "status": assignment.status,
-                "is_returned": assignment.is_returned,
-                "assigned_at": assignment.assigned_at,
-                "returned_at": assignment.returned_at,
-                "notes": assignment.notes,
-                "service_name": assignment.assigned_service.service.name if assignment.assigned_service and assignment.assigned_service.service else None,
-                "room_number": assignment.assigned_service.room.number if assignment.assigned_service and assignment.assigned_service.room else None
-            })
-        
-        return result
-    except ImportError:
-        raise HTTPException(status_code=501, detail="Employee inventory tracking not available")
-    except Exception as e:
-        import traceback
-        print(f"[ERROR] Error fetching employee inventory: {str(e)}")
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Failed to fetch employee inventory: {str(e)}")
-
-@router.post("/return-inventory")
-def return_inventory_items(
-    return_data: dict,  # {assignment_id: int, quantity_returned: float, notes: Optional[str]}
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Return inventory items to office/warehouse"""
-    try:
-        from app.models.employee_inventory import EmployeeInventoryAssignment
-        from app.models.inventory import InventoryItem, InventoryTransaction, Location
-        
-        assignment_id = return_data.get("assignment_id")
-        quantity_returned = float(return_data.get("quantity_returned", 0))
-        notes = return_data.get("notes", "")
-        
-        if not assignment_id or quantity_returned <= 0:
-            raise HTTPException(status_code=400, detail="Invalid return data")
-        
-        # Get assignment
-        assignment = db.query(EmployeeInventoryAssignment).filter(
-            EmployeeInventoryAssignment.id == assignment_id
-        ).first()
-        
-        if not assignment:
-            raise HTTPException(status_code=404, detail="Inventory assignment not found")
-        
-        # Check if return quantity is valid
-        balance = assignment.balance_quantity
-        if quantity_returned > balance:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Cannot return {quantity_returned}. Balance available: {balance}"
-            )
-        
-        # Update assignment
-        assignment.quantity_returned += quantity_returned
-        if assignment.quantity_returned >= assignment.quantity_assigned:
-            assignment.is_returned = True
-            assignment.status = "returned"
-            assignment.returned_at = datetime.utcnow()
-        
-        # Find main warehouse location
-        main_location = db.query(Location).filter(
-            (Location.location_type == "WAREHOUSE") | 
-            (Location.location_type == "CENTRAL_WAREHOUSE") |
-            (Location.is_inventory_point == True)
-        ).first()
-        
-        if not main_location:
-            main_location = db.query(Location).filter(
-                Location.location_type.in_(["WAREHOUSE", "CENTRAL_WAREHOUSE", "BRANCH_STORE"])
-            ).first()
-        
-        # Add stock back
-        item = db.query(InventoryItem).filter(InventoryItem.id == assignment.item_id).first()
-        if item:
-            item.current_stock += quantity_returned
-            print(f"[DEBUG] Returned {quantity_returned} {item.unit} of {item.name}. New stock: {item.current_stock}")
-        
-        # Create return transaction
-        transaction = InventoryTransaction(
-            item_id=assignment.item_id,
-            transaction_type="in",
-            quantity=quantity_returned,
-            unit_price=item.unit_price if item else None,
-            total_amount=item.unit_price * quantity_returned if item and item.unit_price else None,
-            reference_number=f"RETURN-{assignment_id}",
-            notes=f"Return from Employee: {assignment.employee.name if assignment.employee else 'Unknown'} - {notes}",
-            created_by=current_user.id if current_user else None
-        )
-        db.add(transaction)
-        
+        from app.models.service import AssignedService
+        db.query(AssignedService).delete()
         db.commit()
-        db.refresh(assignment)
-        
-        return {
-            "message": "Inventory returned successfully",
-            "assignment_id": assignment.id,
-            "quantity_returned": quantity_returned,
-            "balance_remaining": assignment.balance_quantity
-        }
-    except HTTPException:
-        raise
-    except ImportError:
-        raise HTTPException(status_code=501, detail="Employee inventory tracking not available")
+        return {"detail": "All assigned services cleared"}
     except Exception as e:
         db.rollback()
-        import traceback
-        print(f"[ERROR] Error returning inventory: {str(e)}")
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Failed to return inventory: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

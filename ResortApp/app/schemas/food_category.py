@@ -1,5 +1,5 @@
-# schemas/food_category.py
 from pydantic import BaseModel
+from typing import Optional
 
 class FoodCategoryBase(BaseModel):
     name: str
@@ -9,6 +9,7 @@ class FoodCategoryCreate(FoodCategoryBase):
 
 class FoodCategoryOut(FoodCategoryBase):
     id: int
+    branch_id: Optional[int] = None
     image: str | None
 
     class Config:

@@ -1,20 +1,27 @@
-import psycopg2
+from app.utils.auth import get_db
+from app.models.inventory import AssetMapping, Location
+from sqlalchemy.orm import Session
+import os
+import sys
 
-def check_mappings():
-    try:
-        conn = psycopg2.connect(dbname="orchid_resort", user="postgres")
-        cur = conn.cursor()
-        cur.execute("SELECT id, item_id, location_id, is_active FROM asset_mappings WHERE item_id = 30")
-        mappings = cur.fetchall()
-        print("Asset Mappings (bed sheet):")
-        for m in mappings:
-            print(f"  ID {m[0]}: Item {m[1]}, Location {m[2]}, Active {m[3]}")
-            
-    except Exception as e:
-        print(f"Error: {e}")
-    finally:
-        if 'cur' in locals(): cur.close()
-        if 'conn' in locals(): conn.close()
+# Add the project directory to sys.path
+sys.path.append(os.path.join(os.getcwd(), "ResortApp"))
 
-if __name__ == "__main__":
-    check_mappings()
+from app.utils.auth import get_db
+
+db_gen = get_db()
+db = next(db_gen)
+
+try:
+    mappings = db.query(AssetMapping).all()
+    print(f"{'ID':<5} | {'Item ID':<8} | {'Branch ID':<10} | {'Location ID':<12} | {'Active':<7}")
+    print("-" * 60)
+    for m in mappings:
+        print(f"{m.id:<5} | {m.item_id:<8} | {m.branch_id:<10} | {m.location_id:<12} | {m.is_active:<7}")
+
+    print("\nLocations:")
+    locations = db.query(Location).all()
+    for l in locations:
+        print(f"ID: {l.id}, Name: {l.name}, Branch ID: {l.branch_id}")
+finally:
+    db.close()

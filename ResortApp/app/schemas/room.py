@@ -28,6 +28,7 @@ class RoomCreate(RoomBase):
 
 class RoomOut(RoomBase):
     id: int
+    branch_id: Optional[int] = None
     status: str
     housekeeping_status: Optional[str] = "Clean"
     housekeeping_updated_at: Optional[datetime] = None

@@ -1,27 +1,32 @@
 # booking.py
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Query, Form
+import os
+# Absolute project root path (ResortApp/)
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_UPLOAD_ROOT = os.path.join(_BASE_DIR, "uploads")
 from sqlalchemy.orm import Session, joinedload, load_only
 from sqlalchemy import func, or_, and_
 from typing import List, Union, Optional
 from app.utils.auth import get_db, get_current_user
 from app.utils.api_optimization import optimize_limit, MAX_LIMIT_LOW_NETWORK
-from app.utils.booking_id import parse_display_id
+from app.utils.booking_id import parse_display_id, format_display_id
 from app.models.booking import Booking, BookingRoom
+from app.utils.branch_scope import get_branch_id
 from app.models.user import User
+
 from app.models.room import Room
 from app.models.Package import Package, PackageBooking, PackageBookingRoom
 from app.schemas.booking import BookingCreate, BookingOut
 from app.models.checkout import Checkout
 from app.schemas.room import RoomOut
 from fastapi.responses import FileResponse
-import os
 import shutil
 import uuid
 from app.curd import foodorder as crud_food_order
 from app.schemas.foodorder import FoodOrderCreate, FoodOrderItemCreate
 from app.utils.employee_helpers import get_fallback_employee_id
 
-UPLOAD_DIR = "uploads/checkin_proofs"
+UPLOAD_DIR = os.path.join(_UPLOAD_ROOT, "checkin_proofs")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 from app.schemas.booking import BookingOut, BookingRoomOut
 from pydantic import BaseModel, ValidationError
@@ -46,8 +51,10 @@ def get_bookings(
     order_by: str = "id", 
     order: str = "desc",
     fields: Optional[str] = None,
-    room_id: Optional[int] = None
+    room_id: Optional[int] = None,
+    branch_id: int = Depends(get_branch_id)
 ):
+
     try:
         # Optimize limit for low network
         limit = optimize_limit(limit, MAX_LIMIT_LOW_NETWORK)
@@ -55,6 +62,10 @@ def get_bookings(
         # Get regular bookings - NO eager loading to maximize performance
         # Load relationships separately only when needed
         query = db.query(Booking)
+        
+        if branch_id is not None:
+             query = query.filter(Booking.branch_id == branch_id)
+
 
         if room_id:
             query = query.join(BookingRoom).filter(BookingRoom.room_id == room_id)
@@ -125,7 +136,9 @@ def get_bookings(
                         "email": email,
                         "phone": getattr(user_data, "phone", None),
                         "is_active": getattr(user_data, "is_active", True),
-                        "role": role_obj
+                        "role": role_obj,
+                        "branch_id": getattr(user_data, "branch_id", None),
+                        "is_superadmin": getattr(user_data, "is_superadmin", False)
                     }
                     user_obj = UserOut.model_validate(user_dict)
                 except Exception as e:
@@ -148,6 +161,8 @@ def get_bookings(
                 is_package=False,
                 total_amount=booking.total_amount or 0.0,
                 advance_deposit=booking.advance_deposit or 0.0,
+                checked_in_at=booking.checked_in_at,
+                checked_out_at=booking.checked_out_at,
                 rooms=booking_rooms_map.get(booking.id, [])
             )
             
@@ -340,7 +355,8 @@ def _fetch_inventory(db: Session, room_ids: List[int], check_in, check_out, book
 # GET Detailed view for a SINGLE booking (regular or package)
 # ----------------------------------------------------------------
 @router.get("/details/{booking_id}", response_model=BookingOut)
-def get_booking_details(booking_id: Union[str, int], is_package: bool, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def get_booking_details(booking_id: Union[str, int], is_package: bool, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+
     # Parse display ID (BK-000001 or PK-000001) or accept numeric ID
     numeric_id, booking_type = parse_display_id(str(booking_id))
     if numeric_id is None:
@@ -356,12 +372,18 @@ def get_booking_details(booking_id: Union[str, int], is_package: bool, db: Sessi
     
     try:
         if is_package:
-            booking = db.query(PackageBooking).options(
+            query = db.query(PackageBooking).options(
                 joinedload(PackageBooking.rooms).joinedload(PackageBookingRoom.room),
                 joinedload(PackageBooking.user),
                 joinedload(PackageBooking.package),
                 joinedload(PackageBooking.checkout)
-            ).filter(PackageBooking.id == booking_id).first()
+            ).filter(PackageBooking.id == booking_id)
+            
+            if branch_id is not None:
+                query = query.filter(PackageBooking.branch_id == branch_id)
+                
+            booking = query.first()
+
 
             if not booking:
                 raise HTTPException(status_code=404, detail="Package booking not found")
@@ -392,17 +414,26 @@ def get_booking_details(booking_id: Union[str, int], is_package: bool, db: Sessi
                 user=booking.user,
                 is_package=True,
                 total_amount=total_amt,
+                checked_in_at=booking.checked_in_at,
+                checked_out_at=booking.checked_out_at,
+                checkout=booking.checkout,
                 rooms=[pbr.room for pbr in booking.rooms if pbr.room],
                 food_orders=_fetch_extras(db, room_ids, start_filter, booking.check_out),
                 service_requests=_fetch_services(db, room_ids, start_filter, booking.check_out),
                 inventory_usage=_fetch_inventory(db, room_ids, start_filter, booking.check_out, booking_id=booking.id)
             )
         else: # Regular booking
-            booking = db.query(Booking).options(
+            query = db.query(Booking).options(
                 joinedload(Booking.booking_rooms).joinedload(BookingRoom.room),
                 joinedload(Booking.user).joinedload(User.role),
                 joinedload(Booking.checkout)
-            ).filter(Booking.id == booking_id).first()
+            ).filter(Booking.id == booking_id)
+            
+            if branch_id is not None:
+                query = query.filter(Booking.branch_id == branch_id)
+                
+            booking = query.first()
+
 
             if not booking:
                 raise HTTPException(status_code=404, detail="Booking not found")
@@ -463,6 +494,9 @@ def get_booking_details(booking_id: Union[str, int], is_package: bool, db: Sessi
                 is_package=False,
                 total_amount=total_amt,
                 advance_deposit=booking.advance_deposit or 0.0,
+                checked_in_at=booking.checked_in_at,
+                checked_out_at=booking.checked_out_at,
+                checkout=booking.checkout,
                 rooms=[br.room for br in booking.booking_rooms if br.room],
                 food_orders=_fetch_extras(db, room_ids, start_filter, booking.check_out),
                 service_requests=_fetch_services(db, room_ids, start_filter, booking.check_out),
@@ -479,7 +513,8 @@ def get_booking_details(booking_id: Union[str, int], is_package: bool, db: Sessi
 # -------------------------------
 # Helper function to get or create guest user
 # -------------------------------
-def get_or_create_guest_user(db: Session, email: str, mobile: str, name: str):
+def get_or_create_guest_user(db: Session, email: str, mobile: str, name: str, branch_id: int):
+
     """
     Find or create a guest user based on email and mobile number.
     Returns the user_id to link bookings to the same user.
@@ -499,11 +534,13 @@ def get_or_create_guest_user(db: Session, email: str, mobile: str, name: str):
     # First, try to find user by email (most reliable identifier)
     user = None
     if email:
-        user = db.query(User).filter(User.email == email).first()
+        user = db.query(User).filter(User.email == email, User.branch_id == branch_id).first()
+
     
     # If not found by email, try by mobile/phone
     if not user and mobile:
-        user = db.query(User).filter(User.phone == mobile).first()
+        user = db.query(User).filter(User.phone == mobile, User.branch_id == branch_id).first()
+
     
     # If user exists, return the user_id
     if user:
@@ -553,8 +590,10 @@ def get_or_create_guest_user(db: Session, email: str, mobile: str, name: str):
             phone=mobile if mobile else None,
             hashed_password=hashed_password,
             role_id=guest_role.id,
-            is_active=True
+            is_active=True,
+            branch_id=branch_id
         )
+
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
@@ -577,7 +616,8 @@ def get_or_create_guest_user(db: Session, email: str, mobile: str, name: str):
 # POST a new booking
 # -------------------------------
 @router.post("", response_model=BookingOut) # Changed from "/" to ""
-def create_booking(booking: BookingCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def create_booking(booking: BookingCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+
     print(f"DEBUG: create_booking called with: {booking}")
     # Find or create guest user based on email and mobile
     guest_user_id = None
@@ -598,16 +638,20 @@ def create_booking(booking: BookingCreate, db: Session = Depends(get_db), curren
                 db=db,
                 email=guest_email,
                 mobile=guest_mobile,
-                name=booking.guest_name or "Guest User"
+                name=booking.guest_name or "Guest User",
+                branch_id=branch_id
             )
+
         except Exception as e:
             # Log error but don't fail the booking if user creation fails
             print(f"Warning: Could not create/link guest user: {str(e)}")
     
     # Check for an existing booking to reuse guest details for consistency
     existing_booking = db.query(Booking).filter(
-        (Booking.guest_email == booking.guest_email) & (Booking.guest_mobile == booking.guest_mobile)
+        (Booking.guest_email == booking.guest_email) & (Booking.guest_mobile == booking.guest_mobile),
+        Booking.branch_id == branch_id
     ).order_by(Booking.id.desc()).first()
+
 
     # Logic Removed: We should NOT overwrite the provided guest name with an old one.
     # If the user provides a name "jeena", we should save "jeena", even if previous bookings
@@ -615,7 +659,8 @@ def create_booking(booking: BookingCreate, db: Session = Depends(get_db), curren
     guest_name_to_use = booking.guest_name
 
     # Validate room capacity for adults and children separately
-    selected_rooms = db.query(Room).filter(Room.id.in_(booking.room_ids)).all()
+    selected_rooms = db.query(Room).filter(Room.id.in_(booking.room_ids), Room.branch_id == branch_id).all()
+
     if len(selected_rooms) != len(booking.room_ids):
         print(f"DEBUG: Invalid rooms. Selected IDs: {booking.room_ids}, Found: {len(selected_rooms)}")
         raise HTTPException(status_code=400, detail="One or more selected rooms are invalid.")
@@ -641,17 +686,11 @@ def create_booking(booking: BookingCreate, db: Session = Depends(get_db), curren
         # Check if room is already booked by regular bookings for overlapping dates (only check active bookings, not cancelled or checked-out)
         conflicting_regular_booking = db.query(BookingRoom).join(Booking).filter(
             BookingRoom.room_id == room_id,
-            BookingRoom.room_id == room_id,
-            # Case-insensitive check for active statuses
-            and_(
-                Booking.status.ilike('booked'),
-                Booking.status.ilike('checked-in')
-            ) == False, # Logic fix: we want to MATCH these
-            # Actually, using in_ with ilike is hard in one go.
-            # Simplified:
+            Booking.branch_id == branch_id,
             or_(
                 Booking.status.ilike('booked'),
-                Booking.status.ilike('checked-in')
+                Booking.status.ilike('checked-in'),
+                Booking.status.ilike('checked_in')
             ),
             Booking.check_in < booking.check_out,
             Booking.check_out > booking.check_in
@@ -660,10 +699,12 @@ def create_booking(booking: BookingCreate, db: Session = Depends(get_db), curren
         # Check if room is already booked by package bookings for overlapping dates
         conflicting_package_booking = db.query(PackageBookingRoom).join(PackageBooking).filter(
             PackageBookingRoom.room_id == room_id,
+            PackageBooking.branch_id == branch_id,
             PackageBooking.status.in_(['booked', 'checked-in']),  # Only check for active bookings
             PackageBooking.check_in < booking.check_out,
             PackageBooking.check_out > booking.check_in
         ).first()
+
         
         if conflicting_regular_booking or conflicting_package_booking:
             room = db.query(Room).filter(Room.id == room_id).first()
@@ -682,8 +723,15 @@ def create_booking(booking: BookingCreate, db: Session = Depends(get_db), curren
         adults=booking.adults,
         children=booking.children,
         user_id=guest_user_id,  # Link booking to guest user
+        branch_id=branch_id
     )
+
     db.add(db_booking)
+    db.commit()
+    db.refresh(db_booking)
+
+    # Generate and save display_id
+    db_booking.display_id = format_display_id(db_booking.id, branch_id=branch_id)
     db.commit()
     db.refresh(db_booking)
 
@@ -692,7 +740,7 @@ def create_booking(booking: BookingCreate, db: Session = Depends(get_db), curren
         room = db.query(Room).filter(Room.id == room_id).first()
         if room:
             room.status = "Booked"
-        db.add(BookingRoom(booking_id=db_booking.id, room_id=room_id))
+        db.add(BookingRoom(booking_id=db_booking.id, room_id=room_id, branch_id=branch_id))
     
     db.commit()
 
@@ -707,6 +755,44 @@ def create_booking(booking: BookingCreate, db: Session = Depends(get_db), curren
     )
     
     # Convert to BookingOut format with rooms
+    # Safe user serialization — handle malformed emails (e.g., missing .com)
+    safe_user = None
+    if booking_with_rooms.user:
+        try:
+            from app.schemas.user import UserOut
+            raw_user = booking_with_rooms.user
+            raw_email = getattr(raw_user, 'email', None)
+            if raw_email and "@" in raw_email and "." not in raw_email.split("@")[1]:
+                raw_email = raw_email + ".com"
+            role_obj = None
+            try:
+                if getattr(raw_user, 'role_id', None):
+                    from app.models.role import Role
+                    role_obj = db.query(Role).filter(Role.id == raw_user.role_id).first()
+            except Exception:
+                pass
+            safe_user = UserOut.model_validate({
+                "id": raw_user.id, "name": raw_user.name, "email": raw_email,
+                "phone": getattr(raw_user, "phone", None),
+                "is_active": getattr(raw_user, "is_active", True), "role": role_obj,
+                "branch_id": getattr(raw_user, "branch_id", None),
+                "is_superadmin": getattr(raw_user, "is_superadmin", False)
+            })
+        except Exception as ue:
+            print(f"Warning: Could not serialize user for new booking: {ue}")
+
+    # Calculate total amount
+    try:
+        from datetime import datetime, date
+        ci = booking_with_rooms.check_in
+        co = booking_with_rooms.check_out
+        if isinstance(ci, str): ci = datetime.strptime(ci, '%Y-%m-%d').date()
+        if isinstance(co, str): co = datetime.strptime(co, '%Y-%m-%d').date()
+        nights = max(1, (co - ci).days)
+        total_amt = sum(float(br.room.price or 0) for br in booking_with_rooms.booking_rooms if br.room) * nights
+    except Exception:
+        total_amt = 0.0
+
     booking_out = BookingOut(
         id=booking_with_rooms.id,
         guest_name=booking_with_rooms.guest_name,
@@ -719,8 +805,10 @@ def create_booking(booking: BookingCreate, db: Session = Depends(get_db), curren
         children=booking_with_rooms.children,
         id_card_image_url=getattr(booking_with_rooms, 'id_card_image_url', None),
         guest_photo_url=getattr(booking_with_rooms, 'guest_photo_url', None),
-        user=booking_with_rooms.user,
+        user=safe_user,
         is_package=False,
+        total_amount=total_amt,
+        advance_deposit=getattr(booking_with_rooms, 'advance_deposit', 0.0) or 0.0,
         rooms=[br.room for br in booking_with_rooms.booking_rooms if br.room]
     )
     
@@ -749,8 +837,8 @@ def create_booking(booking: BookingCreate, db: Session = Depends(get_db), curren
                         'price': room_price
                     })
             
-            # Format booking ID (BK-000001)
-            formatted_booking_id = f"BK-{str(booking_with_rooms.id).zfill(6)}"
+            # Format booking ID (BK-1-000001)
+            formatted_booking_id = format_display_id(booking_with_rooms.id, branch_id=branch_id)
             
             email_html = create_booking_confirmation_email(
                 guest_name=guest_name_to_use,
@@ -779,11 +867,15 @@ def create_booking(booking: BookingCreate, db: Session = Depends(get_db), curren
     return booking_out
 
 @router.post("/guest", response_model=BookingOut, summary="Create a booking as a guest")
-def create_guest_booking(booking: BookingCreate, db: Session = Depends(get_db)):
+def create_guest_booking(booking: BookingCreate, db: Session = Depends(get_db), branch_id_query: int = Query(1, alias="branch_id")):
+
     """
     Public endpoint for guests to create a booking without authentication.
     """
     try:
+        # Prioritize branch_id from the JSON body (BookingCreate schema)
+        branch_id = booking.branch_id if booking.branch_id is not None else branch_id_query
+        
         # Find or create guest user based on email and mobile
         guest_user_id = None
         # Normalize email and mobile - convert empty strings to None, handle None safely
@@ -803,8 +895,10 @@ def create_guest_booking(booking: BookingCreate, db: Session = Depends(get_db)):
                     db=db,
                     email=guest_email,
                     mobile=guest_mobile,
-                    name=booking.guest_name or "Guest User"
+                    name=booking.guest_name or "Guest User",
+                    branch_id=branch_id
                 )
+
             except Exception as e:
                 # Log error but don't fail the booking if user creation fails
                 print(f"Warning: Could not create/link guest user: {str(e)}")
@@ -816,7 +910,8 @@ def create_guest_booking(booking: BookingCreate, db: Session = Depends(get_db)):
             duplicate_query = db.query(Booking).filter(
                 Booking.check_in == booking.check_in,
                 Booking.check_out == booking.check_out,
-                Booking.status.in_(['booked', 'checked-in'])
+                Booking.status.in_(['booked', 'checked-in']),
+                Booking.branch_id == branch_id
             )
             
             # Add email filter if normalized email exists
@@ -839,7 +934,7 @@ def create_guest_booking(booking: BookingCreate, db: Session = Depends(get_db)):
         # Only check if we have at least email or mobile
         existing_booking = None
         if guest_email or guest_mobile:
-            existing_query = db.query(Booking)
+            existing_query = db.query(Booking).filter(Booking.branch_id == branch_id)
             
             # Add email filter if normalized email exists
             if guest_email:
@@ -855,9 +950,11 @@ def create_guest_booking(booking: BookingCreate, db: Session = Depends(get_db)):
         guest_name_to_use = booking.guest_name or "Guest User"
 
         # Validate room capacity for adults and children separately
-        selected_rooms = db.query(Room).filter(Room.id.in_(booking.room_ids)).all()
+        # Ensure rooms belong to the specified branch
+        selected_rooms = db.query(Room).filter(Room.id.in_(booking.room_ids), Room.branch_id == branch_id).all()
         if len(selected_rooms) != len(booking.room_ids):
-            raise HTTPException(status_code=400, detail="One or more selected rooms are invalid.")
+            print(f"DEBUG: Invalid rooms for branch {branch_id}. Selected: {booking.room_ids}, Found: {[r.id for r in selected_rooms]}")
+            raise HTTPException(status_code=400, detail="One or more selected rooms are invalid or belong to a different branch.")
         
         total_adult_capacity = sum(room.adults or 0 for room in selected_rooms)
         total_children_capacity = sum(room.children or 0 for room in selected_rooms)
@@ -879,7 +976,7 @@ def create_guest_booking(booking: BookingCreate, db: Session = Depends(get_db)):
             # Check if room is already booked by regular bookings for overlapping dates (only check active bookings, not cancelled or checked-out)
             conflicting_regular_booking = db.query(BookingRoom).join(Booking).filter(
                 BookingRoom.room_id == room_id,
-                BookingRoom.room_id == room_id,
+                Booking.branch_id == branch_id,
                 or_(
                     Booking.status.ilike('booked'),
                     Booking.status.ilike('checked-in')
@@ -891,6 +988,7 @@ def create_guest_booking(booking: BookingCreate, db: Session = Depends(get_db)):
             # Check if room is already booked by package bookings for overlapping dates
             conflicting_package_booking = db.query(PackageBookingRoom).join(PackageBooking).filter(
                 PackageBookingRoom.room_id == room_id,
+                PackageBooking.branch_id == branch_id,
                 PackageBooking.status.in_(['booked', 'checked-in']),  # Only check for active bookings
                 PackageBooking.check_in < booking.check_out,
                 PackageBooking.check_out > booking.check_in
@@ -904,7 +1002,7 @@ def create_guest_booking(booking: BookingCreate, db: Session = Depends(get_db)):
                 )
 
         # Calculate stay duration
-        from datetime import datetime
+        from datetime import datetime, date
         # Ensure dates are date objects
         d_check_in = booking.check_in if isinstance(booking.check_in, date) else datetime.strptime(str(booking.check_in), '%Y-%m-%d').date()
         d_check_out = booking.check_out if isinstance(booking.check_out, date) else datetime.strptime(str(booking.check_out), '%Y-%m-%d').date()
@@ -925,6 +1023,7 @@ def create_guest_booking(booking: BookingCreate, db: Session = Depends(get_db)):
             children=booking.children,
             user_id=guest_user_id,  # Link booking to guest user
             total_amount=calculated_total_amount, # Set calculated total amount
+            branch_id=branch_id
         )
         db.add(db_booking)
         db.commit()
@@ -933,7 +1032,7 @@ def create_guest_booking(booking: BookingCreate, db: Session = Depends(get_db)):
         # Create BookingRoom links and update room status
         for room_id in booking.room_ids:
             db.query(Room).filter(Room.id == room_id).update({"status": "Booked"})
-            db.add(BookingRoom(booking_id=db_booking.id, room_id=room_id))
+            db.add(BookingRoom(booking_id=db_booking.id, room_id=room_id, branch_id=branch_id))
         db.commit()
         db.refresh(db_booking)
         
@@ -970,8 +1069,8 @@ def create_guest_booking(booking: BookingCreate, db: Session = Depends(get_db)):
                             'price': room_price
                         })
                 
-                # Format booking ID (BK-000001)
-                formatted_booking_id = f"BK-{str(db_booking.id).zfill(6)}"
+                # Format booking ID
+                formatted_booking_id = format_display_id(db_booking.id, branch_id=branch_id)
                 
                 email_to_use = guest_email or booking.guest_email
                 if email_to_use:
@@ -1027,7 +1126,8 @@ def check_in_booking(
     guest_photo: Optional[UploadFile] = File(None),
     amenityAllocation: Optional[str] = Form(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     print(f"[DEBUG] REGULAR CHECK-IN REQUEST: Booking ID: {booking_id}")
     print(f"[DEBUG] Amenity Allocation: {amenityAllocation}")
@@ -1174,11 +1274,11 @@ def check_in_booking(
             # Actually, we just verified booking.status == 'booked'. So it can't be occupied by this booking.
             if len(occupied_rooms) > 0:
                  occupied_numbers = ", ".join([str(r.number) for r in occupied_rooms])
-                 print(f"WARNING: Forced check-in despite occupied status for rooms: {occupied_numbers}. Statuses: {[r.status for r in occupied_rooms]}")
-                 # raise HTTPException(
-                 #     status_code=400, 
-                 #     detail=f"Cannot check-in. The following room(s) are currently marked as Checked-in/Occupied: {occupied_numbers}. Please check-out the previous guest first."
-                 # )
+                 print(f"WARNING: Prevented check-in due to occupied status for rooms: {occupied_numbers}")
+                 raise HTTPException(
+                     status_code=400, 
+                     detail=f"Cannot check-in. The following room(s) are currently marked as Checked-in/Occupied: {occupied_numbers}. Please check-out the previous guest first."
+                 )
 
     # Save ID card image (if provided)
     if id_card_image:
@@ -1216,7 +1316,7 @@ def check_in_booking(
         from app.models.notification import Notification
         # Get room numbers for notification
         room_numbers = ", ".join([f"#{br.room.number}" for br in booking.booking_rooms if br.room])
-        formatted_booking_id = f"BK-{str(booking_id).zfill(6)}"
+        formatted_booking_id = format_display_id(booking_id, branch_id=branch_id)
         
         notification = Notification(
             user_id=current_user.id,
@@ -1262,7 +1362,7 @@ def check_in_booking(
                             continue
 
                         # Create Issue Record
-                        formatted_booking_id = f"BK-{str(booking_id).zfill(6)}"
+                        formatted_booking_id = format_display_id(booking_id, branch_id=branch_id)
                         stock_issue = StockIssue(
                             source_location_id=source_id,
                             destination_location_id=room.inventory_location_id,
@@ -1346,7 +1446,7 @@ def check_in_booking(
 # Cancel a booking
 # -------------------------------
 @router.put("/{booking_id}/cancel", response_model=BookingOut)
-def cancel_booking(booking_id: Union[str, int], db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def cancel_booking(booking_id: Union[str, int], db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
     # Parse display ID (BK-000001) or accept numeric ID
     numeric_id, booking_type = parse_display_id(str(booking_id))
     if numeric_id is None:
@@ -1370,7 +1470,7 @@ def cancel_booking(booking_id: Union[str, int], db: Session = Depends(get_db), c
     return booking
     
 @router.put("/{booking_id}/extend", response_model=BookingOut)
-def extend_checkout(booking_id: Union[str, int], new_checkout: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def extend_checkout(booking_id: Union[str, int], new_checkout: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
     """
     Extend the checkout date for a booking.
     Validates that the new checkout date is after the current checkout date
@@ -1503,11 +1603,15 @@ def extend_checkout(booking_id: Union[str, int], new_checkout: str, db: Session 
 # GET booking by ID
 # -------------------------------
 @router.get("/{booking_id}", response_model=BookingOut)
-def get_booking(booking_id: Union[str, int], db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def get_booking(booking_id: Union[str, int], db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
     # Parse display ID (BK-000001) or accept numeric ID
     numeric_id, booking_type = parse_display_id(str(booking_id))
     if numeric_id is None:
         raise HTTPException(status_code=400, detail=f"Invalid booking ID format: {booking_id}")
+    
+    booking_id_num = numeric_id
+    is_package = (booking_type == 'package')
+    formatted_booking_id = format_display_id(booking_id_num, branch_id=branch_id, is_package=is_package)
     if booking_type and booking_type != "booking":
         raise HTTPException(status_code=400, detail=f"Invalid booking type. Expected regular booking, got: {booking_id}")
     booking_id = numeric_id

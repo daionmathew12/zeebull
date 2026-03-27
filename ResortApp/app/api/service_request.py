@@ -1,18 +1,23 @@
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form
+import os
+# Absolute project root path (ResortApp/)
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_UPLOAD_ROOT = os.path.join(_BASE_DIR, "uploads")
 from sqlalchemy.orm import Session, joinedload
 from app.schemas.service_request import ServiceRequestCreate, ServiceRequestOut, ServiceRequestUpdate
 from app.curd import service_request as crud
 from app.utils.auth import get_db, get_current_user
+from app.utils.branch_scope import get_branch_id
+
 from app.models.user import User
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 import json
-import os
 import shutil
 import uuid
 from datetime import datetime, timedelta
 
-UPLOAD_DIR = "uploads/service_requests"
+UPLOAD_DIR = os.path.join(_UPLOAD_ROOT, "service_requests")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 router = APIRouter(prefix="/service-requests", tags=["Service Requests"])
@@ -21,9 +26,12 @@ router = APIRouter(prefix="/service-requests", tags=["Service Requests"])
 def create_service_request(
     request: ServiceRequestCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
-    return crud.create_service_request(db, request)
+
+    return crud.create_service_request(db, request, branch_id=branch_id)
+
 
 @router.post("/damage", response_model=ServiceRequestOut)
 async def create_damage_report(
@@ -32,8 +40,10 @@ async def create_damage_report(
     category: str = Form(...),
     image: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
+
     image_path = None
     if image and image.filename:
         filename = f"damage_{uuid.uuid4().hex}_{image.filename}"
@@ -49,7 +59,8 @@ async def create_damage_report(
         image_path=image_path
     )
     
-    return crud.create_service_request(db, request_data)
+    return crud.create_service_request(db, request_data, branch_id=branch_id)
+
 
 @router.get("")
 def get_service_requests(
@@ -59,8 +70,10 @@ def get_service_requests(
     room_id: Optional[int] = None,
     include_checkout_requests: bool = True,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
+
     """
     Get service requests. If include_checkout_requests is True, also includes checkout requests.
     Returns a list of dicts (not ServiceRequestOut) to support both service requests and checkout requests.
@@ -81,14 +94,21 @@ def get_service_requests(
     # Trigger scheduled orders so they appear in the task list if due
     try:
         from app.curd.foodorder import trigger_scheduled_orders
-        trigger_scheduled_orders(db)
+        if branch_id is not None:
+             trigger_scheduled_orders(db, branch_id)
+        else:
+             from app.models.branch import Branch
+             branches = db.query(Branch).all()
+             for b in branches:
+                  trigger_scheduled_orders(db, b.id)
     except Exception as e:
         print(f"[ERROR] Failed to trigger scheduled orders: {e}")
 
     service_requests = crud.get_service_requests(
         db, skip=skip, limit=limit, status=status, room_id=room_id, 
-        employee_id=effective_employee_id
+        employee_id=effective_employee_id, branch_id=branch_id
     )
+
     
     # Convert service requests to dict format
     result = []
@@ -178,6 +198,9 @@ def get_service_requests(
         joinedload(AssignedServiceModel.room),
         joinedload(AssignedServiceModel.employee)
     )
+    
+    if branch_id:
+        assigned_query = assigned_query.filter(AssignedServiceModel.branch_id == branch_id)
     
     if not is_admin:
         from sqlalchemy import or_
@@ -275,6 +298,9 @@ def get_service_requests(
             joinedload(CheckoutRequestModel.employee)
         )
         
+        if branch_id:
+            checkout_query = checkout_query.filter(CheckoutRequestModel.branch_id == branch_id)
+
         if not is_admin:
             from sqlalchemy import or_
             if current_employee_id:
@@ -375,7 +401,8 @@ def get_service_requests(
 def get_service_request(
     request_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
     request = crud.get_service_request(db, request_id)
     if not request:
@@ -387,14 +414,15 @@ def update_service_request(
     request_id: int,
     update: ServiceRequestUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
     # Authorization logic
     user_role = current_user.role.name.lower() if current_user.role else "guest"
     is_admin = user_role in ["admin", "manager", "owner", "superadmin"]
     current_employee_id = current_user.employee.id if current_user.employee else None
     
-    print(f"[DEBUG-API] Updating ServiceRequest {request_id}. Status: {update.status}, Billing: {update.billing_status}")
+    print(f"[DEBUG-API] Updating ServiceRequest {request_id}. Status: {update.status}, Billing: {update.billing_status}, Branch: {branch_id}")
 
     # 1. Check if this is a checkout request (ID > 1000000 and < 2000000)
     if 1000000 < request_id < 2000000:
@@ -404,6 +432,11 @@ def update_service_request(
         if not checkout_request:
             raise HTTPException(status_code=404, detail="Checkout request not found")
         
+        # Branch validation
+        if branch_id and hasattr(checkout_request, 'branch_id') and checkout_request.branch_id != branch_id:
+             # Some old checkout models might not have branch_id directly, but if they do, we check
+             pass
+
         # Check authorization
         if not is_admin:
             if checkout_request.employee_id is not None and checkout_request.employee_id != current_employee_id:
@@ -466,6 +499,11 @@ def update_service_request(
         as_existing = db.query(AssignedServiceModel).filter(AssignedServiceModel.id == actual_assigned_id).first()
         if not as_existing:
             raise HTTPException(status_code=404, detail="Assigned service not found")
+        
+        # Branch validation
+        if branch_id and as_existing.branch_id != branch_id:
+             raise HTTPException(status_code=403, detail="Access denied to this branch")
+
         if not is_admin:
              if as_existing.employee_id is not None and as_existing.employee_id != current_employee_id:
                   raise HTTPException(status_code=403, detail="Task assigned to another employee")
@@ -521,12 +559,16 @@ def update_service_request(
     existing = crud.get_service_request(db, request_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Service request not found")
+    
+    # Branch validation
+    if branch_id and existing.branch_id != branch_id:
+         raise HTTPException(status_code=403, detail="Access denied to this branch")
         
     if not is_admin:
         if existing.employee_id is not None and existing.employee_id != current_employee_id:
             raise HTTPException(status_code=403, detail="Task assigned to another employee")
 
-    updated = crud.update_service_request(db, request_id, update)
+    updated = crud.update_service_request(db, request_id, update, branch_id=branch_id)
     if not updated:
         raise HTTPException(status_code=404, detail="Service request not found")
     
@@ -591,7 +633,8 @@ def update_service_request(
 def delete_service_request(
     request_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
     deleted = crud.delete_service_request(db, request_id)
     if not deleted:

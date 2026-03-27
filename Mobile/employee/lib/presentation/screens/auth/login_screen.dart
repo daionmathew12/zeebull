@@ -94,14 +94,14 @@ class _LoginScreenState extends State<LoginScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Icon(
-                  Icons.hotel, // Or app logo
-                  size: 80,
-                  color: AppColors.primary,
+                Image.asset(
+                  'assets/zeebulllogo.png',
+                  height: 120,
+                  fit: BoxFit.contain,
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 16),
                 const Text(
-                  'Orchid Resort\nEmployee Portal',
+                  'Zeebull Wild Villa\nEmployee Portal',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 24,

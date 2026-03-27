@@ -110,8 +110,11 @@ def get_current_user(
                 detail="User role not found. Please contact administrator."
             )
             
-        # Store user_id in request state for logging
+        # Store user info in request state for logging and scoping
         request.state.user_id = user.id
+        request.state.branch_id = user.branch_id
+        request.state.is_superadmin = getattr(user, 'is_superadmin', False)
+
         
         # print(f"[AUTH DEBUG] User verified: {user.email}")
         return user
@@ -122,3 +125,78 @@ def get_current_user(
         import traceback
         print(f"[AUTH DEBUG] DB Error during auth: {str(e)}\n{traceback.format_exc()}")
         raise credentials_exception
+
+from typing import Optional
+
+def get_branch_id(
+    request: Request,
+    current_user: User = Depends(get_current_user)
+) -> Optional[int]:
+    # 1. If superadmin, allow override via header or query param
+    if getattr(current_user, 'is_superadmin', False):
+        branch_header = request.headers.get("X-Branch-ID")
+        if branch_header == "all":
+            return None
+        if branch_header: 
+            try:
+                return int(branch_header)
+            except ValueError:
+                pass
+        
+        # If superadmin didn't provide a branch_header or is unassigned, permit returning None/their branch_id
+        return getattr(current_user, 'branch_id', None)
+    
+    # 2. Otherwise, return user's fixed branch_id
+    if getattr(current_user, 'branch_id', None) is None:
+        raise HTTPException(status_code=403, detail="User not assigned to a branch")
+    return current_user.branch_id
+
+def verify_superadmin(current_user: User = Depends(get_current_user)) -> User:
+    """Dependency to ensure the current user is a superadmin."""
+    if not getattr(current_user, 'is_superadmin', False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Superadmin privileges required to perform this action."
+        )
+    return current_user
+
+def has_permission(user: User, required_permission: str) -> bool:
+    """
+    Check if a user has a specific permission.
+    Superadmins and 'admin' roles bypass all checks.
+    Otherwise, checks against the role's parsed permissions_list.
+    """
+    if getattr(user, 'is_superadmin', False):
+        return True
+        
+    if user.role:
+        if user.role.name.lower() in ["admin", "superadmin"]:
+            return True
+            
+        # permissions_list is a property on Role that returns a list of strings
+        perms = getattr(user.role, "permissions_list", [])
+        
+        # 1. Exact match (e.g., "rooms:create")
+        if required_permission in perms:
+            return True
+            
+        # 2. Module wildcard match (if required_permission is "rooms", match if any permission starts with "rooms:")
+        # This is useful for high-level visibility or broad access 
+        if any(p.startswith(f"{required_permission}:") or p.startswith(f"{required_permission}_") for p in perms):
+            return True
+            
+    return False
+
+def require_permission(permission: str):
+    """
+    FastAPI dependency that ensures the current user has the required permission.
+    Usage: Depends(require_permission("rooms:view"))
+    """
+    def permission_checker(current_user: User = Depends(get_current_user)):
+        if not has_permission(current_user, permission):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission denied: {permission} required."
+            )
+        return current_user
+    return permission_checker

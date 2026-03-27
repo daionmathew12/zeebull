@@ -107,7 +107,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Image.asset(
-                          'assets/images/orchid_logo.png',
+                          'assets/zeebulllogo.png',
                           height: 120,
                         ),
                       ),

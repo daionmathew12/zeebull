@@ -11,6 +11,7 @@ from decimal import Decimal
 
 from app.database import get_db
 from app.utils.auth import get_current_user
+from app.utils.branch_scope import get_branch_id
 from app.models import (
     Booking, BookingRoom, PackageBooking, PackageBookingRoom,
     Checkout,
@@ -37,6 +38,7 @@ def get_daily_arrival_report(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Daily Arrival Report: List of guests checking in today"""
@@ -44,14 +46,14 @@ def get_daily_arrival_report(
         if not report_date:
             report_date = date.today()
         
-        bookings = db.query(Booking).filter(
+        bookings = (db.query(Booking).filter(Booking.branch_id == branch_id) if branch_id is not None else db.query(Booking)).filter(
             Booking.check_in == report_date
         ).options(
             joinedload(Booking.booking_rooms).joinedload(BookingRoom.room),
             joinedload(Booking.user)
         ).offset(skip).limit(limit).all()
         
-        package_bookings = db.query(PackageBooking).filter(
+        package_bookings = (db.query(PackageBooking).filter(PackageBooking.branch_id == branch_id) if branch_id is not None else db.query(PackageBooking)).filter(
             PackageBooking.check_in == report_date
         ).options(
             joinedload(PackageBooking.rooms).joinedload(PackageBookingRoom.room),
@@ -122,13 +124,14 @@ def get_daily_departure_report(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Daily Departure Report: List of guests checking out"""
     if not report_date:
         report_date = date.today()
     
-    checkouts = db.query(Checkout).filter(
+    checkouts = (db.query(Checkout).filter(Checkout.branch_id == branch_id) if branch_id is not None else db.query(Checkout)).filter(
         func.date(Checkout.checkout_date) == report_date
     ).options(
         joinedload(Checkout.booking),
@@ -162,16 +165,17 @@ def get_daily_departure_report(
 def get_occupancy_report(
     report_date: Optional[date] = Query(None, description="Date for occupancy report (default: today)"),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Occupancy Report: % of rooms occupied vs vacant"""
     if not report_date:
         report_date = date.today()
     
-    total_rooms = db.query(Room).count()
+    total_rooms = (db.query(Room).filter(Room.branch_id == branch_id) if branch_id is not None else db.query(Room)).count()
     
     # Occupied rooms (checked in but not checked out)
-    occupied_bookings = db.query(Booking).filter(
+    occupied_bookings = (db.query(Booking).filter(Booking.branch_id == branch_id) if branch_id is not None else db.query(Booking)).filter(
         and_(
             Booking.check_in <= report_date,
             Booking.check_out > report_date,
@@ -179,7 +183,7 @@ def get_occupancy_report(
         )
     ).count()
     
-    occupied_packages = db.query(PackageBooking).filter(
+    occupied_packages = (db.query(PackageBooking).filter(PackageBooking.branch_id == branch_id) if branch_id is not None else db.query(PackageBooking)).filter(
         and_(
             PackageBooking.check_in <= report_date,
             PackageBooking.check_out > report_date,
@@ -208,12 +212,13 @@ def get_police_c_form_report(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Police / C-Form Report: List of foreign nationals (Legal Requirement)"""
     # Note: This requires passport/visa fields in Booking model
     # For now, returning all bookings - can be filtered by nationality when field is added
-    query = db.query(Booking).filter(Booking.status.in_(["checked-in", "booked"]))
+    query = (db.query(Booking).filter(Booking.branch_id == branch_id) if branch_id is not None else db.query(Booking)).filter(Booking.status.in_(["checked-in", "booked"]))
     
     if start_date:
         query = query.filter(Booking.check_in >= start_date)
@@ -246,6 +251,7 @@ def get_police_c_form_report(
 def get_night_audit_report(
     audit_date: Optional[date] = Query(None, description="Date for night audit (default: yesterday)"),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Night Audit Report: Summary of day's total business closed at midnight"""
@@ -253,22 +259,22 @@ def get_night_audit_report(
         audit_date = date.today() - timedelta(days=1)
     
     # Room revenue
-    room_revenue = db.query(func.sum(Checkout.room_total)).filter(
+    room_revenue = (db.query(func.sum(Checkout.room_total)).filter(Checkout.branch_id == branch_id) if branch_id is not None else db.query(func.sum(Checkout.room_total))).filter(
         func.date(Checkout.checkout_date) == audit_date
     ).scalar() or 0
     
     # Food & Beverage revenue
-    food_revenue = db.query(func.sum(Checkout.food_total)).filter(
+    food_revenue = (db.query(func.sum(Checkout.food_total)).filter(Checkout.branch_id == branch_id) if branch_id is not None else db.query(func.sum(Checkout.food_total))).filter(
         func.date(Checkout.checkout_date) == audit_date
     ).scalar() or 0
     
     # Service revenue
-    service_revenue = db.query(func.sum(Checkout.service_total)).filter(
+    service_revenue = (db.query(func.sum(Checkout.service_total)).filter(Checkout.branch_id == branch_id) if branch_id is not None else db.query(func.sum(Checkout.service_total))).filter(
         func.date(Checkout.checkout_date) == audit_date
     ).scalar() or 0
     
     # Tax collected
-    tax_collected = db.query(func.sum(Checkout.tax_amount)).filter(
+    tax_collected = (db.query(func.sum(Checkout.tax_amount)).filter(Checkout.branch_id == branch_id) if branch_id is not None else db.query(func.sum(Checkout.tax_amount))).filter(
         func.date(Checkout.checkout_date) == audit_date
     ).scalar() or 0
     
@@ -276,7 +282,7 @@ def get_night_audit_report(
     total_revenue = room_revenue + food_revenue + service_revenue + tax_collected
     
     # Checkouts count
-    checkouts_count = db.query(Checkout).filter(
+    checkouts_count = (db.query(Checkout).filter(Checkout.branch_id == branch_id) if branch_id is not None else db.query(Checkout)).filter(
         func.date(Checkout.checkout_date) == audit_date
     ).count()
     
@@ -299,10 +305,11 @@ def get_no_show_cancellation_report(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """No-Show & Cancellation Report: Revenue loss tracking"""
-    query = db.query(Booking).filter(
+    query = (db.query(Booking).filter(Booking.branch_id == branch_id) if branch_id is not None else db.query(Booking)).filter(
         Booking.status.in_(["cancelled", "no-show"])
     )
     
@@ -344,13 +351,14 @@ def get_in_house_guest_list(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """In-House Guest List: Currently checked-in guests (Emergency evacuation list)"""
     try:
         today = date.today()
         
-        bookings = db.query(Booking).filter(
+        bookings = (db.query(Booking).filter(Booking.branch_id == branch_id) if branch_id is not None else db.query(Booking)).filter(
             and_(
                 Booking.check_in <= today,
                 Booking.check_out > today,
@@ -360,7 +368,7 @@ def get_in_house_guest_list(
             joinedload(Booking.booking_rooms).joinedload(BookingRoom.room)
         ).offset(skip).limit(limit).all()
         
-        package_bookings = db.query(PackageBooking).filter(
+        package_bookings = (db.query(PackageBooking).filter(PackageBooking.branch_id == branch_id) if branch_id is not None else db.query(PackageBooking)).filter(
             and_(
                 PackageBooking.check_in <= today,
                 PackageBooking.check_out > today,
@@ -412,6 +420,7 @@ def get_in_house_guest_list(
 def get_daily_sales_summary(
     report_date: Optional[date] = Query(None, description="Date for sales summary (default: today)"),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Daily Sales Summary: Food vs Beverage vs Alcohol sales by meal period"""
@@ -419,7 +428,7 @@ def get_daily_sales_summary(
         report_date = date.today()
     
     # Get all food orders for the date
-    orders = db.query(FoodOrder).filter(
+    orders = (db.query(FoodOrder).filter(FoodOrder.branch_id == branch_id) if branch_id is not None else db.query(FoodOrder)).filter(
         func.date(FoodOrder.created_at) == report_date
     ).options(
         joinedload(FoodOrder.items).joinedload(FoodOrderItem.food_item)
@@ -479,6 +488,7 @@ def get_item_wise_sales_report(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Item-wise Sales Report: Which dish is selling the most?"""
@@ -525,12 +535,13 @@ def get_kot_analysis(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """KOT Analysis: Time between Order (KOT) and Service (Kitchen Efficiency)"""
     # Note: Requires order_time and service_time fields in FoodOrder
     # For now, using created_at as order_time
-    query = db.query(FoodOrder).filter(FoodOrder.status == "completed")
+    query = (db.query(FoodOrder).filter(FoodOrder.branch_id == branch_id) if branch_id is not None else db.query(FoodOrder)).filter(FoodOrder.status == "completed")
     
     if start_date:
         query = query.filter(func.date(FoodOrder.created_at) >= start_date)
@@ -574,12 +585,13 @@ def get_void_cancellation_report(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Void / Cancellation Report: Tracks orders deleted after being punched (Security)"""
     # Note: Requires a deleted_at or voided_at field in FoodOrder
     # For now, checking status == "cancelled" or "voided"
-    query = db.query(FoodOrder).filter(
+    query = (db.query(FoodOrder).filter(FoodOrder.branch_id == branch_id) if branch_id is not None else db.query(FoodOrder)).filter(
         FoodOrder.status.in_(["cancelled", "voided"])
     )
     
@@ -618,11 +630,12 @@ def get_discount_complimentary_report(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Discount & Complimentary Report: Free meals given (Manager approval tracking)"""
     # Get orders with amount = 0 or discount > 0
-    query = db.query(FoodOrder).filter(
+    query = (db.query(FoodOrder).filter(FoodOrder.branch_id == branch_id) if branch_id is not None else db.query(FoodOrder)).filter(
         or_(
             FoodOrder.amount == 0,
             # Add discount_amount field check when available
@@ -664,11 +677,12 @@ def get_nc_report(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """NC (Non-Chargeable) Report: Food given to Staff or Owners"""
     # Get orders marked as non-chargeable
-    query = db.query(FoodOrder).filter(
+    query = (db.query(FoodOrder).filter(FoodOrder.branch_id == branch_id) if branch_id is not None else db.query(FoodOrder)).filter(
         FoodOrder.billing_status == "non_chargeable"  # Add this status
     )
     
@@ -716,19 +730,63 @@ def get_stock_status_report(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Stock Status Report: Current quantity and value of every item"""
+    if branch_id is not None:
+        from app.models.inventory import LocationStock
+        # Subquery to aggregate quantity per item for the branch
+        stock_agg = db.query(
+            LocationStock.item_id,
+            func.sum(LocationStock.quantity).label("branch_qty")
+        ).filter(LocationStock.branch_id == branch_id).group_by(LocationStock.item_id).subquery()
+        
+        query = db.query(
+            InventoryItem,
+            func.coalesce(stock_agg.c.branch_qty, 0).label("effective_qty")
+        ).outerjoin(
+            stock_agg, InventoryItem.id == stock_agg.c.item_id
+        ).options(
+            joinedload(InventoryItem.category),
+            joinedload(InventoryItem.preferred_vendor)
+        )
+        
+        if category_id:
+            query = query.filter(InventoryItem.category_id == category_id)
+        if location:
+            query = query.filter(InventoryItem.location == location)
+            
+        items_with_qty = query.offset(skip).limit(limit).all()
+        
+        result = []
+        for item, effective_qty in items_with_qty:
+            stock_value = effective_qty * item.unit_price
+            result.append({
+                "item_name": item.name,
+                "item_code": item.item_code,
+                "category": item.category.name if item.category else "N/A",
+                "unit": item.unit,
+                "current_stock": float(effective_qty),
+                "unit_price": float(item.unit_price),
+                "stock_value": float(stock_value),
+                "location": item.location,
+                "min_stock_level": float(item.min_stock_level),
+                "status": "Low Stock" if effective_qty < item.min_stock_level else "OK"
+            })
+        
+        return {"stock_status": result, "total": len(result)}
+
+    # Global view (branch_id is None)
     query = db.query(InventoryItem).options(
         joinedload(InventoryItem.category),
         joinedload(InventoryItem.preferred_vendor)
     )
-    
     if category_id:
         query = query.filter(InventoryItem.category_id == category_id)
     if location:
         query = query.filter(InventoryItem.location == location)
-    
+        
     items = query.offset(skip).limit(limit).all()
     
     result = []
@@ -754,6 +812,7 @@ def get_stock_status_report(
 @apply_api_optimizations
 def get_low_stock_alert(
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Low Stock Alert Report: Items below minimum level"""
@@ -787,6 +846,7 @@ def get_low_stock_alert(
 def get_expiry_aging_report(
     days_ahead: int = Query(3, ge=1, le=30, description="Days ahead to check for expiry"),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Expiry / Aging Report: Perishable items expiring in next N days"""
@@ -832,10 +892,11 @@ def get_stock_movement_register(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Stock Movement Register: History of item (In -> Move -> Out)"""
-    query = db.query(InventoryTransaction).options(
+    query = (db.query(InventoryTransaction).filter(InventoryTransaction.branch_id == branch_id) if branch_id is not None else db.query(InventoryTransaction)).options(
         joinedload(InventoryTransaction.item)
     )
     
@@ -874,6 +935,7 @@ def get_waste_spoilage_report(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Waste & Spoilage Report: Value of items thrown away"""
@@ -922,6 +984,7 @@ def get_purchase_register(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Purchase Register: List of all Vendor Bills entered"""
@@ -930,7 +993,9 @@ def get_purchase_register(
             joinedload(PurchaseMaster.vendor),
             joinedload(PurchaseMaster.details).joinedload(PurchaseDetail.item)
         )
-        
+
+        if branch_id is not None:
+            query = query.filter(PurchaseMaster.branch_id == branch_id)
         if start_date:
             query = query.filter(PurchaseMaster.purchase_date >= start_date)
         if end_date:
@@ -942,14 +1007,23 @@ def get_purchase_register(
         
         result = []
         for purchase in purchases:
+            # PurchaseMaster stores tax as separate cgst, sgst, igst columns
+            tax_total = float(purchase.cgst or 0) + float(purchase.sgst or 0) + float(purchase.igst or 0)
             result.append({
                 "purchase_id": purchase.id,
+                "purchase_number": purchase.purchase_number,
                 "invoice_number": purchase.invoice_number,
                 "vendor_name": purchase.vendor.name if purchase.vendor else "N/A",
                 "purchase_date": purchase.purchase_date.isoformat() if purchase.purchase_date else None,
-                "total_amount": float(purchase.total_amount),
-                "tax_amount": float(purchase.tax_amount),
+                "sub_total": float(purchase.sub_total or 0),
+                "cgst": float(purchase.cgst or 0),
+                "sgst": float(purchase.sgst or 0),
+                "igst": float(purchase.igst or 0),
+                "tax_amount": tax_total,
+                "discount": float(purchase.discount or 0),
+                "total_amount": float(purchase.total_amount or 0),
                 "payment_status": purchase.payment_status,
+                "status": purchase.status,
                 "items_count": len(purchase.details)
             })
         
@@ -965,6 +1039,7 @@ def get_variance_report(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Variance Report: Difference between System Stock and Physical Audit Stock"""
@@ -1009,16 +1084,17 @@ def get_variance_report(
 @apply_api_optimizations
 def get_room_discrepancy_report(
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Room Discrepancy Report: Front Desk vs Housekeeping status mismatch"""
     # Get all rooms
-    rooms = db.query(Room).all()
+    rooms = (db.query(Room).filter(Room.branch_id == branch_id) if branch_id is not None else db.query(Room)).all()
     
     result = []
     for room in rooms:
         # Check booking status
-        booking = db.query(Booking).join(BookingRoom).filter(
+        booking = (db.query(Booking).filter(Booking.branch_id == branch_id) if branch_id is not None else db.query(Booking)).join(BookingRoom).filter(
             and_(
                 BookingRoom.room_id == room.id,
                 Booking.check_in <= date.today(),
@@ -1052,12 +1128,13 @@ def get_laundry_cost_report(
     start_date: Optional[date] = Query(None),
     end_date: Optional[date] = Query(None),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Laundry Cost Report: Linen sent vs returned, torn/damaged tracking"""
     # Note: Requires laundry tracking in InventoryTransaction
     # Filter by items with track_laundry_cycle = True
-    query = db.query(InventoryTransaction).join(InventoryItem).filter(
+    query = (db.query(InventoryTransaction).filter(InventoryTransaction.branch_id == branch_id) if branch_id is not None else db.query(InventoryTransaction)).join(InventoryItem).filter(
         InventoryItem.track_laundry_cycle == True
     )
     
@@ -1102,6 +1179,7 @@ def get_minibar_consumption_report(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Minibar Consumption: Items consumed from room minibars"""
@@ -1148,6 +1226,7 @@ def get_lost_found_register(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Lost & Found Register: Items left behind by guests"""
@@ -1168,6 +1247,7 @@ def get_maintenance_ticket_log(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Maintenance Ticket Log: Status of repairs"""
@@ -1188,6 +1268,7 @@ def get_asset_audit_report(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Asset Audit Report: Fixed Assets mapped to locations vs actually found"""
@@ -1240,6 +1321,7 @@ def get_visitor_log(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Visitor Log: Non-resident guests entering premises"""
@@ -1262,6 +1344,7 @@ def get_key_card_audit(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Key Card Audit: Who opened which room? (Staff Name + Timestamp)"""
@@ -1284,6 +1367,7 @@ def get_staff_attendance_report(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Staff Attendance: Shift In/Out times"""
@@ -1330,6 +1414,7 @@ def get_payroll_register(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Payroll Register: Salary calculation (Basic + OT - Deductions)"""
@@ -1339,12 +1424,12 @@ def get_payroll_register(
         month = date.today().month
     
     # Get employees
-    employees = db.query(Employee).offset(skip).limit(limit).all()
+    employees = (db.query(Employee).filter(Employee.branch_id == branch_id) if branch_id is not None else db.query(Employee)).offset(skip).limit(limit).all()
     
     result = []
     for employee in employees:
         # Get attendance for the month
-        attendance_count = db.query(Attendance).filter(
+        attendance_count = (db.query(Attendance).filter(Attendance.branch_id == branch_id) if branch_id is not None else db.query(Attendance)).filter(
             and_(
                 Attendance.employee_id == employee.id,
                 extract('month', Attendance.date) == month,
@@ -1376,7 +1461,7 @@ def get_payroll_register(
         ot_amount = (ot_hours * (basic_salary / (30 * 8))) * 1.5  # 1.5x for OT
         
         # Deductions (requires Leave model)
-        leaves = db.query(Leave).filter(
+        leaves = (db.query(Leave).filter(Leave.branch_id == branch_id) if branch_id is not None else db.query(Leave)).filter(
             and_(
                 Leave.employee_id == employee.id,
                 extract('month', Leave.from_date) == month,
@@ -1416,6 +1501,7 @@ def get_payroll_register(
 def get_management_dashboard(
     report_date: Optional[date] = Query(None, description="Date for dashboard (default: today)"),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """Management Dashboard: ADR, RevPAR, Food Cost %, Occupancy %"""
@@ -1423,10 +1509,10 @@ def get_management_dashboard(
         report_date = date.today()
     
     # Total rooms
-    total_rooms = db.query(Room).count()
+    total_rooms = (db.query(Room).filter(Room.branch_id == branch_id) if branch_id is not None else db.query(Room)).count()
     
     # Occupied rooms
-    occupied_bookings = db.query(Booking).filter(
+    occupied_bookings = (db.query(Booking).filter(Booking.branch_id == branch_id) if branch_id is not None else db.query(Booking)).filter(
         and_(
             Booking.check_in <= report_date,
             Booking.check_out > report_date,
@@ -1434,7 +1520,7 @@ def get_management_dashboard(
         )
     ).count()
     
-    occupied_packages = db.query(PackageBooking).filter(
+    occupied_packages = (db.query(PackageBooking).filter(PackageBooking.branch_id == branch_id) if branch_id is not None else db.query(PackageBooking)).filter(
         and_(
             PackageBooking.check_in <= report_date,
             PackageBooking.check_out > report_date,
@@ -1446,12 +1532,12 @@ def get_management_dashboard(
     occupancy_percentage = (occupied_rooms / total_rooms * 100) if total_rooms > 0 else 0
     
     # Room revenue for the date
-    room_revenue = db.query(func.sum(Checkout.room_total)).filter(
+    room_revenue = (db.query(func.sum(Checkout.room_total)).filter(Checkout.branch_id == branch_id) if branch_id is not None else db.query(func.sum(Checkout.room_total))).filter(
         func.date(Checkout.checkout_date) == report_date
     ).scalar() or 0
     
     # ADR (Average Daily Rate)
-    checkouts_count = db.query(Checkout).filter(
+    checkouts_count = (db.query(Checkout).filter(Checkout.branch_id == branch_id) if branch_id is not None else db.query(Checkout)).filter(
         func.date(Checkout.checkout_date) == report_date
     ).count()
     
@@ -1461,7 +1547,7 @@ def get_management_dashboard(
     revpar = (room_revenue / total_rooms) if total_rooms > 0 else 0
     
     # Food revenue
-    food_revenue = db.query(func.sum(Checkout.food_total)).filter(
+    food_revenue = (db.query(func.sum(Checkout.food_total)).filter(Checkout.branch_id == branch_id) if branch_id is not None else db.query(func.sum(Checkout.food_total))).filter(
         func.date(Checkout.checkout_date) == report_date
     ).scalar() or 0
     

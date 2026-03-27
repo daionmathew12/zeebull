@@ -1,0 +1,199 @@
+{
+  "account.py": [
+    "POST /fix-missing-journal-entries",
+    "GET /comprehensive-report",
+    "GET /auto-report",
+    "POST /seed-chart-of-accounts"
+  ],
+  "activity.py": [
+    "GET /logs"
+  ],
+  "activity_logs.py": [
+    "GET ",
+    "GET /stats"
+  ],
+  "attendance.py": [
+    "POST /mark",
+    "POST /log-work",
+    "POST /clock-in",
+    "POST /clock-out",
+    "GET /utilization/aggregate",
+    "GET /holidays",
+    "POST /holidays",
+    "GET /status/today"
+  ],
+  "checkout.py": [
+    "POST /checkout-request",
+    "GET /checkouts",
+    "POST /cleanup-orphaned-checkouts",
+    "GET /active-rooms"
+  ],
+  "comprehensive_reports.py": [
+    "GET /inventory/category-wise",
+    "GET /inventory/department-wise",
+    "GET /bookings",
+    "GET /package-bookings",
+    "GET /expenses",
+    "GET /food-orders",
+    "GET /purchases",
+    "GET /vendors",
+    "GET /services",
+    "GET /summary"
+  ],
+  "dashboard.py": [
+    "GET /transactions",
+    "GET /pnl",
+    "GET /vendors/stats",
+    "GET /financial-trends"
+  ],
+  "employee.py": [
+    "GET /leave-policy",
+    "POST /leave-policy"
+  ],
+  "food_category.py": [
+    "POST ",
+    "GET ",
+    "GET /"
+  ],
+  "food_item.py": [
+    "GET ",
+    "GET /"
+  ],
+  "frontend.py": [
+    "GET /header-banner/",
+    "GET /header-banner",
+    "GET /check-availability/",
+    "GET /check-availability",
+    "POST /check-availability/",
+    "GET /gallery/",
+    "GET /gallery",
+    "GET /reviews/",
+    "GET /reviews",
+    "POST /reviews/",
+    "GET /resort-info/",
+    "GET /resort-info",
+    "POST /resort-info/",
+    "GET /signature-experiences/",
+    "GET /signature-experiences",
+    "GET /plan-weddings/",
+    "GET /plan-weddings",
+    "GET /nearby-attractions/",
+    "GET /nearby-attractions",
+    "GET /nearby-attraction-banners/",
+    "GET /nearby-attraction-banners",
+    "GET /nearby-attraction-banner"
+  ],
+  "gst_reports.py": [
+    "GET /b2b-sales",
+    "GET /b2c-sales",
+    "GET /hsn-sac-summary",
+    "GET /itc-register",
+    "GET /itc-register",
+    "GET /rcm-register",
+    "GET /advance-receipt",
+    "GET /room-tariff-slab",
+    "GET /master-summary"
+  ],
+  "inventory.py": [
+    "POST /categories",
+    "GET /categories",
+    "POST /vendors",
+    "GET /vendors",
+    "GET /recipes",
+    "GET /assets/registry"
+  ],
+  "legal.py": [
+    "GET /"
+  ],
+  "notification.py": [
+    "GET /",
+    "GET ",
+    "GET /unread-count",
+    "POST /"
+  ],
+  "packages.py": [
+    "POST /book",
+    "POST /book/guest",
+    "GET /bookingsall",
+    "GET ",
+    "GET /"
+  ],
+  "public.py": [
+    "GET /rooms",
+    "GET /packages",
+    "GET /food-items",
+    "GET /food-categories",
+    "GET /services",
+    "GET /bookings",
+    "GET /package-bookings"
+  ],
+  "recipe.py": [
+    "GET /test",
+    "POST ",
+    "GET "
+  ],
+  "report.py": [
+    "GET /guest-profile",
+    "GET /food-orders",
+    "GET /user-history",
+    "GET /service-charges",
+    "GET /room-charges",
+    "GET /rent-records",
+    "GET /expenses",
+    "GET /room-bookings",
+    "GET /package-bookings",
+    "GET /employees",
+    "GET /checkin-by-employee",
+    "GET /guest-suggestions"
+  ],
+  "reports_module.py": [
+    "GET /front-office/daily-arrival",
+    "GET /front-office/daily-departure",
+    "GET /front-office/occupancy",
+    "GET /front-office/police-c-form",
+    "GET /front-office/night-audit",
+    "GET /front-office/no-show-cancellation",
+    "GET /front-office/in-house-guests",
+    "GET /restaurant/daily-sales-summary",
+    "GET /restaurant/item-wise-sales",
+    "GET /restaurant/kot-analysis",
+    "GET /restaurant/void-cancellation",
+    "GET /restaurant/discount-complimentary",
+    "GET /restaurant/nc-report",
+    "GET /inventory/stock-status",
+    "GET /inventory/low-stock-alert",
+    "GET /inventory/expiry-aging",
+    "GET /inventory/stock-movement",
+    "GET /inventory/waste-spoilage",
+    "GET /inventory/purchase-register",
+    "GET /inventory/variance",
+    "GET /housekeeping/room-discrepancy",
+    "GET /housekeeping/laundry-cost",
+    "GET /housekeeping/minibar-consumption",
+    "GET /housekeeping/lost-found",
+    "GET /housekeeping/maintenance-tickets",
+    "GET /housekeeping/asset-audit",
+    "GET /security/visitor-log",
+    "GET /security/key-card-audit",
+    "GET /hr/staff-attendance",
+    "GET /hr/payroll-register",
+    "GET /management/dashboard"
+  ],
+  "room.py": [
+    "GET /test-simple"
+  ],
+  "service.py": [
+    "GET ",
+    "GET /",
+    "GET /assigned",
+    "POST /return-inventory"
+  ],
+  "service_report.py": [
+    "GET /detailed-usage"
+  ],
+  "stock_reconciliation.py": [
+    "POST /inventory/reconcile-stock",
+    "GET /inventory/stock-audit",
+    "POST /inventory/validate-checkout-stock"
+  ]
+}

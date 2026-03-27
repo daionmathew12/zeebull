@@ -10,7 +10,7 @@ from typing import List, Optional, Dict, Any
 from datetime import date, datetime, timedelta
 from pydantic import BaseModel
 from app.database import get_db
-from app.api.auth import get_current_user
+from app.utils.auth import get_current_user
 from app.models.user import User
 from app.models.booking import Booking, BookingRoom
 from app.models.Package import PackageBooking, PackageBookingRoom, Package
@@ -24,6 +24,7 @@ from app.models.service import AssignedService, Service
 from app.models.room import Room
 from app.models.employee import Employee
 from app.utils.api_optimization import apply_api_optimizations
+from app.utils.branch_scope import get_branch_id
 
 router = APIRouter(prefix="/reports/comprehensive", tags=["Comprehensive Reports"])
 
@@ -119,6 +120,7 @@ def get_inventory_category_report(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     db: Session = Depends(get_db),
+    branch_id: int | None = Depends(get_branch_id),
     current_user: User = Depends(get_current_user)
 ):
     """Inventory report grouped by category"""
@@ -129,10 +131,16 @@ def get_inventory_category_report(
             func.count(InventoryItem.id).label('total_items'),
             func.coalesce(func.sum(InventoryItem.current_stock), 0).label('total_quantity'),
             func.coalesce(func.sum(InventoryItem.current_stock * InventoryItem.unit_price), 0).label('total_value'),
-            func.sum(case((InventoryItem.current_stock <= InventoryItem.min_stock_level, 1), else_=0)).label('low_stock')
+            func.sum(case([(InventoryItem.current_stock <= InventoryItem.min_stock_level, 1)], else_=0)).label('low_stock')
         ).join(
             InventoryItem, InventoryItem.category_id == InventoryCategory.id
-        ).group_by(InventoryCategory.id, InventoryCategory.name)
+        )
+        
+        # Skip InventoryItem filtering by branch_id as it is now global
+        # if branch_id:
+        #     query = query.filter(InventoryItem.branch_id == branch_id)
+            
+        query = query.group_by(InventoryCategory.id, InventoryCategory.name)
         
         results = query.all()
         
@@ -157,6 +165,7 @@ def get_inventory_department_report(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     db: Session = Depends(get_db),
+    branch_id: int | None = Depends(get_branch_id),
     current_user: User = Depends(get_current_user)
 ):
     """Inventory report grouped by department/location"""
@@ -168,7 +177,14 @@ def get_inventory_department_report(
             func.coalesce(func.sum(InventoryItem.current_stock * InventoryItem.unit_price), 0).label('total_value')
         ).join(
             InventoryItem, InventoryItem.location_id == Location.id
-        ).group_by(Location.name)
+        )
+        
+        # Skip Location filtering by branch_id if we want global items from all locations? 
+        # Actually Location IS branch-dependent, so filtering by Location.branch_id is correct.
+        if branch_id:
+            query = query.filter(Location.branch_id == branch_id)
+            
+        query = query.group_by(Location.name)
         
         results = query.all()
         
@@ -194,13 +210,17 @@ def get_bookings_report(
     end_date: Optional[date] = Query(None),
     status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
+    branch_id: int | None = Depends(get_branch_id),
     current_user: User = Depends(get_current_user)
 ):
     """Comprehensive bookings report"""
     try:
-        query = db.query(Booking).options(
+        query = (db.query(Booking).filter(Booking.branch_id == branch_id) if branch_id is not None else db.query(Booking)).options(
             joinedload(Booking.rooms).joinedload(BookingRoom.room)
         )
+        
+        if branch_id:
+            query = query.filter(Booking.branch_id == branch_id)
         
         if start_date:
             query = query.filter(Booking.check_in >= start_date)
@@ -244,14 +264,18 @@ def get_package_bookings_report(
     end_date: Optional[date] = Query(None),
     status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
+    branch_id: int | None = Depends(get_branch_id),
     current_user: User = Depends(get_current_user)
 ):
     """Comprehensive package bookings report"""
     try:
-        query = db.query(PackageBooking).options(
+        query = (db.query(PackageBooking).filter(PackageBooking.branch_id == branch_id) if branch_id is not None else db.query(PackageBooking)).options(
             joinedload(PackageBooking.rooms).joinedload(PackageBookingRoom.room),
             joinedload(PackageBooking.package)
         )
+        
+        if branch_id:
+            query = query.filter(PackageBooking.branch_id == branch_id)
         
         if start_date:
             query = query.filter(PackageBooking.check_in >= start_date)
@@ -292,13 +316,17 @@ def get_expenses_report(
     end_date: Optional[date] = Query(None),
     category: Optional[str] = Query(None),
     db: Session = Depends(get_db),
+    branch_id: int | None = Depends(get_branch_id),
     current_user: User = Depends(get_current_user)
 ):
     """Comprehensive expenses report"""
     try:
-        query = db.query(Expense).options(
+        query = (db.query(Expense).filter(Expense.branch_id == branch_id) if branch_id is not None else db.query(Expense)).options(
             joinedload(Expense.vendor)
         )
+        
+        if branch_id:
+            query = query.filter(Expense.branch_id == branch_id)
         
         if start_date:
             query = query.filter(Expense.expense_date >= start_date)
@@ -334,14 +362,18 @@ def get_food_orders_report(
     end_date: Optional[date] = Query(None),
     room_number: Optional[str] = Query(None),
     db: Session = Depends(get_db),
+    branch_id: int | None = Depends(get_branch_id),
     current_user: User = Depends(get_current_user)
 ):
     """Comprehensive food orders report"""
     try:
-        query = db.query(FoodOrder).options(
+        query = (db.query(FoodOrder).filter(FoodOrder.branch_id == branch_id) if branch_id is not None else db.query(FoodOrder)).options(
             joinedload(FoodOrder.room),
             joinedload(FoodOrder.items).joinedload(FoodOrderItem.food_item)
         )
+        
+        if branch_id:
+            query = query.filter(FoodOrder.branch_id == branch_id)
         
         if start_date:
             query = query.filter(func.date(FoodOrder.created_at) >= start_date)
@@ -379,14 +411,18 @@ def get_purchases_report(
     end_date: Optional[date] = Query(None),
     vendor_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
+    branch_id: int | None = Depends(get_branch_id),
     current_user: User = Depends(get_current_user)
 ):
     """Comprehensive purchases report"""
     try:
-        query = db.query(PurchaseMaster).options(
+        query = (db.query(PurchaseMaster).filter(PurchaseMaster.branch_id == branch_id) if branch_id is not None else db.query(PurchaseMaster)).options(
             joinedload(PurchaseMaster.vendor),
             joinedload(PurchaseMaster.details)
         )
+        
+        if branch_id:
+            query = query.filter(PurchaseMaster.branch_id == branch_id)
         
         if start_date:
             query = query.filter(PurchaseMaster.purchase_date >= start_date)
@@ -419,13 +455,21 @@ def get_purchases_report(
 @apply_api_optimizations
 def get_vendors_report(
     db: Session = Depends(get_db),
+    branch_id: int | None = Depends(get_branch_id),
     current_user: User = Depends(get_current_user)
 ):
     """Comprehensive vendors report with purchase statistics"""
     try:
-        vendors = db.query(Vendor).options(
+        query = db.query(Vendor).options(
             joinedload(Vendor.purchases)
-        ).limit(500).all()
+        )
+        
+        # Skip Vendor filtering by branch_id if Vendors are global? 
+        # Actually Vendors are still branch-dependent in the current model.
+        if branch_id:
+            query = query.filter(Vendor.branch_id == branch_id)
+            
+        vendors = query.limit(500).all()
         
         results = []
         for vendor in vendors:
@@ -457,6 +501,7 @@ def get_services_report(
     start_date: Optional[date] = Query(None),
     end_date: Optional[date] = Query(None),
     db: Session = Depends(get_db),
+    branch_id: int | None = Depends(get_branch_id),
     current_user: User = Depends(get_current_user)
 ):
     """Comprehensive services report"""
@@ -464,6 +509,9 @@ def get_services_report(
         query = db.query(Service).options(
             joinedload(Service.assigned_services)
         )
+        
+        if branch_id:
+            query = query.filter(Service.branch_id == branch_id)
         
         services = query.limit(500).all()
         
@@ -508,12 +556,17 @@ def get_comprehensive_summary(
     start_date: Optional[date] = Query(None),
     end_date: Optional[date] = Query(None),
     db: Session = Depends(get_db),
+    branch_id: int | None = Depends(get_branch_id),
     current_user: User = Depends(get_current_user)
 ):
     """Get summary statistics for all reports"""
     try:
         # Date filters
         date_filter = []
+        if branch_id:
+            # Skip InventoryItem filtering by branch_id as it is now global
+            pass
+        
         if start_date:
             date_filter.append(func.date(Booking.check_in) >= start_date)
         if end_date:
@@ -538,12 +591,16 @@ def get_comprehensive_summary(
         pkg_bookings_query = db.query(func.count(PackageBooking.id), func.coalesce(
             func.sum(Package.price), 0
         )).join(Package, PackageBooking.package_id == Package.id)
+        if branch_id:
+            pkg_bookings_query = pkg_bookings_query.filter(PackageBooking.branch_id == branch_id)
         if pkg_date_filter:
             pkg_bookings_query = pkg_bookings_query.filter(and_(*pkg_date_filter))
         pkg_count, pkg_revenue = pkg_bookings_query.first()
         
         # Expenses summary
         exp_date_filter = []
+        if branch_id:
+            exp_date_filter.append(Expense.branch_id == branch_id)
         if start_date:
             exp_date_filter.append(Expense.expense_date >= start_date)
         if end_date:
@@ -556,6 +613,8 @@ def get_comprehensive_summary(
         
         # Food orders summary
         food_date_filter = []
+        if branch_id:
+            food_date_filter.append(FoodOrder.branch_id == branch_id)
         if start_date:
             food_date_filter.append(func.date(FoodOrder.created_at) >= start_date)
         if end_date:
@@ -568,6 +627,8 @@ def get_comprehensive_summary(
         
         # Purchases summary
         purchase_date_filter = []
+        if branch_id:
+            purchase_date_filter.append(PurchaseMaster.branch_id == branch_id)
         if start_date:
             purchase_date_filter.append(PurchaseMaster.purchase_date >= start_date)
         if end_date:
@@ -579,15 +640,28 @@ def get_comprehensive_summary(
         purchase_count, purchase_total = purchase_query.first()
         
         # Services summary
-        service_count = db.query(func.count(Service.id)).scalar() or 0
-        assigned_count = db.query(func.count(AssignedService.id)).scalar() or 0
+        service_query = db.query(func.count(Service.id))
+        assigned_query = db.query(func.count(AssignedService.id))
+        if branch_id:
+            service_query = service_query.filter(Service.branch_id == branch_id)
+            assigned_query = assigned_query.filter(AssignedService.branch_id == branch_id)
+        service_count = service_query.scalar() or 0
+        assigned_count = assigned_query.scalar() or 0
         
         # Inventory summary
-        inventory_items = db.query(func.count(InventoryItem.id)).scalar() or 0
-        inventory_value = db.query(func.coalesce(func.sum(InventoryItem.current_stock * InventoryItem.unit_price), 0)).scalar() or 0
+        inv_item_query = db.query(func.count(InventoryItem.id))
+        inv_val_query = db.query(func.coalesce(func.sum(InventoryItem.current_stock * InventoryItem.unit_price), 0))
+        if branch_id:
+            # Skip InventoryItem filtering by branch_id as it is now global
+            pass
+        inventory_items = inv_item_query.scalar() or 0
+        inventory_value = inv_val_query.scalar() or 0
         
         # Vendors summary
-        vendor_count = db.query(func.count(Vendor.id)).scalar() or 0
+        vendor_query = db.query(func.count(Vendor.id))
+        if branch_id:
+            vendor_query = vendor_query.filter(Vendor.branch_id == branch_id)
+        vendor_count = vendor_query.scalar() or 0
         
         return {
             "bookings": {

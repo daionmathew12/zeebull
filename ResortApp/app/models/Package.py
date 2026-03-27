@@ -22,6 +22,10 @@ class Package(Base):
     food_included = Column(String, nullable=True)  # Comma-separated list of included meals (e.g., "Breakfast,Lunch,Dinner")
     food_timing = Column(String, nullable=True)    # JSON string: {"Breakfast": "08:00", ...}
     complimentary = Column(String, nullable=True)  # Free inclusions
+    created_at = Column(DateTime, default=datetime.utcnow)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=True, index=True)
+    
+    branch = relationship("Branch")
 
     # Relationships
     images = relationship("PackageImage", back_populates="package", cascade="all, delete-orphan")
@@ -41,6 +45,7 @@ class PackageImage(Base):
 class PackageBooking(Base):
     __tablename__ = "package_bookings"
     id = Column(Integer, primary_key=True, index=True)
+    display_id = Column(String, index=True, nullable=True) # PK-000001
     package_id = Column(Integer, ForeignKey("packages.id"))
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
@@ -51,6 +56,7 @@ class PackageBooking(Base):
     check_in = Column(Date, nullable=False)
     check_out = Column(Date, nullable=False)
     checked_in_at = Column(DateTime, nullable=True)  # Actual check-in timestamp
+    checked_out_at = Column(DateTime, nullable=True) # Actual check-out timestamp
     adults = Column(Integer, default=2)
     children = Column(Integer, default=0)
     id_card_image_url = Column(String, nullable=True)
@@ -60,6 +66,10 @@ class PackageBooking(Base):
     total_amount = Column(Float, default=0.0) # Added for tracking package booking value
     advance_deposit = Column(Float, default=0.0)  # Advance payment made during booking
     created_at = Column(DateTime, default=datetime.utcnow) # Added for sorting
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    
+    branch = relationship("Branch")
+
     food_preferences = Column(String, nullable=True)
     special_requests = Column(String, nullable=True)
 
@@ -81,6 +91,10 @@ class PackageBookingRoom(Base):
     id = Column(Integer, primary_key=True, index=True)
     package_booking_id = Column(Integer, ForeignKey("package_bookings.id", ondelete="CASCADE"))
     room_id = Column(Integer, ForeignKey("rooms.id"))
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    
+    branch = relationship("Branch")
+
 
     # Relationships
     package_booking = relationship("PackageBooking", back_populates="rooms")

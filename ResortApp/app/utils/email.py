@@ -109,10 +109,14 @@ def create_booking_confirmation_email(
     else:
         rooms_html = '<li>No rooms assigned</li>'
     
+    from app.utils.booking_id import format_display_id
+    
     booking_title = f"Package: {package_name}" if booking_type == 'package' and package_name else "Room Booking"
     
-    # Format booking ID (BK-000001 or PK-000001)
-    formatted_booking_id = f"BK-{str(booking_id).zfill(6)}" if booking_type == 'room' else f"PK-{str(booking_id).zfill(6)}"
+    # Format booking ID (BK-1-000001 or PK-1-000001)
+    # Note: We don't have branch_id here, defaulting to 1 or we should pass it.
+    # For now, using default 1 as most systems use branch 1 as main.
+    formatted_booking_id = format_display_id(booking_id, is_package=(booking_type == 'package'))
     
     # Calculate total amount if not provided
     if total_amount is None:

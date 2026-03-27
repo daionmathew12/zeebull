@@ -58,6 +58,8 @@ class InventoryCategoryUpdate(BaseModel):
 class InventoryCategoryOut(InventoryCategoryBase):
     id: int
     created_at: datetime
+    branch_id: Optional[int] = None
+    branch_name: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -164,6 +166,8 @@ class VendorOut(VendorBase):
     id: int
     created_at: datetime
     updated_at: datetime
+    branch_id: Optional[int] = None
+    branch_name: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -252,6 +256,8 @@ class InventoryItemOut(InventoryItemBase):
     last_purchase_price: Optional[float] = 0.0
     last_purchase_date: Optional[datetime] = None
     last_vendor_name: Optional[str] = None
+    branch_id: Optional[int] = None
+    branch_name: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -589,7 +595,9 @@ class LocationOut(LocationBase):
     id: int
     location_code: Optional[str] = None
     parent_location_name: Optional[str] = None
-    created_at: datetime
+    created_at: Optional[datetime] = None
+    branch_id: Optional[int] = None
+    branch_name: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -698,4 +706,35 @@ class LaundryLogOut(LaundryLogBase):
 
     class Config:
         from_attributes = True
+
+
+# Inter-branch Transfer Schemas
+class InterBranchTransferBase(BaseModel):
+    item_id: int
+    quantity: float
+    source_location_id: int
+    destination_branch_id: int
+    destination_location_id: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class InterBranchTransferCreate(InterBranchTransferBase):
+    pass
+
+
+class InterBranchTransferOut(InterBranchTransferBase):
+    id: int
+    source_branch_id: int
+    status: str  # pending, in_transit, received, cancelled
+    transfer_number: str
+    created_at: datetime
+    item_name: Optional[str] = None
+    source_branch_name: Optional[str] = None
+    destination_branch_name: Optional[str] = None
+    source_location_name: Optional[str] = None
+    destination_location_name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
 

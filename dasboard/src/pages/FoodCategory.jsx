@@ -124,6 +124,7 @@ const FoodManagement = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isLoading) return;
     setIsLoading(true);
     const formData = new FormData();
     formData.append("name", name);
@@ -201,6 +202,7 @@ const FoodManagement = () => {
 
   const handleCategorySubmit = async (e) => {
     e.preventDefault();
+    if (isLoading) return;
     if (!categoryName) {
       toast.error("Please fill in the category name.");
       return;
@@ -402,11 +404,11 @@ const FoodManagement = () => {
             {/* Action Buttons */}
             <div className="lg:col-span-3 flex flex-col md:flex-row gap-4">
               <button
-                className="w-full bg-indigo-600 text-white font-bold py-3 mt-8 rounded-xl shadow-lg hover:bg-indigo-700 transform transition-all duration-300"
+                className={`w-full text-white font-bold py-3 mt-8 rounded-xl shadow-lg transform transition-all duration-300 ${isLoading ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}`}
                 type="submit"
                 disabled={isLoading}
               >
-                {editingItemId ? "Update Food Item" : "Add Food Item"}
+                {isLoading ? "Saving..." : (editingItemId ? "Update Food Item" : "Add Food Item")}
               </button>
               {editingItemId && (
                 <button
@@ -513,10 +515,10 @@ const FoodManagement = () => {
               />
               <button
                 type="submit"
-                className="w-full bg-indigo-600 text-white font-bold py-3 mt-8 rounded-xl shadow-lg hover:bg-indigo-700 transition duration-300"
+                className={`w-full text-white font-bold py-3 mt-8 rounded-xl shadow-lg transition duration-300 ${isLoading ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}`}
                 disabled={isLoading}
               >
-                {editCategoryId ? "Update Category" : "Add Category"}
+                {isLoading ? "Saving..." : (editCategoryId ? "Update Category" : "Add Category")}
               </button>
               {editCategoryId && (
                 <button

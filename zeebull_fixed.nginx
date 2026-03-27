@@ -1,0 +1,43 @@
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+
+    server_name _;
+
+    client_max_body_size 15M;
+
+    # Zeebull Admin Dashboard
+    location /zeebulladmin {
+        alias /var/www/zeebull/zeebulladmin/;
+        try_files $uri $uri/ /zeebulladmin/index.html;
+    }
+
+    # Zeebull User Frontend
+    location /zeebull {
+        alias /var/www/zeebull/;
+        try_files $uri $uri/ /zeebull/index.html;
+    }
+
+    # Zeebull Backend API
+    location /zeebullapi/ {
+        proxy_pass http://127.0.0.1:8013/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # Zeebull Static Files (for images)
+    location /zeebullfiles/ {
+        alias /var/www/zeebull/ResortApp/;
+    }
+
+    # Fallback to root
+    location / {
+        root /var/www/zeebull/;
+        try_files $uri $uri/ /index.html;
+    }
+}

@@ -1,0 +1,39 @@
+# INSTRUCTIONS: Copy and paste this entire block into your SSH terminal
+
+# Step 1: Backup current config
+sudo cp /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/default.backup
+
+# Step 2: Edit the nginx config
+sudo nano /etc/nginx/sites-enabled/default
+
+# Step 3: Find the line that says "# User/Resort interface - /resort routes" (around line 92)
+# Step 4: Add these lines BEFORE that line:
+
+    # Orchid Admin Dashboard - /orchidadmin routes
+    location /orchidadmin {
+        alias /var/www/resort/Resort_first/dasboard/build;
+        try_files $uri $uri/ /orchidadmin/index.html;
+
+        # Cache static assets
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+    }
+
+    # Orchid admin dashboard static files
+    location /orchidadmin-static/ {
+        alias /var/www/resort/Resort_first/dasboard/build/static/;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+# Step 5: Save and exit (Ctrl+X, then Y, then Enter)
+
+# Step 6: Test the configuration
+sudo nginx -t
+
+# Step 7: If test passes, reload nginx
+sudo systemctl reload nginx
+
+# Done! Now refresh http://teqmates.co.in/orchidadmin/dashboard

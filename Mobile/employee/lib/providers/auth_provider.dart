@@ -34,11 +34,8 @@ class AuthProvider with ChangeNotifier {
         final token = response.data['access_token'];
         await _storage.write(key: 'auth_token', value: token);
         
-        // Mock User for now (TODO: Decode JWT or fetch profile)
-        _user = User(id: 1, email: email, role: 'owner', name: 'Owner'); 
-        
-        notifyListeners();
-        return true;
+        // Fetch real profile
+        return await _fetchProfile();
       }
       _error = 'Invalid response from server';
       return false;
@@ -54,8 +51,26 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
+  Future<bool> _fetchProfile() async {
+    try {
+      final response = await _apiService.client.get('/auth/me');
+      _user = User.fromJson(response.data);
+      
+      if (_user?.branchId != null) {
+        await _storage.write(key: 'branch_id', value: _user!.branchId.toString());
+      }
+      
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = 'Failed to fetch user profile';
+      return false;
+    }
+  }
+
   Future<void> logout() async {
     await _storage.delete(key: 'auth_token');
+    await _storage.delete(key: 'branch_id');
     _user = null;
     notifyListeners();
   }

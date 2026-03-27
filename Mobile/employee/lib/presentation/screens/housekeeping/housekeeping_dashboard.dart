@@ -38,6 +38,8 @@ class _HousekeepingDashboardState extends State<HousekeepingDashboard> {
       context.read<RoomProvider>().fetchRooms();
       context.read<ServiceRequestProvider>().fetchRequests();
       context.read<AttendanceProvider>().checkTodayStatus(empId);
+      // Always refresh profile to get latest daily_tasks
+      context.read<AuthProvider>().refreshProfile();
     });
     
     // Auto-refresh every 30 seconds
@@ -358,6 +360,7 @@ class _HousekeepingDashboardState extends State<HousekeepingDashboard> {
                                      if (val) {
                                        Position? position = await _getCurrentLocation();
                                        final tasks = auth.dailyTasks;
+                                       print('[DEBUG] Clock-in: dailyTasks = $tasks (${tasks.length} tasks)');
 
                                        if (tasks.isEmpty) {
                                          await attendance.clockIn(

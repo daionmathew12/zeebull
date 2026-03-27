@@ -4,7 +4,16 @@ from sqlalchemy.exc import ProgrammingError, SQLAlchemyError, IntegrityError
 from typing import List, Optional
 from datetime import date, datetime
 from app.models.service import Service, AssignedService, ServiceImage, service_inventory_item
-from app.models.inventory import InventoryItem, InventoryTransaction, Location, LocationStock
+from app.models.inventory import (
+    InventoryItem, 
+    InventoryTransaction, 
+    Location, 
+    LocationStock, 
+    LaundryLog, 
+    WasteLog
+)
+from app.models.employee_inventory import EmployeeInventoryAssignment
+from app.curd import inventory as crud_inventory
 from app.models.booking import Booking, BookingRoom
 from app.models.Package import PackageBooking, PackageBookingRoom
 from app.models.employee import Employee
@@ -24,8 +33,10 @@ def create_service(
     image_urls: List[str] = None,
     inventory_items: Optional[List[ServiceInventoryItemBase]] = None,
     is_visible_to_guest: bool = False,
-    average_completion_time: Optional[str] = None
+    average_completion_time: Optional[str] = None,
+    branch_id: int = 1
 ):
+
     """
     Create a new service with optional images and inventory items.
     Gracefully handles missing permissions on the service_inventory_items table
@@ -40,8 +51,10 @@ def create_service(
             description=description,
             charges=charges,
             is_visible_to_guest=is_visible_to_guest,
-            average_completion_time=average_completion_time
+            average_completion_time=average_completion_time,
+            branch_id=branch_id
         )
+
         db.add(db_service)
         db.commit()
         db.refresh(db_service)
@@ -303,15 +316,14 @@ def update_service(
 
     return service, removed_image_paths
 
-def get_services(db: Session, skip: int = 0, limit: int = 100):
-    """
-    Fetch services without eagerly loading inventory_items so that the query
-    does not require direct access to the service_inventory_items table.
-    The API layer will perform best-effort inventory enrichment.
-    """
-    return db.query(Service).options(
+def get_services(db: Session, skip: int = 0, limit: int = 100, branch_id: int = None):
+    query = db.query(Service).options(
         joinedload(Service.images)
-    ).offset(skip).limit(limit).all()
+    )
+    if branch_id:
+        query = query.filter(Service.branch_id == branch_id)
+    return query.offset(skip).limit(limit).all()
+
 
 def delete_service(db: Session, service_id: int):
     import traceback
@@ -357,13 +369,16 @@ def delete_service(db: Session, service_id: int):
         print(traceback.format_exc())
         raise RuntimeError(f"Failed to delete service: {delete_error}") from delete_error
 
-def create_assigned_service(db: Session, assigned: AssignedServiceCreate):
+def create_assigned_service(db: Session, assigned: AssignedServiceCreate, branch_id: int = 1):
+
     try:
         # Convert Pydantic model to dict (handle both .dict() and .model_dump())
         if hasattr(assigned, 'model_dump'):
             assigned_dict = assigned.model_dump()
         else:
             assigned_dict = assigned.dict()
+        assigned_dict['branch_id'] = branch_id if branch_id is not None else 1
+
         
         print(f"[DEBUG] Creating assigned service with data: {assigned_dict}")
         
@@ -438,7 +453,7 @@ def create_assigned_service(db: Session, assigned: AssignedServiceCreate):
         
         if not booking_id and not package_booking_id:
             from app.curd.foodorder import get_booking_for_room
-            b_id, is_pkg = get_booking_for_room(assigned_dict['room_id'], db)
+            b_id, is_pkg = get_booking_for_room(assigned_dict['room_id'], db, branch_id=branch_id)
             if b_id:
                 if is_pkg:
                     package_booking_id = b_id
@@ -454,8 +469,10 @@ def create_assigned_service(db: Session, assigned: AssignedServiceCreate):
                 booking_id=booking_id,
                 package_booking_id=package_booking_id,
                 override_charges=assigned_dict.get('override_charges'),
-                billing_status=assigned_dict.get('billing_status', 'unbilled')  # Explicitly set billing status
+                billing_status=assigned_dict.get('billing_status', 'unbilled'),
+                branch_id=assigned_dict.get('branch_id', 1)
             )
+
             print(f"[DEBUG] AssignedService object created, status={db_assigned.status}, billing_status={db_assigned.billing_status}")
             db.add(db_assigned)
             db.flush()  # Flush to get the ID without committing
@@ -555,14 +572,17 @@ def create_assigned_service(db: Session, assigned: AssignedServiceCreate):
                     # 3. Create Inventory Transaction
                     transaction = InventoryTransaction(
                         item_id=item_id,
-                        transaction_type="out", # Consumption
+                        transaction_type="transfer", # Issue/Assignment movement
                         quantity=quantity,
                         unit_price=item.unit_price,
                         total_amount=(item.unit_price or 0.0) * quantity,
                         reference_number=f"SVC-ASSIGN-{db_assigned.id}",
                         department=item.category.parent_department if item.category else "Housekeeping",
-                        notes=f"Service: {service.name} - Room: {room.number} - From {source_location.name if source_location else 'Unknown'}",
+                        notes=f"Service Assigned: {service.name} - Room: {room.number} - From {source_location.name if source_location else 'Unknown'}",
                         created_by=None,
+                        source_location_id=source_location.id if source_location else None,
+                        destination_location_id=room.inventory_location_id if room else None,
+                        branch_id=db_assigned.branch_id
                     )
                     db.add(transaction)
                     
@@ -577,8 +597,10 @@ def create_assigned_service(db: Session, assigned: AssignedServiceCreate):
                                 consumption_id=transaction.id,
                                 cogs_amount=cogs_val,
                                 inventory_item_name=item.name,
+                                branch_id=db_assigned.branch_id,
                                 created_by=None
                             )
+
                     except Exception as je_error:
                          print(f"[WARNING] Failed to create COGS journal entry: {je_error}")
 
@@ -643,7 +665,7 @@ def create_assigned_service(db: Session, assigned: AssignedServiceCreate):
             # Notify about assignment
             try:
                 recipient_id = db_assigned.employee.user_id if db_assigned.employee else None
-                notify_service_assigned(db, db_assigned.service.name, db_assigned.employee.name, db_assigned.room.number, db_assigned.id, recipient_id=recipient_id)
+                notify_service_assigned(db, db_assigned.service.name, db_assigned.employee.name, db_assigned.room.number, db_assigned.id, branch_id=branch_id, recipient_id=recipient_id)
             except Exception as e:
                  print(f"Notification error: {e}")
 
@@ -663,7 +685,8 @@ def create_assigned_service(db: Session, assigned: AssignedServiceCreate):
         print(traceback.format_exc())
         raise ValueError(error_msg) from e
 
-def get_assigned_services(db: Session, skip: int = 0, limit: int = 100, employee_id: Optional[int] = None, status: Optional[str] = None, room_id: Optional[int] = None, booking_id: Optional[int] = None, package_booking_id: Optional[int] = None):
+def get_assigned_services(db: Session, skip: int = 0, limit: int = 100, employee_id: Optional[int] = None, status: Optional[str] = None, room_id: Optional[int] = None, booking_id: Optional[int] = None, package_booking_id: Optional[int] = None, branch_id: int = None):
+
     """
     Get assigned services - ultra-simplified version for maximum performance.
     """
@@ -675,7 +698,12 @@ def get_assigned_services(db: Session, skip: int = 0, limit: int = 100, employee
             limit = 20
         
         # Start query with minimal eager loading
-        query = db.query(AssignedService).options(
+        query = db.query(AssignedService)
+        if branch_id:
+            query = query.filter(AssignedService.branch_id == branch_id)
+        
+        query = query.options(
+
             joinedload(AssignedService.service),
             joinedload(AssignedService.employee),
             joinedload(AssignedService.room)
@@ -709,7 +737,7 @@ def get_assigned_services(db: Session, skip: int = 0, limit: int = 100, employee
         # Return empty list on error to prevent 500
         return []
 
-def update_assigned_service_status(db: Session, assigned_id: int, update_data: AssignedServiceUpdate, commit: bool = True):
+def update_assigned_service_status(db: Session, assigned_id: int, update_data: AssignedServiceUpdate, updated_by: int = 1, commit: bool = True):
     import traceback
     from app.models.inventory import InventoryItem, InventoryTransaction, Location
     from datetime import datetime
@@ -755,7 +783,7 @@ def update_assigned_service_status(db: Session, assigned_id: int, update_data: A
     if new_status != str(old_status):
         try:
             recipient_id = assigned.employee.user_id if assigned.employee else None
-            notify_service_status_changed(db, assigned.service.name, new_status, assigned.id, recipient_id=recipient_id)
+            notify_service_status_changed(db, assigned.service.name, new_status, assigned.id, branch_id=assigned.branch_id, recipient_id=recipient_id)
         except Exception as e:
              print(f"Notification error: {e}")
     if new_status == "completed" and str(old_status) != "completed":
@@ -776,233 +804,171 @@ def update_assigned_service_status(db: Session, assigned_id: int, update_data: A
                     assignment.status = "completed"  # Ready for return
                     print(f"[DEBUG] Marked inventory assignment {assignment.id} as completed (ready for return)")
                 
-                # --- NEW: Textile/Laundry Automatic Collection Logic ---
-                # "Collect every washable thing... at time of refill"
-                # If the service involves items with track_laundry_cycle=True, we assume they are "Collected Dirty"
-                # and move them to the Laundry location.
+                # --- REFACTORED: Unified Inventory Return/Usage Processing ---
+                # We process ALL assignments for the service to ensure nothing is missed
                 
-                # 1. Get items linked to this service definition
-                service_items_stmt = select(
-                    service_inventory_item.c.inventory_item_id,
-                    service_inventory_item.c.quantity
-                ).where(service_inventory_item.c.service_id == assigned.service_id)
-                service_items_rows = db.execute(service_items_stmt).fetchall()
+                # Determine global return location (default)
+                global_return_location = None
+                if update_data.return_location_id:
+                    global_return_location = db.query(Location).filter(Location.id == update_data.return_location_id).first()
                 
-                if service_items_rows:
-                    # 2. Find Laundry Location
-                    laundry_loc = db.query(Location).filter(
-                        (Location.name.ilike("%Laundry%")) | 
-                        (Location.location_type == "LAUNDRY")
-                    ).first()
-                    
-                    if laundry_loc:
-                        print(f"[DEBUG] Found Laundry Location: {laundry_loc.name}")
-                        
-                        for row in service_items_rows:
-                            item_id = row[0] if isinstance(row, tuple) else row.inventory_item_id
-                            qty_defined = row[1] if isinstance(row, tuple) else row.quantity
-                            
-                            # 3. Check if item is Washable
-                            inv_item = db.query(InventoryItem).filter(InventoryItem.id == item_id).first()
-                            
-                            if inv_item and (inv_item.track_laundry_cycle or (inv_item.category and inv_item.category.track_laundry)):
-                                print(f"[DEBUG] Auto-collecting Laundry Item: {inv_item.name} (Qty: {qty_defined})")
-                                
-                                # 4. "Receive" into Laundry (Increment Laundry Stock)
-                                # Note: Ideally we should track "Dirty Stock" separate from "Clean Stock" if it's the same Item ID.
-                                # For now, we will assume the Laundry Location simply holds the items.
-                                # Future improvement: Use a separate 'State' or 'Batch' for Dirty.
-                                
-                                # We treat this as a "Transfer In" (Recovery) from the Room
-                                inv_item.current_stock += qty_defined  # Add back to global stock (it exists again)
-                                
-                                # Record Transaction
-                                laundry_txn = InventoryTransaction(
-                                    item_id=inv_item.id,
-                                    transaction_type="transfer_in",  # Returning from Room/Service
-                                    quantity=qty_defined,
-                                    unit_price=inv_item.unit_price,
-                                    total_amount=0,  # Internal transfer
-                                    reference_number=f"LNDRY-COL-{assigned_id}",
-                                    department=laundry_loc.name,
-                                    destination_location_id=laundry_loc.id,
-                                    notes=f"Auto-collected Dirty Linen from Room {assigned.room.number if assigned.room else 'Unknown'} (Service: {assigned.service.name}) -> To {laundry_loc.name}",
-                                    created_by=None, # System
-                                    created_at=datetime.utcnow()
-                                )
-                                db.add(laundry_txn)
-                                
-                                # Add to LocationStock for the Laundry Location
-                                from app.models.inventory import LocationStock
-                                laundry_stock = db.query(LocationStock).filter(
-                                    LocationStock.location_id == laundry_loc.id,
-                                    LocationStock.item_id == inv_item.id
-                                ).first()
-                                
-                                if laundry_stock:
-                                    laundry_stock.quantity += qty_defined
-                                    laundry_stock.last_updated = datetime.utcnow()
-                                else:
-                                    new_laundry_stock = LocationStock(
-                                        location_id=laundry_loc.id,
-                                        item_id=inv_item.id,
-                                        quantity=qty_defined,
-                                        last_updated=datetime.utcnow()
-                                    )
-                                    db.add(new_laundry_stock)
-                                
-                                # Add to LaundryLog to appear in the Laundry Tracking tab
-                                from app.models.inventory import LaundryLog
-                                laundry_log = LaundryLog(
-                                    item_id=inv_item.id,
-                                    quantity=qty_defined,
-                                    status="DIRTY",
-                                    movement_type="IN",
-                                    source=f"Room {assigned.room.number if assigned.room else 'Unknown'}",
-                                    reference_id=f"SVC-{assigned_id}",
-                                    notes=f"Auto-collected during service {assigned.service.name}"
-                                )
-                                db.add(laundry_log)
-                    else:
-                        print("[WARNING] No 'Laundry' location found. Cannot auto-collect dirty linens.")
-                # -------------------------------------------------------
-                
-                # Process inventory returns if provided
-                if update_data.inventory_returns and len(update_data.inventory_returns) > 0:
-                    print(f"[DEBUG] Processing {len(update_data.inventory_returns)} returns for Svc {assigned_id}")
-                    
-                    print(f"[DEBUG] Processing {len(update_data.inventory_returns)} inventory returns")
-                    
-                    # Determine return location
-                    # Determine global return location (default)
-                    global_return_location = None
-                    if update_data.return_location_id:
-                        global_return_location = db.query(Location).filter(Location.id == update_data.return_location_id).first()
-                        if global_return_location:
-                            print(f"[DEBUG] Default return location: {global_return_location.name}")
+                if not global_return_location:
+                    # Fallback to main warehouse
+                    global_return_location = db.query(Location).filter(
+                        (Location.location_type == "WAREHOUSE") | 
+                        (Location.location_type == "CENTRAL_WAREHOUSE") |
+                        (Location.is_inventory_point == True)
+                    ).filter(Location.branch_id == assigned.branch_id).first()
                     
                     if not global_return_location:
-                        # Fallback to main warehouse
                         global_return_location = db.query(Location).filter(
-                            (Location.location_type == "WAREHOUSE") | 
-                            (Location.location_type == "CENTRAL_WAREHOUSE") |
-                            (Location.is_inventory_point == True)
+                            Location.location_type.in_(["WAREHOUSE", "CENTRAL_WAREHOUSE", "BRANCH_STORE"]),
+                            Location.branch_id == assigned.branch_id
                         ).first()
-                        
-                        if not global_return_location:
-                            global_return_location = db.query(Location).filter(
-                                Location.location_type.in_(["WAREHOUSE", "CENTRAL_WAREHOUSE", "BRANCH_STORE"])
-                            ).first()
-                        
-                        if global_return_location:
-                            print(f"[DEBUG] Using fallback default location: {global_return_location.name}")
-                    
-                    for return_item in update_data.inventory_returns:
-                        try:
-                            print(f"[DEBUG]   - Processing return item: {return_item}")
 
-                            assignment = None
-                            if hasattr(return_item, 'assignment_id') and return_item.assignment_id:
-                                assignment = db.query(EmployeeInventoryAssignment).filter(
-                                    EmployeeInventoryAssignment.id == return_item.assignment_id,
-                                    EmployeeInventoryAssignment.assigned_service_id == assigned_id
-                                ).first()
-                            
-                            if not assignment and hasattr(return_item, 'inventory_item_id') and return_item.inventory_item_id:
-                                assignment = db.query(EmployeeInventoryAssignment).filter(
-                                    EmployeeInventoryAssignment.item_id == return_item.inventory_item_id,
-                                    EmployeeInventoryAssignment.assigned_service_id == assigned_id
-                                ).first()
-                            
-                            if not assignment:
-                                print(f"[WARNING] Inventory assignment not found for item {getattr(return_item, 'inventory_item_id', 'unknown')} / assignment {getattr(return_item, 'assignment_id', 'unknown')} for service {assigned_id}")
-                                continue
-                            
-                            # Update used quantity if provided
-                            if return_item.quantity_used is not None and return_item.quantity_used >= 0:
-                                assignment.quantity_used = return_item.quantity_used
-                            
-                            quantity_returned = float(return_item.quantity_returned)
-                            balance = assignment.balance_quantity
-                            
-                            if quantity_returned <= 0:
-                                continue
-                            
-                            if quantity_returned > balance:
-                                quantity_returned = balance  # Return maximum available
-                            
-                            # Update assignment
-                            assignment.quantity_returned += quantity_returned
-                            if assignment.quantity_returned >= assignment.quantity_assigned:
-                                assignment.is_returned = True
-                                assignment.status = "returned"
-                                assignment.returned_at = datetime.utcnow()
-                            else:
-                                assignment.status = "partially_returned"
-                            
-                            # Determine location for this specific item
-                            item_return_location = global_return_location
-                            if hasattr(return_item, 'return_location_id') and return_item.return_location_id:
-                                specific_loc = db.query(Location).filter(Location.id == return_item.return_location_id).first()
-                                if specific_loc:
-                                    item_return_location = specific_loc
+                # Map provided returns for quick lookup
+                returns_map = {}
+                if update_data.inventory_returns:
+                    for r in update_data.inventory_returns:
+                        if hasattr(r, 'assignment_id') and r.assignment_id:
+                            returns_map[r.assignment_id] = r
+                        elif hasattr(r, 'inventory_item_id') and r.inventory_item_id:
+                            returns_map[f"item_{r.inventory_item_id}"] = r
 
-                            # Add stock back to inventory and location
-                            item = db.query(InventoryItem).filter(InventoryItem.id == assignment.item_id).first()
-                            if item:
-                                item.current_stock += round(quantity_returned, 4)
+                for assignment in assignments:
+                    try:
+                        item = assignment.item
+                        if not item: continue
+
+                        # 1. Get return data for this assignment (if any)
+                        return_data = returns_map.get(assignment.id) or returns_map.get(f"item_{assignment.item_id}")
+                        
+                        quantity_returned = float(getattr(return_data, 'quantity_returned', 0.0) or 0.0)
+                        quantity_used = float(getattr(return_data, 'quantity_used', 0.0) or 0.0)
+                        quantity_damaged = float(getattr(return_data, 'quantity_damaged', 0.0) or 0.0)
+                        
+                        # Auto-infer full usage if NO data provided for this item and it's successful completion
+                        if not return_data and quantity_used == 0 and quantity_returned == 0 and quantity_damaged == 0 and new_status == "completed":
+                            quantity_used = assignment.balance_quantity
+                        
+                        print(f"[DEBUG] Processing assignment {assignment.id}: Item={item.name}, Used={quantity_used}, Returned={quantity_returned}, Damaged={quantity_damaged}")
+
+                        # 2. Update assignment record
+                        assignment.quantity_used += quantity_used
+                        assignment.quantity_returned += quantity_returned
+                        
+                        # Calculate missing quantity
+                        balance = (assignment.quantity_assigned - assignment.quantity_used + quantity_used) - (assignment.quantity_returned + quantity_returned)
+                        # Actually simpler: balance = quantity_assigned - used_total - returned_total
+                        # But we just did the += updates.
+                        current_balance = assignment.quantity_assigned - assignment.quantity_used - assignment.quantity_returned
+                        quantity_missing = max(0, current_balance - quantity_damaged)
+
+                        # 3. Handle Used items (Textile vs Consumable)
+                        if quantity_used > 0:
+                            is_textile = False
+                            try:
+                                is_textile = (getattr(item, 'track_laundry_cycle', False) or 
+                                             (item.category and getattr(item.category, 'track_laundry', False)))
+                            except: pass
                                 
-                                # If we have a return location, update LocationStock
-                                if item_return_location:
-                                    # Start of LocationStock update logic (if model exists)
-                                    try:
-                                        from app.models.inventory import LocationStock
-                                        loc_stock = db.query(LocationStock).filter(
-                                            LocationStock.location_id == item_return_location.id,
-                                            LocationStock.item_id == item.id
-                                        ).first()
-                                        
-                                        if loc_stock:
-                                            loc_stock.quantity += round(quantity_returned, 4)
-                                        else:
-                                            # Create new stock entry at location
-                                            new_stock = LocationStock(
-                                                location_id=item_return_location.id,
-                                                item_id=item.id,
-                                                quantity=round(quantity_returned, 4),
-                                                last_updated=datetime.utcnow()
-                                            )
-                                            db.add(new_stock)
-                                    except ImportError:
-                                        pass
-                                    except Exception as ls_error:
-                                        print(f"[ERROR] LocStock Error: {str(ls_error)}")
+                            if is_textile:
+                                # MOVEMENT TO LAUNDRY
+                                laundry_loc = db.query(Location).filter(
+                                    ((Location.name.ilike("%Laundry%")) | (Location.location_type == "LAUNDRY")),
+                                    Location.branch_id == assigned.branch_id
+                                ).first()
                                 
-                                # Create return transaction
-                                try:
-                                    transaction = InventoryTransaction(
-                                        item_id=assignment.item_id,
-                                        # location_id removed as it does not exist in InventoryTransaction model
-                                        transaction_type="transfer_in",
-                                        quantity=round(quantity_returned, 4),
-                                        unit_price=item.unit_price,
-                                        total_amount=item.unit_price * round(quantity_returned, 4) if item.unit_price else 0.0,
-                                        reference_number=f"SVC-RETURN-{assigned_id}",
-                                        department=item.category.parent_department if item.category else "Housekeeping",
-                                        notes=f"Return to {item_return_location.name if item_return_location else 'Warehouse'} - {assigned.service.name if assigned.service else 'Unknown'} - {return_item.notes or 'Service completed'}",
-                                        created_by=None
+                                if not laundry_loc:
+                                    print(f"[INFO] Creating missing Laundry location for Branch {assigned.branch_id}")
+                                    laundry_loc = Location(
+                                        name="Laundry", location_type="LAUNDRY", building="Main", 
+                                        room_area="Laundry Area", branch_id=assigned.branch_id, is_inventory_point=True
                                     )
-                                    db.add(transaction)
-                                    print(f"[DEBUG] + Transaction Created for return")
-                                except Exception as tx_err:
-                                    print(f"[ERROR] Tx Error: {str(tx_err)}")
-                                    raise tx_err
-
+                                    db.add(laundry_loc); db.flush()
+                                
+                                # Record Laundry Transaction
+                                db.add(InventoryTransaction(
+                                    item_id=item.id, transaction_type="laundry", quantity=quantity_used,
+                                    unit_price=item.unit_price, total_amount=0,
+                                    reference_number=f"LNDRY-COL-{assigned_id}", department="Laundry",
+                                    destination_location_id=laundry_loc.id,
+                                    source_location_id=assigned.room.inventory_location_id if assigned.room else None,
+                                    notes=f"Auto-collected Dirty Linen from Room {assigned.room.number if assigned.room else 'Unknown'} (Svc: {assigned.service.name})",
+                                    created_by=updated_by, branch_id=assigned.branch_id, created_at=datetime.utcnow()
+                                ))
+                                
+                                # Add to LaundryLog
+                                from app.models.inventory import LaundryLog
+                                try:
+                                    db.add(LaundryLog(
+                                        item_id=item.id, quantity=quantity_used, status="Incomplete Washing",
+                                        source_location_id=assigned.room.inventory_location_id if assigned.room else None,
+                                        room_number=assigned.room.number if assigned.room else 'Unknown',
+                                        notes=f"Auto-collected during service {assigned.service.name}", branch_id=assigned.branch_id
+                                    ))
+                                except Exception as log_err:
+                                    print(f"[WARNING] Failed to add LaundryLog: {log_err}")
+                                
+                                # Update Stock in Laundry Location
+                                from app.models.inventory import LocationStock
+                                l_stock = db.query(LocationStock).filter(LocationStock.location_id == laundry_loc.id, LocationStock.item_id == item.id).first()
+                                if l_stock: l_stock.quantity += quantity_used
+                                else: db.add(LocationStock(location_id=laundry_loc.id, item_id=item.id, quantity=quantity_used, branch_id=assigned.branch_id))
+                                
+                                item.current_stock += quantity_used
                             else:
-                                print(f"[WARNING] Item {assignment.item_id} not found for return")
-                        except Exception as loop_err:
-                             print(f"[ERROR] Loop Error in return processing: {str(loop_err)}")
-                             raise loop_err
+                                # REGULAR USAGE
+                                db.add(InventoryTransaction(
+                                    item_id=item.id, transaction_type="out", quantity=quantity_used,
+                                    unit_price=item.unit_price, total_amount=quantity_used * (item.unit_price or 0.0),
+                                    reference_number=f"SVC-USAGE-{assigned_id}",
+                                    department=item.category.name if item.category else "Housekeeping",
+                                    notes=f"Actual Consumption during Service: {assigned.service.name}",
+                                    created_by=updated_by, branch_id=assigned.branch_id, created_at=datetime.utcnow()
+                                ))
+
+                        # 4. Handle Clean Returns (Back to Store)
+                        if quantity_returned > 0:
+                            item.current_stock += round(quantity_returned, 4)
+                            dest_loc = global_return_location
+                            if return_data and hasattr(return_data, 'return_location_id') and return_data.return_location_id:
+                                spec_loc = db.query(Location).filter(Location.id == return_data.return_location_id).first()
+                                if spec_loc: dest_loc = spec_loc
+                            
+                            if dest_loc:
+                                from app.models.inventory import LocationStock
+                                lstk = db.query(LocationStock).filter(LocationStock.location_id == dest_loc.id, LocationStock.item_id == item.id).first()
+                                if lstk: lstk.quantity += round(quantity_returned, 4)
+                                else: db.add(LocationStock(location_id=dest_loc.id, item_id=item.id, quantity=round(quantity_returned, 4), branch_id=assigned.branch_id))
+
+                            db.add(InventoryTransaction(
+                                item_id=item.id, transaction_type="transfer_in", quantity=round(quantity_returned, 4),
+                                unit_price=item.unit_price, total_amount=0, reference_number=f"SVC-RETURN-{assigned_id}",
+                                department="Housekeeping", notes=f"Return to {dest_loc.name if dest_loc else 'Office'}",
+                                created_by=updated_by, branch_id=assigned.branch_id
+                            ))
+
+                        # 5. Handle Damaged/Missing (Waste Logs)
+                        for w_qty, reason in [(quantity_damaged, "Damaged"), (quantity_missing, "Missing")]:
+                            if w_qty > 0:
+                                waste_data = {"item_id": item.id, "quantity": w_qty, "unit": item.unit or "pcs", "reason_code": reason, "notes": f"Auto-reported during {assigned.service.name}", "location_id": (assigned.room.inventory_location_id if assigned.room else assigned.room_id)}
+                                reporter_id = assigned.employee.user_id if assigned.employee and assigned.employee.user_id else 1
+                                from app.curd import inventory as crud_inventory
+                                try:
+                                    crud_inventory.create_waste_log(db, waste_data, reported_by=reporter_id, branch_id=assigned.branch_id)
+                                except Exception as waste_err:
+                                     print(f"[WARNING] Waste log failure: {waste_err}")
+
+                        # Finalize Status
+                        if (assignment.quantity_returned + assignment.quantity_used + quantity_damaged + quantity_missing) >= assignment.quantity_assigned:
+                            assignment.is_returned = True; assignment.status = "returned"; assignment.returned_at = datetime.utcnow()
+                        else: assignment.status = "partially_returned"  
+
+                    except Exception as loop_err:
+                         print(f"[ERROR] Loop Error in return processing: {str(loop_err)}")
+                         import traceback
+                         traceback.print_exc()
                 
         except ImportError:
             print("[WARNING] EmployeeInventoryAssignment model not found, skipping inventory return processing")
@@ -1011,71 +977,85 @@ def update_assigned_service_status(db: Session, assigned_id: int, update_data: A
             print(traceback.format_exc())
             # Don't fail the status update if return processing fails
 
-        # Sync back to ServiceRequest if this assignment is completed
-        try:
-            from app.models.service_request import ServiceRequest
-            # Find matching service requests for this room
-            # If we are just updating billing_status, we might want to find 'completed' ones too
-            requests = db.query(ServiceRequest).filter(
-                ServiceRequest.room_id == assigned.room_id,
-                ServiceRequest.status.notin_(["cancelled"]) # Allow 'completed' to update their food orders
-            ).all()
+    # Sync back to ServiceRequest for ANY status change (Syncing status and billing_status)
+    try:
+        from app.models.service_request import ServiceRequest
+        # Find matching service requests for this room
+        requests = db.query(ServiceRequest).filter(
+            ServiceRequest.room_id == assigned.room_id,
+            ServiceRequest.status.notin_(["cancelled"]) 
+        ).all()
+        
+        print(f"[DEBUG-SYNC] Found {len(requests)} ServiceRequests for Room {assigned.room_id} to Sync (Current Svc Status: {new_status})")
+        
+        for req in requests:
+            # Check if employee matches (if assigned) and if type matches (heuristic)
+            employee_match = (req.employee_id == assigned.employee_id or req.employee_id is None)
+            type_match = False
             
-            print(f"[DEBUG-SYNC] Found {len(requests)} ServiceRequests for Room {assigned.room_id} to Sync")
+            req_type = str(req.request_type).lower()
+            svc_name = str(assigned.service.name).lower()
             
-            for req in requests:
-                # Check if employee matches (if assigned) and if type matches (heuristic)
-                employee_match = (req.employee_id == assigned.employee_id or req.employee_id is None)
-                type_match = False
-                
-                req_type = str(req.request_type).lower()
-                svc_name = str(assigned.service.name).lower()
-                
-                if req_type == "cleaning" and "clean" in svc_name:
+            if req_type == "cleaning" and any(term in svc_name for term in ["clean", "housekeep", "sweep", "mop"]):
+                type_match = True
+            elif req_type == "refill" and any(term in svc_name for term in ["refill", "replenish", "stock", "restock"]):
+                type_match = True
+            elif req_type in ["delivery", "food_delivery", "food"]:
+                if req.food_order_id:
                     type_match = True
-                elif req_type == "refill" and "refill" in svc_name:
+                elif any(term in svc_name for term in ["food", "delivery", "breakfast", "lunch", "dinner", "milk", "water", "tea", "coffee", "snack", "beverage", "drink"]):
                     type_match = True
-                elif req_type in ["delivery", "food_delivery"]:
+            
+            # Check if this request was created recently (last 7 days)
+            is_recent = True
+            if req.created_at:
+                is_recent = (datetime.utcnow() - req.created_at).total_seconds() < 604800 # 7 days
+            
+            if type_match and is_recent:
+                # Sync employee assignment if relevant
+                if assigned.employee_id and (req.employee_id is None or req.employee_id != assigned.employee_id):
+                    # Only sync if it was unassigned or if we are certain this is the same task
+                    # For now, let's just update it if it's currently None
+                    if req.employee_id is None:
+                        req.employee_id = assigned.employee_id
+                        print(f"[DEBUG-SYNC] Syncing Employee {assigned.employee_id} to Req {req.id}")
+
+                # Update status if it's not already completed and we have a new relevant status
+                if new_status in ["in_progress", "completed"] and req.status != "completed":
+                    if req.status != new_status:
+                        print(f"[DEBUG-SYNC] Syncing Req {req.id} status from {req.status} to {new_status}")
+                        req.status = new_status
+                        if new_status == "in_progress" and not req.started_at:
+                            req.started_at = datetime.utcnow()
+                        elif new_status == "completed" and not req.completed_at:
+                            req.completed_at = datetime.utcnow()
+                
+                # ALWAYS propagate billing_status if we have one (Paid/Unpaid)
+                # Priority: 1. Input data 2. Database state (if not default)
+                current_billing = update_data.billing_status or (assigned.billing_status if assigned.billing_status != "unbilled" else None)
+                
+                if current_billing:
+                    req.billing_status = current_billing
+                    print(f"[DEBUG-SYNC] Syncing Req {req.id} billing to {current_billing}")
+                    
                     if req.food_order_id:
-                        type_match = True
-                    elif any(term in svc_name for term in ["food", "delivery", "breakfast", "lunch", "dinner", "milk", "water", "tea", "coffee", "snack"]):
-                        type_match = True
-                
-                # Check if this request was created recently (last 7 days)
-                is_recent = True
-                if req.created_at:
-                    is_recent = (datetime.utcnow() - req.created_at).total_seconds() < 604800 # 7 days
-                
-                if employee_match and type_match and is_recent:
-                    # Only update status if not already completed
-                    if req.status != "completed":
-                        req.status = "completed"
-                        req.completed_at = datetime.utcnow()
-                    
-                    # ALWAYS propagate billing_status if we have one (Paid/Unpaid)
-                    # Priority: 1. Input data 2. Database state (if not default)
-                    current_billing = update_data.billing_status or (assigned.billing_status if assigned.billing_status != "unbilled" else None)
-                    
-                    if current_billing:
-                        print(f"[DEBUG-SYNC] Syncing Req {req.id} (status={req.status}, billing={current_billing})")
-                        # Update linked FoodOrder if it exists
-                        if req.food_order_id:
-                            try:
-                                from app.models.foodorder import FoodOrder
-                                food_order = db.query(FoodOrder).filter(FoodOrder.id == req.food_order_id).first()
-                                if food_order:
-                                    # Always update order status to completed if service is completed
+                        try:
+                            from app.models.foodorder import FoodOrder
+                            food_order = db.query(FoodOrder).filter(FoodOrder.id == req.food_order_id).first()
+                            if food_order:
+                                # Update order status to completed if service is completed
+                                if new_status == "completed":
                                     food_order.status = "completed"
-                                    # Update billing status
-                                    food_order.billing_status = current_billing
-                                    print(f"[INFO] Auto-updated FoodOrder {food_order.id} status to completed (billing: {food_order.billing_status})")
-                            except Exception as fo_err:
-                                print(f"[WARNING] Failed to update linked FoodOrder: {fo_err}")
-                
-        except Exception as sync_err:
-            print(f"[WARNING] Status sync to ServiceRequest failed: {sync_err}")
-            import traceback
-            traceback.print_exc()
+                                # Update billing status
+                                food_order.billing_status = current_billing
+                                print(f"[INFO] Auto-updated FoodOrder {food_order.id} status/billing based on sync")
+                        except Exception as fo_err:
+                            print(f"[WARNING] Failed to update linked FoodOrder: {fo_err}")
+            
+    except Exception as sync_err:
+        print(f"[WARNING] Status sync to ServiceRequest failed: {sync_err}")
+        import traceback
+        traceback.print_exc()
     
     if commit:
         db.commit()

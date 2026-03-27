@@ -62,7 +62,7 @@ def update_room_statuses(db: Session):
                         ).first()
                         
                          if active_reservation or package_reservation:
-                             new_status = "Occupied"
+                             new_status = "Booked"
                          else:
                              new_status = "Available"
                     

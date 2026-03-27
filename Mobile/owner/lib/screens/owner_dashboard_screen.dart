@@ -14,8 +14,9 @@ import 'bookings_screen.dart';
 import 'food_analytics_screen.dart';
 import 'inventory_screen.dart';
 import 'purchase_orders_screen.dart'; // exports PurchaseOrderScreen
-import 'services_screen.dart';
-import 'staff_screen.dart';
+import '../providers/branch_provider.dart';
+import '../models/branch.dart';
+import '../services/api_service.dart';
 
 class OwnerDashboardScreen extends StatefulWidget {
   const OwnerDashboardScreen({super.key});
@@ -28,14 +29,19 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
   @override
   void initState() {
     super.initState();
+    _refreshAllData();
+  }
+
+  void _refreshAllData() {
     Future.microtask(() {
+        if (!mounted) return;
         final dash = Provider.of<DashboardProvider>(context, listen: false);
         dash.fetchKPIData();     
         dash.fetchRoomStats();   
         dash.fetchDailyKPIs();   
         dash.fetchChartData();   
-        dash.fetchReportsData(); // Recent Activity
-        dash.fetchFinancialTrends(); // Added
+        dash.fetchReportsData(); 
+        dash.fetchFinancialTrends(); 
         
         Provider.of<ExpenseProvider>(context, listen: false).fetchExpenses();
         Provider.of<StaffProvider>(context, listen: false).fetchEmployees();
@@ -45,16 +51,21 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final dashboardProvider = Provider.of<DashboardProvider>(context);
+    final branchProvider = Provider.of<BranchProvider>(context);
+    
+    // Refresh data if branch changes (simple notification approach)
+    // In a more robust app, you'd use a listener in the provider or a consumer
+    
     final kpi = dashboardProvider.kpiSummary;
     final daily = dashboardProvider.dailyStats;
     final roomStats = dashboardProvider.roomStats;
     final chartData = dashboardProvider.chartData;
-    final financialTrends = dashboardProvider.financialTrends; // Added
+    final financialTrends = dashboardProvider.financialTrends;
     final recentActivity = dashboardProvider.recentActivity;
     
     final currencyFormat = NumberFormat.simpleCurrency(name: 'INR', locale: 'en_IN', decimalDigits: 0);
 
-    if (dashboardProvider.isLoading) {
+    if (dashboardProvider.isLoading || branchProvider.isLoading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
@@ -67,23 +78,45 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
     int occupiedRooms = roomStats['occupied'] ?? 0;
     double occupancyRate = totalRooms > 0 ? (occupiedRooms / totalRooms) * 100 : 0.0;
     
-    // ADR: Revenue / Number of Rooms Booked (not just occupied, but usually room bookings count)
     double adr = kpi.roomBookings > 0 ? (kpi.totalRevenue / kpi.roomBookings) : 0.0;
-    // RevPAR: Total Revenue / Total Rooms Available (using totalRooms from stats)
     double revpar = totalRooms > 0 ? (kpi.totalRevenue / totalRooms) : 0.0;
 
-
     return Scaffold(
-      appBar: AppBar(title: const Text('Admin Dashboard')),
+      appBar: AppBar(
+        title: const Text('Admin Dashboard'),
+        actions: [
+          if (dashboardProvider.user?.isSuperadmin == true && branchProvider.branches.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: branchProvider.activeBranchId,
+                  icon: const Icon(Icons.business, color: Colors.green),
+                  onChanged: (String? newValue) {
+                    if (newValue != null) {
+                      branchProvider.switchBranch(newValue).then((_) => _refreshAllData());
+                    }
+                  },
+                  items: [
+                    const DropdownMenuItem<String>(
+                      value: 'all',
+                      child: Text('Enterprise View', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.blue)),
+                    ),
+                    ...branchProvider.branches.map<DropdownMenuItem<String>>((Branch branch) {
+                      return DropdownMenuItem<String>(
+                        value: branch.id.toString(),
+                        child: Text(branch.name, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                      );
+                    }).toList(),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
       body: RefreshIndicator(
         onRefresh: () async {
-          await dashboardProvider.fetchKPIData();
-          await dashboardProvider.fetchDailyKPIs();
-          await dashboardProvider.fetchRoomStats();
-          await dashboardProvider.fetchRoomStats();
-          await dashboardProvider.fetchChartData();
-          await dashboardProvider.fetchFinancialTrends();
-          await dashboardProvider.fetchReportsData();
+          _refreshAllData();
         },
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),

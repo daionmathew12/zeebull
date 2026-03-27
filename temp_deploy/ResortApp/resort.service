@@ -1,0 +1,41 @@
+[Unit]
+Description=Resort Management System - TeqMates
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=notify
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/resort/Resort_first/ResortApp
+Environment=PATH=/var/www/resort/venv/bin
+Environment=PYTHONPATH=/var/www/resort/Resort_first/ResortApp
+EnvironmentFile=/var/www/resort/Resort_first/ResortApp/.env.production
+ExecStart=/var/www/resort/venv/bin/gunicorn main:app -c gunicorn.conf.py
+ExecReload=/bin/kill -s HUP $MAINPID
+KillMode=mixed
+TimeoutStopSec=5
+PrivateTmp=true
+Restart=always
+RestartSec=10
+
+# Security settings
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/www/resort/Resort_first/ResortApp/uploads
+ReadWritePaths=/var/www/resort/Resort_first/ResortApp/static
+ReadWritePaths=/var/log/resort
+ReadWritePaths=/var/run/resort
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=32768
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=resort-management
+
+[Install]
+WantedBy=multi-user.target

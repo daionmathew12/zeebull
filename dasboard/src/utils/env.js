@@ -6,12 +6,19 @@ export const isPommaDeployment = () => {
   return path.startsWith("/pommaadmin") || path.startsWith("/pommaholidays");
 };
 
-export const isOrchidDeployment = () => {
+export const isZeebullDeployment = () => {
   if (typeof window === "undefined") {
     return false;
   }
   const path = window.location.pathname || "";
-  return path.startsWith("/orchidadmin") || path.startsWith("/orchid");
+  const hostname = window.location.hostname || "";
+  // Check if it's the dedicated server IP or specific paths
+  return (
+    hostname === "34.71.114.198" ||
+    path.startsWith("/zeebulladmin") ||
+    path.startsWith("/zeebull") ||
+    path === "/"
+  );
 };
 
 export const isInventoryDeployment = () => {
@@ -23,11 +30,11 @@ export const isInventoryDeployment = () => {
 };
 
 export const getMediaBaseUrl = () => {
-  // For local development (localhost or 127.0.0.1 or LAN IP), always use port 8011 for Orchid
+  // For local development (localhost or 127.0.0.1 or LAN IP), always use port 8011 for Zeebull
   if (typeof window !== "undefined") {
     const hostname = window.location.hostname || "";
     if (hostname === "localhost" || hostname === "127.0.0.1" || hostname.startsWith("192.168.") || hostname.startsWith("10.")) {
-      return `http://${hostname}:8000`;
+      return `http://${hostname}:8011`;
     }
   }
 
@@ -35,8 +42,8 @@ export const getMediaBaseUrl = () => {
   if (typeof window !== "undefined" && isInventoryDeployment()) {
     return `${window.location.origin}/inventory`;
   }
-  if (typeof window !== "undefined" && isOrchidDeployment()) {
-    return `${window.location.origin}/orchidapi`;
+  if (typeof window !== "undefined" && isZeebullDeployment()) {
+    return `${window.location.origin}/zeebullfiles`;
   }
   if (typeof window !== "undefined" && isPommaDeployment()) {
     return `${window.location.origin}/pomma`;
@@ -60,8 +67,8 @@ export const getApiBaseUrl = () => {
 
     // Check if running on localhost or a local network IP (e.g. 192.168.x.x)
     if (hostname === "localhost" || hostname === "127.0.0.1" || hostname.startsWith("192.168.") || hostname.startsWith("10.")) {
-      // Use the SAME hostname as the frontend, but port 8000
-      const apiUrl = `http://${hostname}:8000/api`;
+      // Use the SAME hostname as the frontend, but port 8011
+      const apiUrl = `http://${hostname}:8011/api`;
       console.log("Using dynamic local API URL:", apiUrl);
       return apiUrl;
     }
@@ -80,9 +87,9 @@ export const getApiBaseUrl = () => {
     console.log("Using Inventory deployment API URL:", apiUrl);
     return apiUrl;
   }
-  if (typeof window !== "undefined" && isOrchidDeployment()) {
-    const apiUrl = `${window.location.origin}/orchidapi/api`;
-    console.log("Using Orchid deployment API URL:", apiUrl);
+  if (typeof window !== "undefined" && isZeebullDeployment()) {
+    const apiUrl = `${window.location.origin}/zeebullapi/api`;
+    console.log("Using Zeebull deployment API URL:", apiUrl);
     return apiUrl;
   }
   if (typeof window !== "undefined" && isPommaDeployment()) {
@@ -93,7 +100,7 @@ export const getApiBaseUrl = () => {
   // Sensible defaults
   const defaultUrl = process.env.NODE_ENV === "production"
     ? "https://www.teqmates.com/inventoryapi/api"
-    : "http://localhost:8000/api";
+    : "http://localhost:8011/api";
   console.log("Using default API URL:", defaultUrl);
   return defaultUrl;
 };

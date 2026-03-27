@@ -6,9 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import User
-from app.api.auth import get_current_user
+from app.utils.auth import get_current_user
 from typing import List, Dict, Any
 from datetime import datetime
+from app.utils.branch_scope import get_branch_id
 
 router = APIRouter()
 
@@ -17,7 +18,8 @@ router = APIRouter()
 def reconcile_stock(
     fix_discrepancies: bool = False,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """
     Reconcile stock discrepancies between global and location stocks.
@@ -48,7 +50,8 @@ def reconcile_stock(
         for item in items:
             # Calculate total stock across all locations
             location_stocks = db.query(LocationStock).filter(
-                LocationStock.item_id == item.id
+                LocationStock.item_id == item.id,
+                LocationStock.branch_id == branch_id
             ).all()
             
             total_location_stock = sum(ls.quantity for ls in location_stocks)
@@ -94,7 +97,8 @@ def reconcile_stock(
                         total_amount=abs(discrepancy) * (item.unit_price or 0),
                         reference_number=f"RECONCILE-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
                         notes=f"Stock reconciliation: Global {old_global} → {total_location_stock} (Discrepancy: {discrepancy})",
-                        created_by=current_user.id
+                        created_by=current_user.id,
+                        branch_id=branch_id
                     )
                     db.add(adjustment_txn)
                     
@@ -130,7 +134,8 @@ def reconcile_stock(
 def stock_audit(
     item_id: int = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """
     Detailed stock audit for an item or all items.
@@ -151,7 +156,8 @@ def stock_audit(
     for item in items:
         # Get all transactions for this item
         transactions = db.query(InventoryTransaction).filter(
-            InventoryTransaction.item_id == item.id
+            InventoryTransaction.item_id == item.id,
+            InventoryTransaction.branch_id == branch_id
         ).order_by(InventoryTransaction.created_at.desc()).all()
         
         # Calculate expected stock from transactions
@@ -164,7 +170,8 @@ def stock_audit(
         
         # Get location stocks
         location_stocks = db.query(LocationStock).filter(
-            LocationStock.item_id == item.id
+            LocationStock.item_id == item.id,
+            LocationStock.branch_id == branch_id
         ).all()
         
         total_location_stock = sum(ls.quantity for ls in location_stocks)
@@ -216,7 +223,8 @@ def stock_audit(
 def validate_checkout_stock(
     room_number: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """
     Validate stock for a room before checkout.
@@ -225,7 +233,7 @@ def validate_checkout_stock(
     from app.models.room import Room
     from app.models.inventory import LocationStock, StockIssue, StockIssueDetail
     
-    room = db.query(Room).filter(Room.number == room_number).first()
+    room = db.query(Room).filter(Room.number == room_number, Room.branch_id == branch_id).first()
     if not room:
         raise HTTPException(status_code=404, detail=f"Room {room_number} not found")
     
@@ -238,7 +246,8 @@ def validate_checkout_stock(
     
     # Get all stock in room
     room_stocks = db.query(LocationStock).filter(
-        LocationStock.location_id == room.inventory_location_id
+        LocationStock.location_id == room.inventory_location_id,
+        LocationStock.branch_id == branch_id
     ).all()
     
     validation_results = {
@@ -268,7 +277,8 @@ def validate_checkout_stock(
         # Get original issue quantity
         issues = db.query(StockIssueDetail).join(StockIssue).filter(
             StockIssue.destination_location_id == room.inventory_location_id,
-            StockIssueDetail.item_id == item.id
+            StockIssueDetail.item_id == item.id,
+            StockIssue.branch_id == branch_id
         ).all()
         
         total_issued = sum(detail.issued_quantity for detail in issues)

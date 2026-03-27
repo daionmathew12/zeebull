@@ -14,6 +14,11 @@ const ItemFormModal = ({
     onSubmit,
     onClose,
     isSubmitting = false,
+    editingItem = null,
+    activeBranchId,
+    branches = [],
+    selectedBranch = "",
+    setSelectedBranch,
 }) => {
     // Get selected category name for conditional logic
     const selectedCategory = categories.find(
@@ -77,6 +82,7 @@ const ItemFormModal = ({
                     </button>
                 </div>
                 <form onSubmit={onSubmit} className="p-6 space-y-6">
+
                     {/* 1. Basic Information Section */}
                     <div className="border-b border-gray-200 pb-6">
                         <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">

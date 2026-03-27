@@ -12,21 +12,35 @@ import { getImageUrl } from "../utils/imageUtils";
 import { getMediaBaseUrl } from "../utils/env";
 import { formatDateTimeIST, formatDateIST } from "../utils/dateUtils";
 import { normalizeQuantity } from "../utils/quantityValidation";
+import { usePermissions } from "../hooks/usePermissions";
 
 export default function FoodOrders() {
   const location = useLocation();
-  const [activeTab, setActiveTab] = useState("dashboard"); // "dashboard", "orders", "requests", or "management"
+  const { hasPermission, isAdmin } = usePermissions();
+
+  const foodTabs = [
+    { id: "dashboard", label: "Analytics", icon: <TrendingUp className="w-5 h-5" />, permission: "food_orders_dashboard:view" },
+    { id: "orders", label: "Room & Dine-in Orders", icon: <ShoppingCart className="w-5 h-5" />, permission: "food_orders_list:view" },
+    { id: "requests", label: "Order Requests", icon: <Truck className="w-5 h-5" />, permission: "food_orders_requests:view" },
+    { id: "management", label: "Menu Management", icon: <ChefHat className="w-5 h-5" />, permission: "food_orders_management:view" },
+  ].filter(tab => hasPermission(tab.permission) || isAdmin);
+
+  const [activeTab, setActiveTab] = useState(() => foodTabs[0]?.id || "dashboard");
 
   // Set active tab based on route
   useEffect(() => {
     if (location.pathname.includes("/food-categories") || location.pathname.includes("/food-items")) {
       setActiveTab("management");
     } else if (location.pathname.includes("/food-orders")) {
-      setActiveTab("dashboard");
-    } else {
-      setActiveTab("dashboard");
+      // Keep current if valid, else default
     }
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (foodTabs.length > 0 && !foodTabs.find(t => t.id === activeTab)) {
+      setActiveTab(foodTabs[0].id);
+    }
+  }, [foodTabs, activeTab]);
 
   // Food Order Requests state
   const [foodOrderRequests, setFoodOrderRequests] = useState([]);
@@ -1546,12 +1560,7 @@ export default function FoodOrders() {
         {/* Tabs Navigation */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-6">
           <div className="flex border-b border-gray-200">
-            {[
-              { id: "dashboard", label: "Dashboard" },
-              { id: "orders", label: "Food Orders" },
-              { id: "requests", label: "Requested Orders" },
-              { id: "management", label: "Food Management" }
-            ].map((tab) => (
+            {foodTabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}

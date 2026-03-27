@@ -1,8 +1,8 @@
-﻿import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
-import localLogo from "./assets/logo.jpeg";
+import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
+import localLogo from "./assets/zeebulllogo.png";
 // Lucide React is used for elegant icons
-import { BedDouble, Coffee, ConciergeBell, Package, ChevronRight, ChevronLeft, ChevronDown, Image as ImageIcon, Star, Quote, ChevronUp, MessageSquare, Send, X, Facebook, Instagram, Linkedin, Twitter, Moon, Sun, Droplet, Menu } from 'lucide-react';
-import { SiGooglemaps } from "react-icons/si";
+import { BedDouble, Coffee, ConciergeBell, MapPin, Package, Clock, Users, User, Calendar, Check, ChevronRight, ChevronLeft, ChevronDown, Image as ImageIcon, Star, Quote, ChevronUp, MessageSquare, Send, X, Facebook, Instagram, Linkedin, Twitter, Moon, Sun, Droplet, Menu } from 'lucide-react';
+import { SiGooglemaps, SiGhost } from "react-icons/si";
 // Currency formatting utility
 import { formatCurrency } from './utils/currency';
 // API base URL utility
@@ -456,7 +456,9 @@ const themes = {
 
 // Background animation component for the floating bubbles
 const BackgroundAnimation = ({ theme }) => {
-    const bubbles = Array.from({ length: 30 }, (_, i) => { // Reduced bubble count for a smoother, more elegant effect
+    // Optimize bubble count for mobile performance
+    const bubbleCount = typeof window !== 'undefined' && window.innerWidth < 768 ? 8 : 15;
+    const bubbles = useMemo(() => Array.from({ length: bubbleCount }, (_, i) => { // Reduced bubble count for a smoother, more elegant effect
         const size = `${2 + Math.random() * 4}rem`;
         const animationDelay = `${Math.random() * 20}s`;
         const animationDuration = `${25 + Math.random() * 25}s`; // Longer duration for a calmer float
@@ -518,10 +520,9 @@ const BackgroundAnimation = ({ theme }) => {
             <li
                 key={i}
                 className={`absolute rounded-full list-none block z-0 ${bubbleColor} ${animationClass}`}
-                style={style}
             ></li>
         );
-    });
+    }), [bubbleCount, theme.id]);
 
     return (
         <>
@@ -563,6 +564,24 @@ const BackgroundAnimation = ({ theme }) => {
                     --glass-light:   rgba(255,255,255,0.06);
                     --glass-border:  rgba(255,255,255,0.09);
                     --gold-glow:     rgba(200,151,30,0.2);
+
+                    /* Responsive Variables */
+                    --visible-cards: 3;
+                    --carousel-gap: 2.5rem;
+                }
+
+                @media (max-width: 1024px) {
+                    :root {
+                        --visible-cards: 2;
+                        --carousel-gap: 1.5rem;
+                    }
+                }
+
+                @media (max-width: 640px) {
+                    :root {
+                        --visible-cards: 1;
+                        --carousel-gap: 1rem;
+                    }
                 }
 
                 * { box-sizing: border-box; max-width: 100%; }
@@ -654,8 +673,6 @@ const BackgroundAnimation = ({ theme }) => {
 
                 /*  Luxury Card  */
                 .luxury-card {
-                    border-radius: 0;
-                    background: #ffffff;
                     box-shadow: 0 2px 8px rgba(10,10,15,0.06), 0 8px 32px rgba(10,10,15,0.08), 0 0 0 1px rgba(200,151,30,0.1);
                     transition: box-shadow 0.55s cubic-bezier(0.23,1,0.32,1), transform 0.55s cubic-bezier(0.23,1,0.32,1);
                     overflow: hidden;
@@ -1039,6 +1056,76 @@ const formatUrl = (url) => {
     return `https://${url}`;
 };
 
+const PropertyPortal = ({ branches, onSelect, theme }) => {
+    return (
+        <div className={`min-h-screen ${theme.bgPrimary} flex flex-col items-center justify-center p-6 relative overflow-hidden`}>
+            {/* Ambient Background */}
+            <BackgroundAnimation theme={theme} />
+
+            <div className="z-10 max-w-6xl w-full">
+                <div className="text-center mb-16 animate-fade-in-up">
+                    <div className="section-badge mb-4">The Zeebull Collection</div>
+                    <h1 className="section-title mb-4">Select Your Sanctuary</h1>
+                    <p className="section-subtitle max-w-2xl mx-auto">
+                        Explore our world-class resorts, each meticulously designed to offer a unique blend of luxury, serenity, and unparalleled service.
+                    </p>
+                    <div className="gold-rule mt-10"></div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                    {branches.map((branch, idx) => (
+                        <div
+                            key={branch.id}
+                            className="luxury-card group cursor-pointer animate-fade-in-up bg-white"
+                            style={{ animationDelay: `${idx * 150}ms` }}
+                            onClick={() => onSelect(branch)}
+                        >
+                            <div className="aspect-[16/10] overflow-hidden relative">
+                                <img
+                                    src={`https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&q=80&w=800`}
+                                    alt={branch.name}
+                                    className="card-image transition-transform duration-700 group-hover:scale-110"
+                                />
+                                <div className="absolute inset-0 bg-black/20 group-hover:bg-black/10 transition-colors"></div>
+                                <div className="absolute top-4 right-4 capitalize">
+                                    <div className="price-badge bg-black/60 backdrop-blur-md border-white/20 text-white">
+                                        Active
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="p-8 space-y-4">
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <h3 className="text-2xl font-display text-neutral-900 group-hover:text-amber-700 transition-colors uppercase tracking-wider">{branch.name}</h3>
+                                        <p className="text-sm text-neutral-500 font-body flex items-center gap-2 mt-1">
+                                            <SiGooglemaps className="w-3 h-3 text-amber-600" />
+                                            {branch.address || "Exclusive Location"}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="pt-4 border-t border-neutral-100 flex items-center justify-between">
+                                    <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-neutral-400">View Sanctuary</span>
+                                    <div className="w-10 h-10 rounded-full border border-amber-200 flex items-center justify-center group-hover:bg-amber-600 group-hover:border-amber-600 transition-all duration-300">
+                                        <ChevronRight className="w-5 h-5 text-amber-600 group-hover:text-white" />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+
+                <div className="mt-20 text-center animate-fade-in opacity-60">
+                    <p className="text-[10px] uppercase tracking-[0.3em] font-medium text-neutral-500">
+                        Luxury Management by TeqMates Zeebull
+                    </p>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 export default function App() {
     const [rooms, setRooms] = useState([]);
     const [allRooms, setAllRooms] = useState([]); // Store all rooms for filtering
@@ -1047,6 +1134,22 @@ export default function App() {
     const [services, setServices] = useState([]);
     const [foodItems, setFoodItems] = useState([]);
     const [foodCategories, setFoodCategories] = useState([]);
+    const [branches, setBranches] = useState([]);
+    const [selectedBranch, setSelectedBranch] = useState(null);
+    const [allPackages, setAllPackages] = useState([]); // Store all packages for filtering
+    const [allServices, setAllServices] = useState([]); // Store all services for filtering
+    const [allExperiences, setAllExperiences] = useState([]); // Store all signature experiences for filtering
+    const [allGallery, setAllGallery] = useState([]); // Store all gallery images for filtering
+    const [allBanners, setAllBanners] = useState([]); // Store all banners for filtering
+    const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+
+    useEffect(() => {
+        const handleResize = () => setWindowWidth(window.innerWidth);
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
+
+    const itemsPerSlide = windowWidth < 768 ? 1 : (windowWidth < 1024 ? 2 : 3);
     const logoCandidates = useMemo(() => {
         const unique = new Set();
         const candidates = [];
@@ -1066,15 +1169,15 @@ export default function App() {
 
         addCandidate("/logo.jpeg");
         addCandidate("/logo.png");
-        addCandidate("/orchid/logo.jpeg");
-        addCandidate("/orchid/logo.png");
+        addCandidate("/zeebull/logo.jpeg");
+        addCandidate("/zeebull/logo.png");
 
         if (typeof window !== "undefined") {
             const origin = window.location.origin;
             addCandidate(`${origin}/logo.jpeg`);
             addCandidate(`${origin}/logo.png`);
-            addCandidate(`${origin}/orchid/logo.jpeg`);
-            addCandidate(`${origin}/orchid/logo.png`);
+            addCandidate(`${origin}/zeebull/logo.jpeg`);
+            addCandidate(`${origin}/zeebull/logo.png`);
             const { pathname } = window.location;
             if (pathname && pathname !== "/") {
                 const trimmedPath = pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
@@ -1119,9 +1222,12 @@ export default function App() {
     const [userMessage, setUserMessage] = useState("");
     const [isChatLoading, setIsChatLoading] = useState(false);
     const [showAllRooms, setShowAllRooms] = useState(false);
+    const [roomImageIndex, setRoomImageIndex] = useState({});
 
     // Package image slider state
     const [packageImageIndex, setPackageImageIndex] = useState({});
+    const [experienceImageIndex, setExperienceImageIndex] = useState({});
+    const [attractionImageIndex, setAttractionImageIndex] = useState({});
     const [packageCarouselIndex, setPackageCarouselIndex] = useState(0);
     const [isPackageHovered, setIsPackageHovered] = useState(false);
 
@@ -1289,7 +1395,7 @@ export default function App() {
     const chatMessagesRef = useRef(null);
     const isBannerVisible = useOnScreen(bannerRef);
 
-    const ITEM_PLACEHOLDER = "https://placehold.co/400x300/2d3748/cbd5e0?text=Image+Not+Available";
+    const ITEM_PLACEHOLDER = logoSrc;
 
     // Helper function to get correct image URL
     const getImageUrl = (imagePath) => {
@@ -1297,9 +1403,12 @@ export default function App() {
         if (imagePath.startsWith('http')) return imagePath; // Already a full URL
         const baseUrl = getMediaBaseUrl(); // e.g. http://localhost:8011
 
+        // Normalize backslashes to forward slashes for cross-platform compatibility
+        const normalizedPath = imagePath.replace(/\\/g, '/');
+
         // Ensure the path starts with / but don't strip /uploads/
         // The backend serves images at /uploads/... so we must keep that prefix
-        const cleanPath = imagePath.startsWith('/') ? imagePath : `/${imagePath}`;
+        const cleanPath = normalizedPath.startsWith('/') ? normalizedPath : `/${normalizedPath}`;
 
         return `${baseUrl}${cleanPath}`;
     };
@@ -1431,18 +1540,51 @@ export default function App() {
         return `${defaultPattern[colIndex]}px`;
     };
 
-    // Fetch all resort data on component mount
+    // Fetch branches once
+    useEffect(() => {
+        const fetchBranches = async () => {
+            const API_BASE_URL = getApiBaseUrl();
+            try {
+                const res = await fetch(`${API_BASE_URL}/public/branches`);
+                if (res.ok) {
+                    const data = await res.json();
+                    setBranches(data);
+                }
+            } catch (e) {
+                console.error("Failed to fetch branches:", e);
+                setError("Unable to connect to our resorts collection.");
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchBranches();
+    }, []);
+
+    // Fetch all resort data on component mount or when branch changes
     useEffect(() => {
         const fetchResortData = async () => {
             const API_BASE_URL = getApiBaseUrl();
+            const branchId = selectedBranch?.id;
 
             // Helper: fetch JSON but never throw – log and return fallback on error.
             const safeFetch = async (endpoint, fallback) => {
                 try {
-                    // Add cache-busting timestamp to force fresh requests
+                    // Add branch_id (except for global collections to enable "Single Page" multi-property view)
                     const separator = endpoint.includes('?') ? '&' : '?';
-                    const cacheBuster = `${separator}_t=${Date.now()}`;
-                    const res = await fetch(`${API_BASE_URL}${endpoint}${cacheBuster}`);
+                    const globalEndpoints = [
+                        'header-banner',
+                        '/public/rooms',
+                        '/public/packages',
+                        '/public/services',
+                        '/gallery',
+                        '/signature-experiences',
+                        '/nearby-attractions'
+                    ];
+                    const isGlobalEndpoint = globalEndpoints.some(g => endpoint.includes(g));
+                    const branchParam = (branchId && !isGlobalEndpoint) ? `branch_id=${branchId}` : '';
+                    const cacheBuster = `_t=${Date.now()}`;
+                    const items = [branchParam, cacheBuster].filter(Boolean).join('&');
+                    const res = await fetch(`${API_BASE_URL}${endpoint}${separator}${items}`);
                     if (!res.ok) {
                         console.warn(`Endpoint ${endpoint} returned ${res.status}`);
                         return { data: fallback, error: true };
@@ -1494,27 +1636,51 @@ export default function App() {
                 const resortInfoData = resortInfoResult.data;
 
                 setAllRooms(roomsData);
-                // Don't set rooms here - only show after dates are selected
                 setBookings(Array.isArray(bookingsData) ? bookingsData : (bookingsData.bookings || []));
                 setPackageBookings(packageBookingsData || []);
-                setServices(servicesResult.data || []);
+                setAllServices(servicesResult.data || []);
                 setFoodItems(foodItemsResult.data);
                 setFoodCategories(foodCategoriesResult.data || []);
-                setPackages(packagesResult.data);
+                setAllPackages(packagesResult.data || []);
+                setAllGallery(galleryResult.data || []);
+                setAllExperiences(signatureExperiencesResult.data || []);
                 setResortInfo(resortInfoData.length > 0 ? resortInfoData[0] : null);
-                setGalleryImages(galleryResult.data || []);
                 setReviews(reviewsResult.data || []);
-                setBannerData((bannerResult.data || []).filter((b) => b.is_active));
-                setSignatureExperiences(signatureExperiencesResult.data || []);
+                setAllBanners((bannerResult.data || []).filter(b => b.is_active));
                 setPlanWeddings(planWeddingsResult.data || []);
                 setNearbyAttractions(nearbyAttractionsResult.data || []);
                 setNearbyAttractionBanners(nearbyAttractionBannersResult.data || []);
 
-                // Only set a global error if the API calls actually failed (not just empty data)
+                // Branch filtering logic
+                if (branchId) {
+                    const filteredRooms = roomsData.filter(r => r.branch_id == branchId);
+                    const filteredPackages = (packagesResult.data || []).filter(p => p.branch_id == branchId);
+                    const filteredServices = (servicesResult.data || []).filter(s => s.branch_id == branchId);
+
+                    console.log(`Filtering for branchId ${branchId}:`, {
+                        totalRooms: roomsData.length,
+                        filteredRooms: filteredRooms.length,
+                        roomBranchIds: roomsData.map(r => r.branch_id)
+                    });
+
+                    setRooms(filteredRooms);
+                    setPackages(filteredPackages);
+                    setServices(filteredServices);
+                    setGalleryImages((galleryResult.data || []).filter(g => g.branch_id == branchId));
+                    setBannerData((bannerResult.data || []).filter(b => b.is_active && b.branch_id == branchId));
+                    setSignatureExperiences((signatureExperiencesResult.data || []).filter(e => e.branch_id == branchId));
+                } else {
+                    // "All" view - show everything available
+                    setRooms(roomsData);
+                    setPackages(packagesResult.data || []);
+                    setServices(servicesResult.data || []);
+                    setGalleryImages(galleryResult.data || []);
+                    setBannerData((bannerResult.data || []).filter(b => b.is_active));
+                    setSignatureExperiences(signatureExperiencesResult.data || []);
+                }
+
                 if (roomsResult.error && resortInfoResult.error) {
-                    setError(
-                        "Unable to load resort details. Please ensure the backend server is running and accessible."
-                    );
+                    setError("Unable to load resort details. Please ensure the backend server is running and accessible.");
                 }
             } catch (err) {
                 console.error("Unexpected error while fetching resort data:", err);
@@ -1527,19 +1693,20 @@ export default function App() {
         };
 
         fetchResortData();
-    }, []); // run once on mount
+    }, [selectedBranch]); // run when branch selected
 
     // Auto-rotate banner images - only if multiple banners
     useEffect(() => {
+        // Reset index to 0 when banner data or branch changes 
+        setCurrentBannerIndex(0);
+
         if (bannerData.length > 1) {
             const interval = setInterval(() => {
                 setCurrentBannerIndex((prev) => (prev + 1) % bannerData.length);
             }, 9000); // Slower transition: change image every 9 seconds
             return () => clearInterval(interval);
-        } else if (bannerData.length === 1) {
-            setCurrentBannerIndex(0); // Ensure first banner is shown
         }
-    }, [bannerData.length]);
+    }, [bannerData, selectedBranch]);
 
     // Auto-change wedding images (optimized with pause on hover)
     const [isWeddingHovered, setIsWeddingHovered] = useState(false);
@@ -1814,17 +1981,45 @@ export default function App() {
         return () => clearTimeout(timer);
     }, [roomAvailabilityMemo]);
 
-    // Filter rooms to show only available ones when dates are selected
+    // Derived Filtered States for Multi-Property view
     useEffect(() => {
+        // Rooms filtering
+        const branchFilteredRooms = selectedBranch?.id
+            ? allRooms.filter(r => r.branch_id == selectedBranch.id)
+            : allRooms;
+
         if (bookingData.check_in && bookingData.check_out && Object.keys(roomAvailability).length > 0) {
-            // Only show available rooms when dates are selected
-            const availableRooms = allRooms.filter(room => roomAvailability[room.id] === true);
-            setRooms(availableRooms);
+            setRooms(branchFilteredRooms.filter(room => roomAvailability[room.id] === true));
         } else {
-            // Show all rooms when no dates are selected
-            setRooms(allRooms);
+            setRooms(branchFilteredRooms);
         }
-    }, [allRooms, bookingData.check_in, bookingData.check_out, roomAvailability]);
+
+        // Packages filtering
+        setPackages(selectedBranch?.id
+            ? allPackages.filter(p => p.branch_id == selectedBranch.id)
+            : allPackages);
+
+        // Services filtering
+        setServices(selectedBranch?.id
+            ? allServices.filter(s => s.branch_id == selectedBranch.id)
+            : allServices);
+
+        // Experiences filtering
+        setSignatureExperiences(selectedBranch?.id
+            ? allExperiences.filter(e => e.branch_id == selectedBranch.id)
+            : allExperiences);
+
+        // Gallery filtering
+        setGalleryImages(selectedBranch?.id
+            ? allGallery.filter(g => g.branch_id == selectedBranch.id)
+            : allGallery);
+
+        // Banner filtering
+        setBannerData(selectedBranch?.id
+            ? allBanners.filter(b => b.branch_id == selectedBranch.id)
+            : allBanners);
+
+    }, [allRooms, allPackages, allServices, allExperiences, allGallery, allBanners, bookingData.check_in, bookingData.check_out, roomAvailability, selectedBranch]);
 
     // Package booking availability - optimized with useMemo
     const [packageRoomAvailability, setPackageRoomAvailability] = useState({});
@@ -1840,7 +2035,12 @@ export default function App() {
 
         // Calculate availability for each room for package booking (memoized for performance)
         const availability = {};
+        
+        // CRITICAL: Only check rooms that belong to the package's branch
         let roomsToCheck = allRooms;
+        if (selectedPackage.branch_id) {
+            roomsToCheck = allRooms.filter(r => r.branch_id === selectedPackage.branch_id);
+        }
 
         // Determine if it's whole_property (same logic as UI)
         const hasRoomTypes = selectedPackage.room_types && selectedPackage.room_types.trim().length > 0;
@@ -1849,15 +2049,15 @@ export default function App() {
             (!selectedPackage.booking_type && !hasRoomTypes);
 
         // Filter by room_types if it's NOT whole_property (i.e., it's room_type)
-        // For whole_property, check ALL rooms
+        // For whole_property, check all rooms within the branch
         if (!isWholeProperty && selectedPackage.room_types) {
             const allowedRoomTypes = selectedPackage.room_types.split(',').map(t => t.trim().toLowerCase());
-            roomsToCheck = allRooms.filter(room => {
+            roomsToCheck = roomsToCheck.filter(room => {
                 const roomType = room.type ? room.type.trim().toLowerCase() : '';
                 return allowedRoomTypes.includes(roomType);
             });
         }
-        // For whole_property, roomsToCheck remains allRooms (no filtering)
+        // For whole_property, roomsToCheck remains the branch's rooms (no type filtering)
 
         // Check availability for each room
         const requestedCheckIn = new Date(packageBookingData.check_in);
@@ -1979,6 +2179,13 @@ export default function App() {
                 return;
             }
         }
+        
+        // --- MOBILE NUMBER VALIDATION ---
+        if (bookingData.guest_mobile && !/^\d{10}$/.test(bookingData.guest_mobile)) {
+            showBannerMessage("error", "Please enter a valid 10-digit mobile number.");
+            setIsBookingLoading(false);
+            return;
+        }
 
         // --- CAPACITY VALIDATION ---
         const selectedRoomDetails = bookingData.room_ids.map(roomId => rooms.find(r => r.id === roomId)).filter(Boolean);
@@ -2007,10 +2214,21 @@ export default function App() {
 
         try {
             const API_BASE_URL = getApiBaseUrl();
+
+            // Determine branch_id from selected rooms if not explicitly set by branch selection
+            // This ensures if we select a room from a different branch in an "all rooms" view, the booking goes to the right place.
+            let finalBranchId = selectedBranch?.id;
+            if (bookingData.room_ids.length > 0) {
+                const firstRoom = allRooms.find(r => r.id === bookingData.room_ids[0]);
+                if (firstRoom?.branch_id) {
+                    finalBranchId = firstRoom.branch_id;
+                }
+            }
+
             const response = await fetch(`${API_BASE_URL}/bookings/guest`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(bookingData)
+                body: JSON.stringify({ ...bookingData, branch_id: finalBranchId })
             });
 
             if (response.ok) {
@@ -2070,6 +2288,11 @@ export default function App() {
             // Check availability for all rooms based on selected dates
             const availableRoomIds = allRooms
                 .filter(room => {
+                    // CRITICAL: Only include rooms from the package's branch
+                    if (selectedPackage.branch_id && room.branch_id !== selectedPackage.branch_id) {
+                        return false;
+                    }
+
                     // Check if room has any conflicting bookings
                     const hasConflict = bookings.some(booking => {
                         const normalizedStatus = booking.status?.toLowerCase().replace(/_/g, '-');
@@ -2126,6 +2349,13 @@ export default function App() {
                 setIsBookingLoading(false);
                 return;
             }
+        }
+        
+        // --- MOBILE NUMBER VALIDATION ---
+        if (packageBookingData.guest_mobile && !/^\d{10}$/.test(packageBookingData.guest_mobile)) {
+            showBannerMessage("error", "Please enter a valid 10-digit mobile number.");
+            setIsBookingLoading(false);
+            return;
         }
 
         // --- CAPACITY VALIDATION ---
@@ -2185,18 +2415,22 @@ export default function App() {
                 return;
             }
 
+            // Determine branch_id from the selected package itself as the source of truth
+            const finalPackageBranchId = selectedPackage?.branch_id || selectedBranch?.id;
+
             const payload = {
                 package_id: parseInt(packageBookingData.package_id),
                 room_ids: finalRoomIds.map(id => parseInt(id)), // Use finalRoomIds (all available for whole_property, selected for room_type)
+                check_in: packageBookingData.check_in,
+                check_out: packageBookingData.check_out,
                 guest_name: packageBookingData.guest_name.trim(),
                 guest_email: packageBookingData.guest_email?.trim() || null,
                 guest_mobile: packageBookingData.guest_mobile.trim(),
-                check_in: packageBookingData.check_in,
-                check_out: packageBookingData.check_out,
                 adults: parseInt(packageBookingData.adults) || 1,
                 children: parseInt(packageBookingData.children) || 0,
                 food_preferences: packageBookingData.food_preferences,
-                special_requests: packageBookingData.special_requests
+                special_requests: packageBookingData.special_requests,
+                branch_id: finalPackageBranchId
             };
 
             console.log("Package Booking Payload:", payload); // Debug log
@@ -2258,12 +2492,19 @@ export default function App() {
         setIsBookingLoading(true);
         setBookingMessage({ type: null, text: "" });
 
+        // --- MOBILE NUMBER VALIDATION ---
+        if (serviceBookingData.guest_mobile && !/^\d{10}$/.test(serviceBookingData.guest_mobile)) {
+            showBannerMessage("error", "Please enter a valid 10-digit mobile number.");
+            setIsBookingLoading(false);
+            return;
+        }
+
         try {
             const API_BASE_URL = getApiBaseUrl();
             const response = await fetch(`${API_BASE_URL}/services/bookings`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(serviceBookingData)
+                body: JSON.stringify({ ...serviceBookingData, branch_id: selectedBranch.id })
             });
 
             if (response.ok) {
@@ -2313,7 +2554,7 @@ export default function App() {
             const response = await fetch(`${API_BASE_URL}/food-orders/`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify({ ...payload, branch_id: selectedBranch.id })
             });
 
             if (response.ok) {
@@ -2421,27 +2662,50 @@ export default function App() {
 
     if (loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-transparent">
-                <div className="flex flex-col items-center space-y-6">
+            <div className="min-h-screen flex items-center justify-center bg-[#0a0a0f] relative overflow-hidden">
+                {/* Background Glow */}
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-amber-500/10 blur-[120px] rounded-full" />
+
+                <div className="flex flex-col items-center space-y-8 relative z-10">
                     <div className="relative">
-                        <div className="w-28 h-28 md:w-32 md:h-32 rounded-full border-4 border-amber-400/30 border-t-amber-500 animate-spin shadow-lg" />
-                        <div className="absolute inset-3 md:inset-4 rounded-full bg-amber-500 flex items-center justify-center shadow-2xl border-2 border-amber-300/20">
+                        {/* Elite outer ring animation */}
+                        <div className="w-32 h-32 md:w-40 md:h-40 rounded-full border border-amber-500/20" />
+                        <div className="absolute inset-0 w-32 h-32 md:w-40 md:h-40 rounded-full border-t-2 border-amber-500 animate-spin" />
+
+                        {/* Centered Logo with specialized pulse */}
+                        <div className="absolute inset-0 rounded-full flex items-center justify-center">
                             <img
                                 src={logoSrc || localLogo}
-                                alt="Resort"
-                                className="h-16 w-auto md:h-20 object-contain"
+                                alt="Zeebull"
+                                className="h-24 md:h-32 w-auto object-contain drop-shadow-[0_0_20px_rgba(251,191,36,0.3)] animate-[logo-pulse_2s_ease-in-out_infinite]"
                             />
                         </div>
                     </div>
-                    <div className="text-center">
-                        <p className="text-xs md:text-sm tracking-[0.25em] uppercase text-amber-600 font-bold">
-                            Resort
-                        </p>
-                        <p className="mt-2 text-xs md:text-sm text-gray-700">
-                            Crafting your perfect stay...
-                        </p>
+
+                    <div className="text-center space-y-3">
+                        <div className="overflow-hidden">
+                            <p className="text-[10px] md:text-xs tracking-[0.4em] uppercase text-amber-500/80 font-bold animate-fade-in-up">
+                                The Zeebull Collection
+                            </p>
+                        </div>
+                        <div className="flex items-center justify-center gap-1.5 h-4">
+                            {[0, 1, 2].map((i) => (
+                                <div
+                                    key={i}
+                                    className="w-1.5 h-1.5 rounded-full bg-amber-500/40 animate-bounce"
+                                    style={{ animationDelay: `${i * 0.15}s` }}
+                                />
+                            ))}
+                        </div>
                     </div>
                 </div>
+
+                <style>{`
+                    @keyframes logo-pulse {
+                        0%, 100% { transform: scale(0.92); opacity: 0.8; filter: drop-shadow(0 0 10px rgba(251,191,36,0.2)); }
+                        50% { transform: scale(1.05); opacity: 1; filter: drop-shadow(0 0 25px rgba(251,191,36,0.5)); }
+                    }
+                `}</style>
             </div>
         );
     }
@@ -2453,6 +2717,7 @@ export default function App() {
             </div>
         );
     }
+
 
     return (
         <>
@@ -2502,7 +2767,7 @@ export default function App() {
                     </div>
                 )}
 
-                <header className={`fixed left-0 right-0 z-50 ${bannerMessage.text ? 'top-16' : 'top-0'} transition-all duration-500`} style={{ height: '72px' }}>
+                <header className={`fixed left-0 right-0 z-50 ${bannerMessage.text ? 'top-16' : 'top-0'} transition-all duration-500`} style={{ height: '90px' }}>
                     {/* Scroll-aware navbar background */}
                     <div className="absolute inset-0" style={{
                         background: isNavScrolled ? 'rgba(250,246,240,0.97)' : 'rgba(250,246,240,0.0)',
@@ -2515,19 +2780,12 @@ export default function App() {
                     <div className="container mx-auto px-4 sm:px-6 md:px-12 h-full flex items-center justify-between relative z-10">
                         {/* Logo */}
                         <div className="flex items-center h-full">
-                            <div className="flex items-center justify-center" style={{
-                                padding: '0.4rem',
-                                borderRadius: '3px',
-                                background: isNavScrolled ? 'linear-gradient(135deg,#0e3d2a,#1b5e40)' : 'rgba(10,10,15,0.55)',
-                                border: '1px solid rgba(201,168,76,0.45)',
-                                backdropFilter: 'blur(8px)',
-                                transition: 'all 0.5s ease'
-                            }}>
+                            <div className="flex items-center justify-center transition-all duration-500">
                                 <img
                                     src={logoSrc}
                                     alt="Resort logo"
                                     className="object-contain drop-shadow-md"
-                                    style={{ height: '40px', width: 'auto' }}
+                                    style={{ height: isNavScrolled ? '75px' : '105px', width: 'auto' }}
                                     loading="lazy"
                                     onError={() => {
                                         setLogoIndex((prev) => {
@@ -2542,6 +2800,7 @@ export default function App() {
                         {/* Desktop Navigation Menu */}
                         <nav className="hidden lg:flex items-center" style={{ gap: '0.25rem' }}>
                             {[
+                                { label: 'Properties', action: () => setSelectedBranch(null) },
                                 { label: 'Exclusive Deals', target: 'packages', type: 'id' },
                                 { label: 'Rooms', target: 'rooms-section', type: 'id' },
                                 { label: 'Services', target: '[data-services-section]', type: 'selector' },
@@ -2549,16 +2808,29 @@ export default function App() {
                                 { label: 'Gallery', target: '[data-gallery-section]', type: 'selector' },
                                 { label: 'Reviews', target: '[data-reviews-section]', type: 'selector' },
                                 { label: 'Contact', target: '[data-contact-section]', type: 'selector' },
-                            ].map(({ label, target, type }) => (
+                            ].map(({ label, target, type, action }) => (
                                 <a
                                     key={label}
-                                    href={`#${label.toLowerCase()}`}
+                                    href={target ? `#${label.toLowerCase()}` : '#'}
                                     className="nav-link"
                                     style={{ color: isNavScrolled ? 'var(--obsidian)' : 'rgba(255,255,255,0.92)' }}
                                     onClick={(e) => {
                                         e.preventDefault();
-                                        const el = type === 'id' ? document.getElementById(target) : document.querySelector(target);
-                                        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                        if (action) {
+                                            action();
+                                            setTimeout(() => {
+                                                const el = document.getElementById('properties');
+                                                if (el) el.scrollIntoView({ behavior: 'smooth' });
+                                            }, 100);
+                                        } else {
+                                            if (!selectedBranch) {
+                                                const el = document.getElementById('properties');
+                                                if (el) el.scrollIntoView({ behavior: 'smooth' });
+                                            } else {
+                                                const el = type === 'id' ? document.getElementById(target) : document.querySelector(target);
+                                                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                            }
+                                        }
                                         setIsMobileMenuOpen(false);
                                     }}
                                 >
@@ -2593,6 +2865,7 @@ export default function App() {
                         <div className="lg:hidden absolute top-full left-0 right-0 shadow-xl" style={{ background: 'rgba(250,246,240,0.97)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(201,168,76,0.25)' }}>
                             <nav className="container mx-auto px-4 py-6" style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                                 {[
+                                    { label: 'Properties', action: () => setSelectedBranch(null) },
                                     { label: 'Exclusive Deals', target: 'packages', type: 'id' },
                                     { label: 'Rooms', target: 'rooms-section', type: 'id' },
                                     { label: 'Services', target: '[data-services-section]', type: 'selector' },
@@ -2600,16 +2873,29 @@ export default function App() {
                                     { label: 'Gallery', target: '[data-gallery-section]', type: 'selector' },
                                     { label: 'Reviews', target: '[data-reviews-section]', type: 'selector' },
                                     { label: 'Contact', target: '[data-contact-section]', type: 'selector' },
-                                ].map(({ label, target, type }) => (
+                                ].map(({ label, target, type, action }) => (
                                     <a
                                         key={label}
-                                        href={`#${label.toLowerCase()}`}
+                                        href={target ? `#${label.toLowerCase()}` : '#'}
                                         className="nav-link block"
                                         style={{ textAlign: 'left' }}
                                         onClick={(e) => {
                                             e.preventDefault();
-                                            const el = type === 'id' ? document.getElementById(target) : document.querySelector(target);
-                                            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                            if (action) {
+                                                action();
+                                                setTimeout(() => {
+                                                    const el = document.getElementById('properties');
+                                                    if (el) el.scrollIntoView({ behavior: 'smooth' });
+                                                }, 100);
+                                            } else {
+                                                if (!selectedBranch) {
+                                                    const el = document.getElementById('properties');
+                                                    if (el) el.scrollIntoView({ behavior: 'smooth' });
+                                                } else {
+                                                    const el = type === 'id' ? document.getElementById(target) : document.querySelector(target);
+                                                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                                }
+                                            }
                                             setIsMobileMenuOpen(false);
                                         }}
                                     >
@@ -2634,134 +2920,241 @@ export default function App() {
                 </header>
 
                 <main className="w-full max-w-full pt-0 space-y-0 relative z-10 overflow-hidden">
-                    {/* Hero Banner Section - Image Only */}
+                    {/* ── Hero Banner Section ── Always shows all available banners */}
                     <div
                         ref={bannerRef}
-                        className="relative w-full h-screen overflow-hidden"
-                        style={{ background: 'linear-gradient(160deg, #0a0a0f 0%, #12121a 45%, #1c1c28 70%, #0a0a0f 100%)' }}
+                        className="relative w-full overflow-hidden"
+                        style={{ height: '100vh', background: '#0a0a0f' }}
                     >
+                        {/* Banner images – show all banners regardless of branch selection */}
                         {bannerData.length > 0 ? (
-                            <>
-                                {/* Banner Images Background */}
-                                {bannerData.map((banner, index) => (
-                                    <img
-                                        key={banner.id}
-                                        src={getImageUrl(banner.image_url)}
-                                        onError={(e) => { e.target.src = ITEM_PLACEHOLDER; }}
-                                        alt={banner.title}
-                                        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ${index === currentBannerIndex ? 'opacity-100 animate-zoom-gentle' : 'opacity-0'}`}
-                                    />
-                                ))}
-                            </>
+                            bannerData.map((banner, index) => (
+                                <img
+                                    key={banner.id}
+                                    src={getImageUrl(banner.image_url)}
+                                    onError={(e) => { e.target.src = ITEM_PLACEHOLDER; }}
+                                    alt={banner.title}
+                                    className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ${index === currentBannerIndex ? 'opacity-100 animate-zoom-gentle' : 'opacity-0'}`}
+                                />
+                            ))
                         ) : (
-                            /* Cinematic dark fallback — matches our obsidian overlay */
-                            <div className="absolute inset-0" style={{
-                                background: 'radial-gradient(ellipse at 60% 50%, rgba(28,28,40,1) 0%, rgba(10,10,15,1) 100%)'
-                            }}>
-                                {/* Fine diagonal texture */}
-                                <div style={{ position: 'absolute', inset: 0, backgroundImage: 'repeating-linear-gradient(135deg, transparent, transparent 80px, rgba(200,151,30,0.025) 80px, rgba(200,151,30,0.025) 81px)', pointerEvents: 'none' }} />
+                            <div className="absolute inset-0 bg-[#0a0a0f] flex flex-col items-center justify-center">
+                                <div className="relative">
+                                    <div className="absolute inset-0 bg-amber-500/20 blur-[80px] rounded-full animate-pulse" />
+                                    <img
+                                        src={logoSrc}
+                                        className="relative w-auto h-32 md:h-48 object-contain opacity-40 contrast-125 animate-[logo-pulse_3s_ease-in-out_infinite]"
+                                        alt="Zeebull Logo"
+                                    />
+                                </div>
+                                <div className="mt-8 flex gap-2">
+                                    {[0, 1, 2].map((i) => (
+                                        <div
+                                            key={i}
+                                            className="w-1.5 h-1.5 rounded-full bg-amber-500/20 animate-pulse"
+                                            style={{ animationDelay: `${i * 0.3}s` }}
+                                        />
+                                    ))}
+                                </div>
+                                <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/80"></div>
                             </div>
                         )}
 
-                        {/* Luxury hero overlay */}
+                        {/* Overlay */}
                         <div className="absolute inset-0 hero-overlay z-[1]"></div>
 
                         {/* Hero Content */}
-                        <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6 z-10">
-                            <div className="max-w-5xl mx-auto">
-                                {/* Eyebrow badge */}
-                                <div className="animate-fade-in-up" style={{ animationDelay: '0.1s', marginBottom: '1.5rem' }}>
-                                    <span className="section-badge" style={{ color: 'rgba(232,213,163,0.9)', borderColor: 'rgba(201,168,76,0.6)', letterSpacing: '0.3em' }}>A Sanctuary of Serenity</span>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-4 sm:px-6 z-10">
+                            <div className="w-full max-w-4xl mx-auto">
+                                <div className="animate-fade-in-up mb-4 sm:mb-6" style={{ animationDelay: '0.1s' }}>
+                                    <span className="section-badge" style={{ color: 'rgba(232,213,163,0.9)', borderColor: 'rgba(201,168,76,0.6)', letterSpacing: '0.25em', fontSize: 'clamp(0.55rem, 1.5vw, 0.72rem)' }}>
+                                        {selectedBranch ? `${selectedBranch.name} — Select Below to Change` : 'The Zeebull Hospitality Collection'}
+                                    </span>
                                 </div>
 
-                                {/* Contact Info */}
-                                {resortInfo && (
-                                    <div className="flex flex-wrap items-center justify-center gap-4 md:gap-6 mb-8 text-white/80 text-xs drop-shadow-lg animate-fade-in-up" style={{ animationDelay: '0.2s', fontFamily: 'var(--font-display)', letterSpacing: '0.12em' }}>
-                                        {resortInfo.email && (
-                                            <span className="flex items-center gap-2">
-                                                <span>✉</span>{resortInfo.email}
-                                            </span>
-                                        )}
-                                        {resortInfo.email && resortInfo.phone && <span style={{ color: 'rgba(201,168,76,0.6)' }}>·</span>}
-                                        {resortInfo.phone && (
-                                            <span className="flex items-center gap-2">
-                                                <span>☎</span>{resortInfo.phone}
-                                            </span>
-                                        )}
-                                    </div>
-                                )}
+                                <h1 className="animate-fade-in-up text-white uppercase drop-shadow-2xl leading-none mb-4 sm:mb-6"
+                                    style={{ fontSize: 'clamp(2.5rem, 10vw, 5.5rem)', fontFamily: 'var(--font-display)', letterSpacing: '0.06em', animationDelay: '0.3s' }}>
+                                    {selectedBranch ? selectedBranch.name : 'Zeebull Hospitality'}
+                                </h1>
 
-                                {/* Main Heading - Banner Title and Description */}
-                                {bannerData.length > 0 && bannerData[currentBannerIndex] && (
-                                    <div style={{ marginBottom: '2.5rem' }}>
-                                        {bannerData[currentBannerIndex].title && (
-                                            <h1 className="animate-slide-left" style={{ fontSize: 'clamp(2rem,6vw,4.5rem)', fontFamily: 'var(--font-display)', fontWeight: '600', letterSpacing: '0.06em', color: '#ffffff', textShadow: '0 2px 20px rgba(0,0,0,0.5)', lineHeight: '1.15', marginBottom: '0.75rem', animationDelay: '0.4s' }}>
-                                                {bannerData[currentBannerIndex].title}
-                                            </h1>
-                                        )}
-                                        {bannerData[currentBannerIndex].subtitle && (
-                                            <p className="animate-slide-right" style={{ fontFamily: 'var(--font-serif)', fontSize: 'clamp(1.1rem,3vw,1.8rem)', fontStyle: 'italic', fontWeight: '300', color: 'rgba(232,213,163,0.95)', textShadow: '0 1px 12px rgba(0,0,0,0.4)', animationDelay: '0.55s' }}>
-                                                {bannerData[currentBannerIndex].subtitle}
-                                            </p>
-                                        )}
-                                    </div>
-                                )}
-                                {(!bannerData.length || !bannerData[currentBannerIndex]) && (
-                                    <h1 className="animate-fade-in-up" style={{ fontSize: 'clamp(2rem,6vw,4.5rem)', fontFamily: 'var(--font-display)', fontWeight: '600', letterSpacing: '0.06em', color: '#ffffff', textShadow: '0 2px 20px rgba(0,0,0,0.5)', lineHeight: '1.2', marginBottom: '2rem', animationDelay: '0.4s' }}>
-                                        Where Nature Meets
-                                        <br />
-                                        <span style={{ fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontWeight: '300', color: 'rgba(232,213,163,0.95)' }}>Luxury &amp; Serenity</span>
-                                    </h1>
-                                )}
+                                <p className="animate-fade-in-up text-white/85 font-light mx-auto leading-relaxed mb-8"
+                                    style={{ fontSize: 'clamp(0.9rem, 2.5vw, 1.15rem)', fontFamily: 'var(--font-serif)', fontStyle: 'italic', maxWidth: '560px', animationDelay: '0.5s' }}>
+                                    {selectedBranch
+                                        ? selectedBranch.address
+                                        : 'Discover a collection of world-class resorts, each crafted for a unique blend of luxury and serenity.'}
+                                </p>
 
-                                {/* Gold divider */}
-                                <div className="animate-fade-in-up" style={{ animationDelay: '0.6s', marginBottom: '2.5rem' }}>
-                                    <span className="gold-rule" style={{ display: 'inline-block' }}></span>
-                                </div>
-
-                                {/* CTA Button */}
-                                <div className="animate-fade-in-up" style={{ animationDelay: '0.75s' }}>
+                                <div className="animate-fade-in-up flex flex-col sm:flex-row items-center justify-center gap-3" style={{ animationDelay: '0.65s' }}>
                                     <button
                                         type="button"
                                         onClick={() => { setShowAmenities(false); setIsGeneralBookingOpen(true); }}
                                         className="btn-gold"
+                                        style={{ fontSize: 'clamp(0.6rem, 1.8vw, 0.72rem)' }}
                                     >
                                         Reserve Your Escape
-                                        <ChevronRight style={{ width: '1rem', height: '1rem' }} />
+                                        <ChevronRight className="w-3 h-3 sm:w-4 sm:h-4" />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const el = document.getElementById('packages');
+                                            if (el) el.scrollIntoView({ behavior: 'smooth' });
+                                        }}
+                                        style={{ fontSize: 'clamp(0.6rem, 1.8vw, 0.7rem)', letterSpacing: '0.15em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.7)', background: 'none', border: '1px solid rgba(255,255,255,0.25)', padding: '0.7rem 1.4rem', borderRadius: '999px', cursor: 'pointer' }}
+                                    >
+                                        Explore Deals
                                     </button>
                                 </div>
+
+                                {/* Quick Branch Select Chips - Move choosing into banner */}
+                                {branches.length > 1 && (
+                                    <div className="animate-fade-in-up mt-12 pt-8 border-t border-white/10" style={{ animationDelay: '0.8s' }}>
+                                        <p className="text-[10px] uppercase tracking-[0.3em] text-white/50 mb-4 font-bold">Quick Select Destination</p>
+                                        <div className="flex flex-wrap items-center justify-center gap-3">
+                                            <button
+                                                onClick={() => setSelectedBranch(null)}
+                                                className={`px-5 py-2 rounded-full text-[11px] uppercase tracking-widest font-bold transition-all duration-300 ${!selectedBranch ? 'bg-amber-500 text-white shadow-lg' : 'bg-white/5 text-white/70 hover:bg-white/10 hover:text-white border border-white/10'}`}
+                                            >
+                                                All
+                                            </button>
+                                            {branches.map(branch => (
+                                                <button
+                                                    key={branch.id}
+                                                    onClick={() => {
+                                                        setSelectedBranch(branch);
+                                                        setTimeout(() => {
+                                                            const el = document.getElementById('packages');
+                                                            if (el) el.scrollIntoView({ behavior: 'smooth' });
+                                                        }, 300);
+                                                    }}
+                                                    className={`px-5 py-2 rounded-full text-[11px] uppercase tracking-widest font-bold transition-all duration-300 ${selectedBranch?.id === branch.id ? 'bg-amber-500 text-white shadow-lg' : 'bg-white/5 text-white/70 hover:bg-white/10 hover:text-white border border-white/10'}`}
+                                                >
+                                                    {branch.name}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
 
-                        {/* Navigation Dots - Only show if multiple banners */}
+                        {/* Banner nav dots */}
                         {bannerData.length > 1 && (
-                            <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex space-x-3 z-20">
+                            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2 z-20">
                                 {bannerData.map((_, index) => (
                                     <button
                                         key={index}
                                         onClick={() => setCurrentBannerIndex(index)}
-                                        className={`transition-all duration-300 ${index === currentBannerIndex
-                                            ? "w-12 h-1 bg-white rounded-full"
-                                            : "w-8 h-1 bg-white/40 hover:bg-white/70 rounded-full"
-                                            }`}
+                                        className={`transition-all duration-300 rounded-full ${index === currentBannerIndex ? 'w-8 h-1.5 bg-white' : 'w-4 h-1.5 bg-white/40 hover:bg-white/70'}`}
                                     />
                                 ))}
                             </div>
                         )}
                     </div>
 
-                    {/* ── Exclusive Deals (Packages) ─────────────────────────── */}
+                    {/* ── Active Branch Context Bar ── */}
+                    <div style={{ background: selectedBranch ? 'linear-gradient(90deg,#1a1a24,#2a2a36)' : 'linear-gradient(90deg,#2a2a36,#3a3a4a)', padding: '0.6rem 1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                            <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: selectedBranch ? '#c9a84c' : '#6adc8a', display: 'inline-block', flexShrink: 0 }}></span>
+                            <span style={{ fontFamily: 'var(--font-body)', fontSize: 'clamp(0.6rem,1.8vw,0.72rem)', letterSpacing: '0.15em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.75)' }}>
+                                {selectedBranch ? `Showing: ${selectedBranch.name}` : 'Showing: All Properties'}
+                            </span>
+                        </div>
+                        {selectedBranch && (
+                            <button onClick={() => setSelectedBranch(null)} style={{ fontFamily: 'var(--font-body)', fontSize: '0.6rem', letterSpacing: '0.15em', textTransform: 'uppercase', color: 'rgba(201,168,76,0.9)', background: 'none', border: '1px solid rgba(201,168,76,0.35)', padding: '0.25rem 0.75rem', borderRadius: '999px', cursor: 'pointer' }}>
+                                View All
+                            </button>
+                        )}
+                    </div>
+
+                    {/* ── Property Hub (Destinations) Section ── */}
+                    <section id="properties"
+                        style={{
+                            padding: '2rem 1.5rem',
+                            background: 'radial-gradient(circle at 50% -20%, #ffffff 0%, #faf9f6 100%)',
+                            position: 'relative',
+                            borderBottom: '1px solid rgba(201,168,76,0.1)'
+                        }}>
+                        <div className="max-w-7xl mx-auto">
+                            <div className="text-center mb-6 animate-fade-in">
+                                <div className="section-badge mb-2 mx-auto" style={{ letterSpacing: '0.25em', padding: '0.2rem 0.6rem', fontSize: '10px' }}>Our Destinations</div>
+                                <h2 className="section-title mb-2" style={{ fontSize: 'clamp(1.5rem, 3.5vw, 2.25rem)', fontFamily: 'var(--font-display)', letterSpacing: '0.04em' }}>
+                                    {selectedBranch ? 'Switch Property' : 'Choose Your Sanctuary'}
+                                </h2>
+                                <p className="section-subtitle max-w-2xl mx-auto text-gray-500 font-light italic" style={{ fontSize: 'clamp(0.75rem, 1.5vw, 0.88rem)', fontFamily: 'var(--font-serif)' }}>
+                                    {selectedBranch
+                                        ? `You are currently viewing ${selectedBranch.name}. Select another property to explore.`
+                                        : 'Discover our handpicked collection of luxury resorts, each offering a distinct atmosphere.'}
+                                </p>
+                                <div className="w-10 h-0.5 bg-amber-500/20 mx-auto mt-4"></div>
+                            </div>
+
+                            <div className={`grid grid-cols-1 gap-6 ${branches.length === 1 ? 'max-w-md mx-auto' : branches.length === 2 ? 'md:grid-cols-2 max-w-4xl mx-auto' : 'md:grid-cols-2 lg:grid-cols-3'}`}>
+                                {branches.map((branch, idx) => (
+                                    <div
+                                        key={branch.id}
+                                        className={`group cursor-pointer animate-fade-in-up transition-all duration-700 overflow-hidden rounded-3xl shadow-md border border-transparent ${selectedBranch?.id === branch.id
+                                            ? 'ring-2 ring-amber-500 ring-offset-2 scale-[1.01] shadow-2xl z-10'
+                                            : 'hover:scale-[1.02] hover:shadow-2xl hover:border-amber-500/10'
+                                            }`}
+                                        style={{
+                                            animationDelay: `${idx * 150}ms`,
+                                            background: '#ffffff'
+                                        }}
+                                        onClick={() => {
+                                            setSelectedBranch(branch);
+                                            setTimeout(() => {
+                                                const el = document.getElementById('packages');
+                                                if (el) el.scrollIntoView({ behavior: 'smooth' });
+                                            }, 400);
+                                        }}
+                                    >
+                                        <div className="aspect-[21/9] overflow-hidden relative">
+                                            <img
+                                                src={branch.image_url ? getImageUrl(branch.image_url) : [
+                                                    "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&q=80&w=800",
+                                                    "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&q=80&w=800",
+                                                    "https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?auto=format&fit=crop&q=80&w=800",
+                                                    "https://images.unsplash.com/photo-1571003123894-1f0594d2b5d9?auto=format&fit=crop&q=80&w=800",
+                                                    "https://images.unsplash.com/photo-1445019980597-93fa8acb246c?auto=format&fit=crop&q=80&w=800",
+                                                    "https://images.unsplash.com/photo-1530521954074-e64f6810b32d?auto=format&fit=crop&q=80&w=800",
+                                                ][idx % 6]}
+                                                alt={branch.name}
+                                                className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110"
+                                            />
+                                            {/* Refined Overlay Gradient */}
+                                            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-80 group-hover:opacity-100 transition-opacity duration-500"></div>
+
+                                            {selectedBranch?.id === branch.id && (
+                                                <div className="absolute top-5 right-5">
+                                                    <div className="bg-amber-500/90 backdrop-blur-md text-white text-[9px] tracking-[0.2em] uppercase font-bold px-4 py-1.5 rounded-full shadow-xl ring-1 ring-white/30 animate-pulse">
+                                                        Active
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            <div className="absolute bottom-6 left-6 right-6">
+                                                <h3 className="text-xl md:text-2xl font-display text-white uppercase tracking-widest mb-1 shadow-sm">{branch.name}</h3>
+                                                <div className="flex items-center gap-1.5 text-white/80 text-[10px] md:text-xs font-body mb-3">
+                                                    <MapPin className="w-3 h-3 text-amber-400" />
+                                                    <span className="tracking-wide">{branch.address || "Exclusive Destination"}</span>
+                                                </div>
+                                                <div className="flex items-center gap-2 text-amber-400 text-[9px] uppercase tracking-[0.2em] font-bold opacity-0 group-hover:opacity-100 transform translate-y-3 group-hover:translate-y-0 transition-all duration-500">
+                                                    <span>Explore Sanctuary</span>
+                                                    <ChevronRight className="w-3 h-3 group-hover:translate-x-1.5 transition-transform" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </section>
+
+                    {/* ── Exclusive Deals (Packages) ───────────────────────── */}
                     <section id="packages" style={{ position: 'relative', backgroundColor: '#faf9f6', paddingTop: '3.5rem', paddingBottom: '6rem', overflow: 'hidden' }}>
                         {/* Dynamic Background — Blurred focus image */}
-                        <div style={{
-                            position: 'absolute',
-                            inset: 0,
-                            zIndex: 0,
-                            opacity: 0.45,
-                            transition: 'all 1s ease-in-out',
-                            filter: 'blur(60px) saturate(1.2)',
-                            pointerEvents: 'none'
-                        }}>
+                        <div style={{ position: 'absolute', inset: 0, zIndex: 0, opacity: 0.45, transition: 'all 1s ease-in-out', filter: 'blur(60px) saturate(1.2)', pointerEvents: 'none' }}>
                             {packages.length > 0 && (
                                 <img
                                     src={packages[packageCarouselIndex + 1]?.images?.[0]?.image_url
@@ -2819,14 +3212,15 @@ export default function App() {
                                             display: 'flex',
                                             gap: '2.5rem',
                                             transition: 'transform 1.2s cubic-bezier(0.19, 1, 0.22, 1)',
-                                            transform: `translateX(calc(-${packageCarouselIndex} * (100% / 3 + 2.5rem / 3)))`
+                                            transform: `translateX(calc(-${packageCarouselIndex} * (100% / var(--visible-cards, 3) + 2.5rem / var(--visible-cards, 3))))`
                                         }}>
                                             {packages.map((pkg, index) => {
                                                 const imgIndex = packageImageIndex[pkg.id] || 0;
                                                 const currentImage = pkg.images && pkg.images[imgIndex];
 
-                                                // Center card logic for 3 visible cards
-                                                const isCenter = index === (packageCarouselIndex + 1);
+                                                // Center card logic
+                                                const visibleCardsCount = typeof window !== 'undefined' ? parseInt(getComputedStyle(document.documentElement).getPropertyValue('--visible-cards') || '3') : 3;
+                                                const isCenter = visibleCardsCount >= 3 ? index === (packageCarouselIndex + 1) : index === packageCarouselIndex;
 
                                                 return (
                                                     <div
@@ -2835,12 +3229,12 @@ export default function App() {
                                                         style={{
                                                             position: 'relative',
                                                             cursor: 'pointer',
-                                                            flex: '0 0 calc((100% - 5rem) / 3)',
-                                                            maxWidth: 'calc((100% - 5rem) / 3)',
+                                                            flex: '0 0 calc((100% - (var(--visible-cards, 3) - 1) * var(--carousel-gap, 2.5rem)) / var(--visible-cards, 3))',
+                                                            maxWidth: 'calc((100% - (var(--visible-cards, 3) - 1) * var(--carousel-gap, 2.5rem)) / var(--visible-cards, 3))',
                                                             transition: 'all 1s cubic-bezier(0.19, 1, 0.22, 1)',
                                                             transform: isCenter ? 'scale(1.15)' : 'scale(1)',
                                                             zIndex: isCenter ? 5 : 1,
-                                                            opacity: (index >= packageCarouselIndex && index <= packageCarouselIndex + 2) ? 1 : 0.3,
+                                                            opacity: (index >= packageCarouselIndex && index < packageCarouselIndex + visibleCardsCount) ? 1 : 0.3,
                                                             filter: isCenter ? 'none' : 'grayscale(15%) brightness(95%)',
                                                             margin: isCenter ? '0 0.5rem' : '0'
                                                         }}
@@ -2905,9 +3299,14 @@ export default function App() {
                                                             transition: 'transform 0.5s ease, box-shadow 0.5s ease'
                                                         }} className="group-hover:-translate-y-2">
                                                             {/* Package Title — All Caps Tracked */}
-                                                            <h3 style={{ fontFamily: 'var(--font-body)', fontSize: '0.68rem', fontWeight: '600', letterSpacing: '0.24em', textTransform: 'uppercase', color: 'var(--obsidian)', marginBottom: '0.85rem', lineHeight: '1.5' }}>
+                                                            <h3 style={{ fontFamily: 'var(--font-body)', fontSize: '0.68rem', fontWeight: '600', letterSpacing: '0.24em', textTransform: 'uppercase', color: 'var(--obsidian)', marginBottom: '0.45rem', lineHeight: '1.5' }}>
                                                                 {pkg.title}
                                                             </h3>
+                                                            {!selectedBranch && branches.length > 1 && pkg.branch_id && (
+                                                                <p style={{ fontFamily: 'var(--font-body)', fontSize: '0.55rem', fontWeight: '600', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--gold)', marginBottom: '0.85rem' }}>
+                                                                    {branches.find(b => b.id === pkg.branch_id)?.name}
+                                                                </p>
+                                                            )}
                                                             {/* Gold hairline */}
                                                             <div style={{ height: '1px', width: '1.5rem', background: 'var(--gold-warm)', marginBottom: '1.2rem' }} />
                                                             {/* Call to Action */}
@@ -2932,10 +3331,10 @@ export default function App() {
                                 </div>
                             )}
                         </div>
-                    </section>
+                    </section >
 
                     {/* Luxury Villa Showcase Section */}
-                    <section id="rooms-section" style={{ backgroundColor: '#faf7f0', paddingTop: '5.5rem', paddingBottom: '5.5rem' }}>
+                    < section id="rooms-section" style={{ backgroundColor: '#faf7f0', paddingTop: '5.5rem', paddingBottom: '5.5rem' }}>
                         <div className="w-full mx-auto px-4 sm:px-8 md:px-16">
                             {/* Taj 2-column section header */}
                             <div className="taj-section-header">
@@ -2978,10 +3377,34 @@ export default function App() {
                                     <p style={{ fontFamily: 'var(--font-body)', fontSize: '0.68rem', letterSpacing: '0.18em', color: '#9a9a9a', textTransform: 'uppercase', marginBottom: '1.75rem' }}>
                                         Showing all {rooms.length} rooms
                                     </p>
-                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '1.5rem', alignItems: 'start' }}>
+                                    <div style={{
+                                        display: 'grid',
+                                        gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 360px), 1fr))',
+                                        gap: '2rem',
+                                        alignItems: 'start'
+                                    }}>
                                         {rooms.map((room, idx) => {
                                             const isBooked = bookingData.check_in && bookingData.check_out && !roomAvailability[room.id];
                                             const hasDateFilter = !!(bookingData.check_in && bookingData.check_out);
+
+                                            const roomImages = [];
+                                            if (room.image_url) roomImages.push(room.image_url);
+                                            if (room.extra_images) {
+                                                try {
+                                                    const extras = JSON.parse(room.extra_images);
+                                                    if (Array.isArray(extras)) {
+                                                        extras.forEach(img => {
+                                                            if (img && !roomImages.includes(img)) roomImages.push(img);
+                                                        });
+                                                    }
+                                                } catch (e) {
+                                                    console.error("Error parsing extra images:", e);
+                                                }
+                                            }
+
+                                            const imgIndex = roomImageIndex[room.id] || 0;
+                                            const currentImage = roomImages.length > 0 ? roomImages[imgIndex] : null;
+
                                             return (
                                                 <div
                                                     key={room.id}
@@ -2991,12 +3414,50 @@ export default function App() {
                                                     {/* Tall full-bleed image — sharp corners */}
                                                     <div style={{ position: 'relative', height: idx % 3 === 1 ? '420px' : '370px', overflow: 'hidden', background: 'var(--obsidian)' }}>
                                                         <img
-                                                            src={getImageUrl(room.image_url)}
+                                                            src={getImageUrl(currentImage)}
                                                             alt={room.type}
                                                             style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.9s cubic-bezier(0.23,1,0.32,1)', filter: isBooked ? 'grayscale(40%)' : 'none' }}
                                                             className={isBooked ? '' : 'group-hover:scale-[1.05]'}
                                                             onError={(e) => { e.target.src = ITEM_PLACEHOLDER; }}
                                                         />
+
+                                                        {/* Image Slider Controls — Only if multiple images */}
+                                                        {roomImages.length > 1 && (
+                                                            <>
+                                                                <div
+                                                                    className="absolute inset-y-0 left-0 w-1/4 flex items-center justify-start pl-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setRoomImageIndex(prev => ({ ...prev, [room.id]: (imgIndex - 1 + roomImages.length) % roomImages.length }));
+                                                                    }}
+                                                                >
+                                                                    <div className="w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/60 transition-all">
+                                                                        <ChevronLeft size={18} />
+                                                                    </div>
+                                                                </div>
+                                                                <div
+                                                                    className="absolute inset-y-0 right-0 w-1/4 flex items-center justify-end pr-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setRoomImageIndex(prev => ({ ...prev, [room.id]: (imgIndex + 1) % roomImages.length }));
+                                                                    }}
+                                                                >
+                                                                    <div className="w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/60 transition-all">
+                                                                        <ChevronRight size={18} />
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* Dots */}
+                                                                <div className="absolute bottom-12 left-1/2 -translate-x-1/2 flex gap-1.5 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                    {roomImages.map((_, iIdx) => (
+                                                                        <div
+                                                                            key={iIdx}
+                                                                            className={`w-1.5 h-1.5 rounded-full transition-all ${iIdx === imgIndex ? 'bg-white scale-110' : 'bg-white/40'}`}
+                                                                        />
+                                                                    ))}
+                                                                </div>
+                                                            </>
+                                                        )}
                                                         {/* Subtle bottom vignette */}
                                                         <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(10,10,15,0.32) 0%, transparent 50%)', pointerEvents: 'none' }} />
 
@@ -3024,9 +3485,13 @@ export default function App() {
                                                         <h3 style={{ fontFamily: 'var(--font-body)', fontSize: '0.65rem', fontWeight: '600', letterSpacing: '0.24em', textTransform: 'uppercase', color: 'var(--obsidian)', marginBottom: '0.5rem', lineHeight: '1.5' }}>
                                                             {room.type}
                                                         </h3>
-                                                        {/* Room number */}
-                                                        <p style={{ fontFamily: 'var(--font-body)', fontSize: '0.6rem', letterSpacing: '0.1em', color: '#9a9a9a', marginBottom: '0.75rem' }}>
+                                                        <p style={{ fontFamily: 'var(--font-body)', fontSize: '0.6rem', letterSpacing: '0.1em', color: '#9a9a9a', marginBottom: '0.45rem' }}>
                                                             Room #{room.number}
+                                                            {!selectedBranch && branches.length > 1 && room.branch_id && (
+                                                                <span className="ml-2 font-medium text-[var(--gold)]">
+                                                                    — {branches.find(b => b.id === room.branch_id)?.name || "Main Resort"}
+                                                                </span>
+                                                            )}
                                                         </p>
                                                         {/* Gold hairline */}
                                                         <div style={{ height: '1px', width: '1.75rem', background: 'linear-gradient(90deg,var(--gold-warm),var(--gold-light))', marginBottom: '0.85rem' }} />
@@ -3076,7 +3541,7 @@ export default function App() {
                     {/* Signature Experiences Section - Resort Style */}
                     < section style={{ position: 'relative', backgroundColor: '#faf9f6', paddingTop: '3.5rem', paddingBottom: '3.5rem', overflow: 'hidden' }}>
                         {/* Dynamic Background — Blurred focus image */}
-                        <div style={{
+                        < div style={{
                             position: 'absolute',
                             inset: 0,
                             zIndex: 0,
@@ -3093,7 +3558,7 @@ export default function App() {
                                 />
                             )}
                             <div style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(255,255,255,0.4)' }} />
-                        </div>
+                        </div >
 
                         <div className="w-full mx-auto px-4 sm:px-8 md:px-16" style={{ position: 'relative', zIndex: 1 }}>
                             {/* Taj 2-column section header */}
@@ -3141,12 +3606,62 @@ export default function App() {
                                                     <div
                                                         className={`relative group h-[400px] sm:h-[460px] lg:h-[520px] rounded-[32px] overflow-hidden bg-black shadow-[0_35px_80px_rgba(12,61,38,0.35)] transition-transform duration-700 ease-[cubic-bezier(.4,.0,.2,1)] will-change-transform ${offset === 0 ? '' : 'scale-[0.9] opacity-70 blur-[1.5px]'}`}
                                                     >
-                                                        <img
-                                                            src={getImageUrl(experience.image_url)}
-                                                            alt={experience.title}
-                                                            className="absolute inset-0 w-full h-full object-cover transition-transform duration-[1500ms] ease-out group-hover:scale-[1.12]"
-                                                            onError={(e) => { e.target.src = ITEM_PLACEHOLDER; }}
-                                                        />
+                                                        {(() => {
+                                                            let images = [experience.image_url];
+                                                            if (experience.extra_images) {
+                                                                try {
+                                                                    const extra = JSON.parse(experience.extra_images);
+                                                                    images = [...images, ...(Array.isArray(extra) ? extra : [])];
+                                                                } catch (e) {
+                                                                    console.error("Error parsing extra_images for experience:", e);
+                                                                }
+                                                            }
+                                                            const currentImgIdx = experienceImageIndex[experience.id] || 0;
+                                                            const currentImg = images[currentImgIdx % images.length];
+
+                                                            return (
+                                                                <>
+                                                                    <img
+                                                                        src={getImageUrl(currentImg)}
+                                                                        alt={experience.title}
+                                                                        className="absolute inset-0 w-full h-full object-cover transition-transform duration-[1500ms] ease-out group-hover:scale-[1.12]"
+                                                                        onError={(e) => { e.target.src = ITEM_PLACEHOLDER; }}
+                                                                    />
+                                                                    {images.length > 1 && (
+                                                                        <>
+                                                                            <div className="absolute inset-0 flex items-center justify-between px-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                                                                                <button
+                                                                                    onClick={(e) => {
+                                                                                        e.stopPropagation();
+                                                                                        setExperienceImageIndex(prev => ({ ...prev, [experience.id]: (currentImgIdx - 1 + images.length) % images.length }));
+                                                                                    }}
+                                                                                    className="p-2 rounded-full bg-black/30 text-white hover:bg-black/60 backdrop-blur-md transition-all"
+                                                                                >
+                                                                                    <ChevronLeft size={20} />
+                                                                                </button>
+                                                                                <button
+                                                                                    onClick={(e) => {
+                                                                                        e.stopPropagation();
+                                                                                        setExperienceImageIndex(prev => ({ ...prev, [experience.id]: (currentImgIdx + 1) % images.length }));
+                                                                                    }}
+                                                                                    className="p-2 rounded-full bg-black/30 text-white hover:bg-black/60 backdrop-blur-md transition-all"
+                                                                                >
+                                                                                    <ChevronRight size={20} />
+                                                                                </button>
+                                                                            </div>
+                                                                            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-1.5 z-20">
+                                                                                {images.map((_, i) => (
+                                                                                    <div
+                                                                                        key={i}
+                                                                                        className={`transition-all duration-300 rounded-full ${i === currentImgIdx ? 'w-4 h-1 bg-[#d8b471]' : 'w-1 h-1 bg-white/50'}`}
+                                                                                    />
+                                                                                ))}
+                                                                            </div>
+                                                                        </>
+                                                                    )}
+                                                                </>
+                                                            );
+                                                        })()}
                                                         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-black/90 via-black/60 to-transparent" />
                                                         <div className="absolute top-6 left-6 z-10">
                                                             <span className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.35em] text-white/95 bg-white/20 border border-white/30 rounded-full px-5 py-1.5 shadow-lg backdrop-blur">
@@ -3659,202 +4174,256 @@ export default function App() {
                     </section>
 
                     {/* Nearby Attractions Feature Banner */}
-                    {totalNearbyAttractionBanners > 0 ? (
-                        <section className="relative w-full h-[520px] md:h-[620px] overflow-hidden rounded-3xl mt-20 mb-10 bg-[#0f5132]/5">
-                            {activeNearbyAttractionBanners.map((banner, index) => (
-                                <div key={banner.id} className="absolute inset-0">
-                                    <img
-                                        src={getImageUrl(banner.image_url)}
-                                        alt={banner.title}
-                                        className={`absolute inset-0 w-full h-full object-cover transition-all duration-[9000ms] ease-in-out ${index === currentAttractionBannerIndex ? 'opacity-100 scale-100' : 'opacity-0 scale-110'}`}
-                                        style={{
-                                            animationDelay: `${index * 2}s`,
-                                            animationDirection: index % 2 === 0 ? 'alternate' : 'alternate-reverse'
-                                        }}
-                                        onError={(e) => { e.target.src = ITEM_PLACEHOLDER; }}
-                                    />
-                                    <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/60 to-black/20" />
-                                </div>
-                            ))}
-                            <div className="relative z-10 h-full flex items-center justify-center px-4 sm:px-6 lg:px-8 text-center text-white">
-                                <div className="max-w-4xl mx-auto space-y-6">
-                                    <div className="inline-flex items-center gap-2 px-6 py-2 bg-white/15 backdrop-blur-sm rounded-full border border-white/30 uppercase tracking-[0.35em] text-xs font-semibold">
-                                        ✦ Nearby Attractions ✦
-                                    </div>
-                                    <h2 className="text-3xl md:text-5xl font-extrabold leading-tight drop-shadow-xl">
-                                        {activeNearbyAttractionBanners[currentAttractionBannerIndex]?.title || 'Explore the Destination'}
-                                    </h2>
-                                    <p className="text-base md:text-xl text-white/85 leading-relaxed drop-shadow-lg">
-                                        {activeNearbyAttractionBanners[currentAttractionBannerIndex]?.subtitle || 'Discover the most captivating sights surrounding our resort.'}
-                                    </p>
-                                </div>
-                            </div>
-                            {totalNearbyAttractionBanners > 1 ? (
-                                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2 z-20">
-                                    {activeNearbyAttractionBanners.map((_, index) => (
-                                        <button
-                                            key={index}
-                                            onClick={() => setCurrentAttractionBannerIndex(index)}
-                                            className={`transition-all duration-300 ${index === currentAttractionBannerIndex
-                                                ? "w-12 h-1 bg-[#d8b471] rounded-full shadow-[0_0_12px_rgba(216,180,113,0.6)]"
-                                                : "w-8 h-1 bg-white/40 hover:bg-white/70 rounded-full"
-                                                }`}
-                                            aria-label={`Show attraction ${index + 1}`}
+                    {
+                        totalNearbyAttractionBanners > 0 ? (
+                            <section className="relative w-full h-[520px] md:h-[620px] overflow-hidden rounded-3xl mt-20 mb-10 bg-[#0f5132]/5">
+                                {activeNearbyAttractionBanners.map((banner, index) => (
+                                    <div key={banner.id} className="absolute inset-0">
+                                        <img
+                                            src={getImageUrl(banner.image_url)}
+                                            alt={banner.title}
+                                            className={`absolute inset-0 w-full h-full object-cover transition-all duration-[9000ms] ease-in-out ${index === currentAttractionBannerIndex ? 'opacity-100 scale-100' : 'opacity-0 scale-110'}`}
+                                            style={{
+                                                animationDelay: `${index * 2}s`,
+                                                animationDirection: index % 2 === 0 ? 'alternate' : 'alternate-reverse'
+                                            }}
+                                            onError={(e) => { e.target.src = ITEM_PLACEHOLDER; }}
                                         />
-                                    ))}
+                                        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/60 to-black/20" />
+                                    </div>
+                                ))}
+                                <div className="relative z-10 h-full flex items-center justify-center px-4 sm:px-6 lg:px-8 text-center text-white">
+                                    <div className="max-w-4xl mx-auto space-y-6">
+                                        <div className="inline-flex items-center gap-2 px-6 py-2 bg-white/15 backdrop-blur-sm rounded-full border border-white/30 uppercase tracking-[0.35em] text-xs font-semibold">
+                                            ✦ Nearby Attractions ✦
+                                        </div>
+                                        <h2 className="text-3xl md:text-5xl font-extrabold leading-tight drop-shadow-xl">
+                                            {activeNearbyAttractionBanners[currentAttractionBannerIndex]?.title || 'Explore the Destination'}
+                                        </h2>
+                                        <p className="text-base md:text-xl text-white/85 leading-relaxed drop-shadow-lg">
+                                            {activeNearbyAttractionBanners[currentAttractionBannerIndex]?.subtitle || 'Discover the most captivating sights surrounding our resort.'}
+                                        </p>
+                                    </div>
                                 </div>
-                            ) : null}
-                        </section>
-                    ) : null}
+                                {totalNearbyAttractionBanners > 1 ? (
+                                    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2 z-20">
+                                        {activeNearbyAttractionBanners.map((_, index) => (
+                                            <button
+                                                key={index}
+                                                onClick={() => setCurrentAttractionBannerIndex(index)}
+                                                className={`transition-all duration-300 ${index === currentAttractionBannerIndex
+                                                    ? "w-12 h-1 bg-[#d8b471] rounded-full shadow-[0_0_12px_rgba(216,180,113,0.6)]"
+                                                    : "w-8 h-1 bg-white/40 hover:bg-white/70 rounded-full"
+                                                    }`}
+                                                aria-label={`Show attraction ${index + 1}`}
+                                            />
+                                        ))}
+                                    </div>
+                                ) : null}
+                            </section>
+                        ) : null
+                    }
 
                     {/* Nearby Attractions Section - Taj Carousel Style */}
-                    {nearbyAttractions.length > 0 && nearbyAttractions.some(a => a.is_active) && (
-                        <section style={{ position: 'relative', backgroundColor: '#faf9f6', paddingTop: '3.5rem', paddingBottom: '7rem', overflow: 'hidden' }}>
-                            {/* Dynamic Background — Blurred focus image */}
-                            <div style={{
-                                position: 'absolute',
-                                inset: 0,
-                                zIndex: 0,
-                                opacity: 0.4,
-                                transition: 'all 1s ease-in-out',
-                                filter: 'blur(60px) saturate(1.2)',
-                                pointerEvents: 'none'
-                            }}>
-                                {(() => {
-                                    const activeAttractions = nearbyAttractions.filter(a => a.is_active);
-                                    if (activeAttractions.length === 0) return null;
-                                    const targetIndex = (attractionCarouselIndex + 1) % activeAttractions.length;
-                                    const fallbackIndex = attractionCarouselIndex % activeAttractions.length;
-                                    return (
-                                        <img
-                                            src={getImageUrl(activeAttractions[targetIndex]?.image_url || activeAttractions[fallbackIndex]?.image_url)}
-                                            alt="Background"
-                                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                        />
-                                    );
-                                })()}
-                                <div style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(255,255,255,0.4)' }} />
-                            </div>
-
-                            <div className="w-full mx-auto px-4 sm:px-8 md:px-16" style={{ position: 'relative', zIndex: 1 }}>
-                                {/* Taj 2-column section header */}
-                                <div className="taj-section-header">
-                                    <div className="taj-section-header__left">
-                                        <span className="taj-section-header__eyebrow">Local Discovery</span>
-                                        <h2 className="taj-section-header__title">Nearby<br />Attractions</h2>
-                                    </div>
-                                    <div className="taj-section-header__right" style={{ textAlign: 'right', fontSize: '0.92rem', color: '#6b6b75', lineHeight: '1.8' }}>
-                                        Embark on a voyage of discovery through the cultural tapestry and natural wonders that envelop our retreat. From ancient temples to hidden waterfalls, the soul of the region awaits.
-                                    </div>
+                    {
+                        nearbyAttractions.length > 0 && nearbyAttractions.some(a => a.is_active) && (
+                            <section style={{ position: 'relative', backgroundColor: '#faf9f6', paddingTop: '3.5rem', paddingBottom: '7rem', overflow: 'hidden' }}>
+                                {/* Dynamic Background — Blurred focus image */}
+                                <div style={{
+                                    position: 'absolute',
+                                    inset: 0,
+                                    zIndex: 0,
+                                    opacity: 0.4,
+                                    transition: 'all 1s ease-in-out',
+                                    filter: 'blur(60px) saturate(1.2)',
+                                    pointerEvents: 'none'
+                                }}>
+                                    {(() => {
+                                        const activeAttractions = nearbyAttractions.filter(a => a.is_active);
+                                        if (activeAttractions.length === 0) return null;
+                                        const targetIndex = (attractionCarouselIndex + 1) % activeAttractions.length;
+                                        const fallbackIndex = attractionCarouselIndex % activeAttractions.length;
+                                        return (
+                                            <img
+                                                src={getImageUrl(activeAttractions[targetIndex]?.image_url || activeAttractions[fallbackIndex]?.image_url)}
+                                                alt="Background"
+                                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                            />
+                                        );
+                                    })()}
+                                    <div style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(255,255,255,0.4)' }} />
                                 </div>
 
-                                <div
-                                    style={{ position: 'relative', marginTop: '2.5rem', padding: '0 2rem' }}
-                                    onMouseEnter={() => setIsAttractionHovered(true)}
-                                    onMouseLeave={() => setIsAttractionHovered(false)}
-                                >
-                                    {/* Navigation Buttons */}
-                                    {nearbyAttractions.filter(a => a.is_active).length > 3 && (
-                                        <>
-                                            <button
-                                                onClick={prevAttraction}
-                                                style={{ position: 'absolute', left: '-1rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gold)', zIndex: 10, padding: '1rem' }}
-                                                className="hover:scale-125 transition-transform hidden lg:block"
-                                            >
-                                                <ChevronLeft size={52} strokeWidth={1} />
-                                            </button>
-                                            <button
-                                                onClick={nextAttraction}
-                                                style={{ position: 'absolute', right: '-1rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gold)', zIndex: 10, padding: '1rem' }}
-                                                className="hover:scale-125 transition-transform hidden lg:block"
-                                            >
-                                                <ChevronRight size={52} strokeWidth={1} />
-                                            </button>
-                                        </>
-                                    )}
+                                <div className="w-full mx-auto px-4 sm:px-8 md:px-16" style={{ position: 'relative', zIndex: 1 }}>
+                                    {/* Taj 2-column section header */}
+                                    <div className="taj-section-header">
+                                        <div className="taj-section-header__left">
+                                            <span className="taj-section-header__eyebrow">Local Discovery</span>
+                                            <h2 className="taj-section-header__title">Nearby<br />Attractions</h2>
+                                        </div>
+                                        <div className="taj-section-header__right" style={{ textAlign: 'right', fontSize: '0.92rem', color: '#6b6b75', lineHeight: '1.8' }}>
+                                            Embark on a voyage of discovery through the cultural tapestry and natural wonders that envelop our retreat. From ancient temples to hidden waterfalls, the soul of the region awaits.
+                                        </div>
+                                    </div>
 
-                                    <div style={{ overflow: 'hidden', padding: '4rem 1.5rem' }}>
-                                        <div style={{
-                                            display: 'flex',
-                                            gap: '2.5rem',
-                                            transition: isAttractionHovered ? 'none' : 'transform 1.2s cubic-bezier(0.19, 1, 0.22, 1)',
-                                            transform: `translateX(calc(-${attractionCarouselIndex} * (100% / 3 + 2.5rem / 3)))`
-                                        }}>
-                                            {[...nearbyAttractions.filter(a => a.is_active), ...nearbyAttractions.filter(a => a.is_active), ...nearbyAttractions.filter(a => a.is_active)].map((attraction, index) => {
-                                                const counts = nearbyAttractions.filter(a => a.is_active).length;
-                                                const isCenter = index === (attractionCarouselIndex + 1);
-                                                const isActive = (index >= attractionCarouselIndex && index <= attractionCarouselIndex + 2);
+                                    <div
+                                        style={{ position: 'relative', marginTop: '2.5rem', padding: '0 2rem' }}
+                                        onMouseEnter={() => setIsAttractionHovered(true)}
+                                        onMouseLeave={() => setIsAttractionHovered(false)}
+                                    >
+                                        {/* Navigation Buttons */}
+                                        {nearbyAttractions.filter(a => a.is_active).length > 3 && (
+                                            <>
+                                                <button
+                                                    onClick={prevAttraction}
+                                                    style={{ position: 'absolute', left: '-1rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gold)', zIndex: 10, padding: '1rem' }}
+                                                    className="hover:scale-125 transition-transform hidden lg:block"
+                                                >
+                                                    <ChevronLeft size={52} strokeWidth={1} />
+                                                </button>
+                                                <button
+                                                    onClick={nextAttraction}
+                                                    style={{ position: 'absolute', right: '-1rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gold)', zIndex: 10, padding: '1rem' }}
+                                                    className="hover:scale-125 transition-transform hidden lg:block"
+                                                >
+                                                    <ChevronRight size={52} strokeWidth={1} />
+                                                </button>
+                                            </>
+                                        )}
 
-                                                return (
-                                                    <div
-                                                        key={`${attraction.id}-${index}`}
-                                                        className="group"
-                                                        style={{
-                                                            position: 'relative',
-                                                            cursor: 'pointer',
-                                                            flex: '0 0 calc((100% - 5rem) / 3)',
-                                                            maxWidth: 'calc((100% - 5rem) / 3)',
-                                                            transition: 'all 1s cubic-bezier(0.19, 1, 0.22, 1)',
-                                                            transform: isCenter ? 'scale(1.15)' : 'scale(1)',
-                                                            zIndex: isCenter ? 5 : 1,
-                                                            opacity: isActive ? 1 : 0.3,
-                                                            filter: isCenter ? 'none' : 'grayscale(15%) brightness(95%)',
-                                                            margin: isCenter ? '0 0.5rem' : '0'
-                                                        }}
-                                                        onClick={() => attraction.map_link && window.open(formatUrl(attraction.map_link), '_blank')}
-                                                    >
-                                                        {/* Image container */}
-                                                        <div style={{
-                                                            position: 'relative',
-                                                            height: '480px',
-                                                            overflow: 'hidden',
-                                                            background: '#ffffff',
-                                                            boxShadow: isCenter ? '0 30px 60px rgba(10,10,15,0.35)' : '0 10px 30px rgba(0,0,0,0.1)',
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            justifyContent: 'center'
-                                                        }}>
-                                                            <img
-                                                                src={getImageUrl(attraction.image_url)}
-                                                                alt={attraction.title}
-                                                                style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 1s cubic-bezier(0.19, 1, 0.22, 1)' }}
-                                                                className="group-hover:scale-[1.08]"
-                                                                onError={(e) => { e.target.src = ITEM_PLACEHOLDER; }}
-                                                            />
-                                                            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(10,10,15,0.4) 0%, transparent 60%)', pointerEvents: 'none' }} />
-                                                        </div>
+                                        <div style={{ overflow: 'hidden', padding: '4rem 1.5rem' }}>
+                                            <div style={{
+                                                display: 'flex',
+                                                gap: '2.5rem',
+                                                transition: isAttractionHovered ? 'none' : 'transform 1.2s cubic-bezier(0.19, 1, 0.22, 1)',
+                                                transform: `translateX(calc(-${attractionCarouselIndex} * (100% / ${itemsPerSlide} + 2.5rem / ${itemsPerSlide})))`
+                                            }}>
+                                                {[...nearbyAttractions.filter(a => a.is_active), ...nearbyAttractions.filter(a => a.is_active), ...nearbyAttractions.filter(a => a.is_active)].map((attraction, index) => {
+                                                    const counts = nearbyAttractions.filter(a => a.is_active).length;
+                                                    const isCenter = index === (attractionCarouselIndex + 1);
+                                                    const isActive = (index >= attractionCarouselIndex && index <= attractionCarouselIndex + 2);
 
-                                                        {/* Protruding Caption Plate */}
-                                                        <div style={{
-                                                            position: 'relative',
-                                                            marginTop: '-3rem',
-                                                            marginLeft: '0',
-                                                            marginRight: '0',
-                                                            background: '#ffffff',
-                                                            padding: '1.8rem 2rem 2rem',
-                                                            boxShadow: isCenter ? '0 15px 45px rgba(10,10,15,0.15)' : '0 8px 32px rgba(10,10,15,0.08)',
-                                                            transition: 'all 0.6s cubic-bezier(0.19, 1, 0.22, 1)',
-                                                            textAlign: 'center'
-                                                        }}>
-                                                            <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '0.9rem', fontWeight: '500', letterSpacing: '0.15em', textTransform: 'uppercase', color: 'var(--obsidian)', marginBottom: '0.8rem' }}>
-                                                                {attraction.title}
-                                                            </h3>
-                                                            {isCenter && (
-                                                                <div style={{ height: '1px', width: '40px', background: 'var(--gold)', margin: '0 auto 1.2rem', opacity: 0.6 }} />
-                                                            )}
-                                                            <div style={{ color: 'var(--gold)', fontSize: '0.65rem', fontWeight: '600', letterSpacing: '0.2em', textTransform: 'uppercase', marginTop: '0.8rem' }}>
-                                                                {attraction.map_link ? 'EXPLORE ON MAP >' : 'MORE >'}
+                                                    return (
+                                                        <div
+                                                            key={`${attraction.id}-${index}`}
+                                                            className="group"
+                                                            style={{
+                                                                position: 'relative',
+                                                                cursor: 'pointer',
+                                                                flex: `0 0 calc((100% - ${(itemsPerSlide - 1) * 2.5}rem) / ${itemsPerSlide})`,
+                                                                maxWidth: `calc((100% - ${(itemsPerSlide - 1) * 2.5}rem) / ${itemsPerSlide})`,
+                                                                transition: 'all 1s cubic-bezier(0.19, 1, 0.22, 1)',
+                                                                transform: isCenter ? 'scale(1.15)' : 'scale(1)',
+                                                                zIndex: isCenter ? 5 : 1,
+                                                                opacity: isActive ? 1 : 0.3,
+                                                                filter: isCenter ? 'none' : 'grayscale(15%) brightness(95%)',
+                                                                margin: isCenter ? '0 0.5rem' : '0'
+                                                            }}
+                                                            onClick={() => attraction.map_link && window.open(formatUrl(attraction.map_link), '_blank')}
+                                                        >
+                                                            {/* Image container */}
+                                                            <div style={{
+                                                                position: 'relative',
+                                                                height: '480px',
+                                                                overflow: 'hidden',
+                                                                background: '#ffffff',
+                                                                boxShadow: isCenter ? '0 30px 60px rgba(10,10,15,0.35)' : '0 10px 30px rgba(0,0,0,0.1)',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center'
+                                                            }}>
+                                                                {(() => {
+                                                                    let images = [attraction.image_url];
+                                                                    if (attraction.extra_images) {
+                                                                        try {
+                                                                            const extra = JSON.parse(attraction.extra_images);
+                                                                            images = [...images, ...(Array.isArray(extra) ? extra : [])];
+                                                                        } catch (e) {
+                                                                            console.error("Error parsing extra_images for attraction:", e);
+                                                                        }
+                                                                    }
+                                                                    const currentImgIdx = attractionImageIndex[attraction.id] || 0;
+                                                                    const currentImg = images[currentImgIdx % images.length];
+
+                                                                    return (
+                                                                        <>
+                                                                            <img
+                                                                                src={getImageUrl(currentImg)}
+                                                                                alt={attraction.title}
+                                                                                style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 1s cubic-bezier(0.19, 1, 0.22, 1)' }}
+                                                                                className="group-hover:scale-[1.08]"
+                                                                                onError={(e) => { e.target.src = ITEM_PLACEHOLDER; }}
+                                                                            />
+                                                                            {images.length > 1 && (
+                                                                                <>
+                                                                                    <div className="absolute inset-0 flex items-center justify-between px-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                                                                                        <button
+                                                                                            onClick={(e) => {
+                                                                                                e.stopPropagation();
+                                                                                                setAttractionImageIndex(prev => ({ ...prev, [attraction.id]: (currentImgIdx - 1 + images.length) % images.length }));
+                                                                                            }}
+                                                                                            className="p-1.5 rounded-full bg-black/20 text-white hover:bg-black/50 backdrop-blur-sm transition-all"
+                                                                                        >
+                                                                                            <ChevronLeft size={16} />
+                                                                                        </button>
+                                                                                        <button
+                                                                                            onClick={(e) => {
+                                                                                                e.stopPropagation();
+                                                                                                setAttractionImageIndex(prev => ({ ...prev, [attraction.id]: (currentImgIdx + 1) % images.length }));
+                                                                                            }}
+                                                                                            className="p-1.5 rounded-full bg-black/20 text-white hover:bg-black/50 backdrop-blur-sm transition-all"
+                                                                                        >
+                                                                                            <ChevronRight size={16} />
+                                                                                        </button>
+                                                                                    </div>
+                                                                                    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-1 z-20">
+                                                                                        {images.map((_, i) => (
+                                                                                            <div
+                                                                                                key={i}
+                                                                                                className={`transition-all duration-300 rounded-full ${i === currentImgIdx ? 'w-3 h-1 bg-[#d8b471]' : 'w-1 h-1 bg-white/40'}`}
+                                                                                            />
+                                                                                        ))}
+                                                                                    </div>
+                                                                                </>
+                                                                            )}
+                                                                        </>
+                                                                    );
+                                                                })()}
+                                                                <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(10,10,15,0.4) 0%, transparent 60%)', pointerEvents: 'none' }} />
+                                                            </div>
+
+                                                            {/* Protruding Caption Plate */}
+                                                            <div style={{
+                                                                position: 'relative',
+                                                                marginTop: '-3rem',
+                                                                marginLeft: '0',
+                                                                marginRight: '0',
+                                                                background: '#ffffff',
+                                                                padding: '1.8rem 2rem 2rem',
+                                                                boxShadow: isCenter ? '0 15px 45px rgba(10,10,15,0.15)' : '0 8px 32px rgba(10,10,15,0.08)',
+                                                                transition: 'all 0.6s cubic-bezier(0.19, 1, 0.22, 1)',
+                                                                textAlign: 'center'
+                                                            }}>
+                                                                <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '0.9rem', fontWeight: '500', letterSpacing: '0.15em', textTransform: 'uppercase', color: 'var(--obsidian)', marginBottom: '0.8rem' }}>
+                                                                    {attraction.title}
+                                                                </h3>
+                                                                {isCenter && (
+                                                                    <div style={{ height: '1px', width: '40px', background: 'var(--gold)', margin: '0 auto 1.2rem', opacity: 0.6 }} />
+                                                                )}
+                                                                <div style={{ color: 'var(--gold)', fontSize: '0.65rem', fontWeight: '600', letterSpacing: '0.2em', textTransform: 'uppercase', marginTop: '0.8rem' }}>
+                                                                    {attraction.map_link ? 'EXPLORE ON MAP >' : 'MORE >'}
+                                                                </div>
                                                             </div>
                                                         </div>
-                                                    </div>
-                                                );
-                                            })}
+                                                    );
+                                                })}
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-                        </section>
-                    )}
+                            </section>
+                        )
+                    }
 
 
                     {/* Testimonials Section - Taj Style */}
@@ -3908,18 +4477,19 @@ export default function App() {
                             </div>
                         </div>
                     </section>
+
                 </main>
 
                 {/* Floating UI Elements */}
                 <button
                     onClick={scrollToTop}
-                    className={`fixed bottom-8 right-8 p-3 rounded-full ${theme.buttonBg} ${theme.buttonText} shadow-lg transition-all duration-300 ${showBackToTop ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}
+                    className={`fixed bottom-24 right-4 sm:bottom-16 sm:right-8 p-3 rounded-full ${theme.buttonBg} ${theme.buttonText} shadow-lg transition-all duration-300 z-[100] ${showBackToTop ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'} back-to-top-btn`}
                     aria-label="Back to Top"
                 >
                     <ChevronUp className="w-6 h-6" />
                 </button>
 
-                <button onClick={toggleChat} className={`fixed bottom-8 left-8 p-4 rounded-full ${theme.buttonBg} ${theme.buttonText} shadow-lg transition-all duration-300 z-50 ${theme.buttonHover}`} aria-label="Open Chat">
+                <button onClick={toggleChat} className={`fixed bottom-24 left-4 sm:bottom-16 sm:left-8 p-4 rounded-full ${theme.buttonBg} ${theme.buttonText} shadow-lg transition-all duration-300 z-50 ${theme.buttonHover} chat-fab`} aria-label="Open Chat">
                     <MessageSquare className="w-6 h-6" />
                 </button>
 
@@ -4100,8 +4670,8 @@ export default function App() {
                                 )}
                                 <form onSubmit={handleRoomBookingSubmit} className="p-4 space-y-4 overflow-y-auto">
                                     {/* Always show editable date inputs */}
-                                    <div className="flex space-x-4">
-                                        <div className="space-y-2 w-1/2">
+                                    <div className="flex flex-col sm:grid sm:grid-cols-2 gap-4">
+                                        <div className="space-y-2">
                                             <label className={`block text-sm font-medium ${theme.textSecondary}`}>Check-in Date</label>
                                             <input
                                                 type="date"
@@ -4113,7 +4683,7 @@ export default function App() {
                                                 className={`w-full p-3 rounded-xl ${theme.bgSecondary} ${theme.textPrimary} border ${theme.border} focus:outline-none focus:ring-2 focus:ring-[#0f5132] transition-colors`}
                                             />
                                         </div>
-                                        <div className="space-y-2 w-1/2">
+                                        <div className="space-y-2">
                                             <label className={`block text-sm font-medium ${theme.textSecondary}`}>Check-out Date</label>
                                             <input
                                                 type="date"
@@ -4150,6 +4720,11 @@ export default function App() {
                                                                 />
                                                                 <div className="p-2 text-center">
                                                                     <p className="font-semibold text-xs">Room {room.number}</p>
+                                                                    {!selectedBranch && branches.length > 1 && room.branch_id && (
+                                                                        <p className="text-[10px] text-[var(--gold)] font-medium uppercase tracking-wider mb-1">
+                                                                            {branches.find(b => b.id === room.branch_id)?.name}
+                                                                        </p>
+                                                                    )}
                                                                     <p className="text-xs opacity-80">{room.type}</p>
                                                                     <p className="text-xs opacity-60 mt-1">Max: {room.adults}A, {room.children}C</p>
                                                                     <p className="text-xs font-bold mt-1">{formatCurrency(room.price)}</p>
@@ -4179,12 +4754,12 @@ export default function App() {
                                         <label className={`block text-sm font-medium ${theme.textSecondary}`}>Phone Number</label>
                                         <input type="tel" name="guest_mobile" value={bookingData.guest_mobile} onChange={handleRoomBookingChange} placeholder="Enter your mobile number" required className={`w-full p-3 rounded-xl ${theme.bgSecondary} ${theme.textPrimary} border ${theme.border} focus:outline-none focus:ring-2 focus:ring-amber-500 transition-colors`} />
                                     </div>
-                                    <div className="flex space-x-4">
-                                        <div className="space-y-2 w-1/2">
+                                    <div className="flex flex-col sm:grid sm:grid-cols-2 gap-4">
+                                        <div className="space-y-2">
                                             <label className={`block text-sm font-medium ${theme.textSecondary}`}>Adults</label>
                                             <input type="number" name="adults" value={bookingData.adults} onChange={handleRoomBookingChange} min="1" required className={`w-full p-3 rounded-xl ${theme.bgSecondary} ${theme.textPrimary} border ${theme.border} focus:outline-none focus:ring-2 focus:ring-amber-500 transition-colors`} />
                                         </div>
-                                        <div className="space-y-2 w-1/2">
+                                        <div className="space-y-2">
                                             <label className={`block text-sm font-medium ${theme.textSecondary}`}>Children</label>
                                             <input type="number" name="children" value={bookingData.children} onChange={handleRoomBookingChange} min="0" required className={`w-full p-3 rounded-xl ${theme.bgSecondary} ${theme.textPrimary} border ${theme.border} focus:outline-none focus:ring-2 focus:ring-amber-500 transition-colors`} />
                                         </div>
@@ -4208,9 +4783,27 @@ export default function App() {
                     isPackageBookingFormOpen && (
                         <div className="fixed inset-0 z-[100] bg-neutral-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
                             <div className={`w-full max-w-lg ${theme.bgCard} rounded-3xl shadow-2xl flex flex-col max-h-[90vh] my-8`}>
-                                <div className={`p-6 flex items-center justify-between border-b ${theme.border}`}>
-                                    <h3 className="text-lg font-bold flex items-center"><Package className={`w-5 h-5 mr-2 ${theme.textAccent}`} /> Book a Package</h3>
-                                    <button onClick={() => setIsPackageBookingFormOpen(false)} className={`p-1 rounded-full ${theme.textSecondary} hover:${theme.textPrimary} transition-colors`}><X className="w-6 h-6" /></button>
+                                <div className={`p-8 flex items-center justify-between border-b ${theme.border} bg-neutral-50/50`}>
+                                    <div className="flex flex-col">
+                                        <h3 className="text-xl font-display text-neutral-900 flex items-center tracking-tight">
+                                            <Package className={`w-6 h-6 mr-3 ${theme.textAccent}`} /> 
+                                            Book Your Experience
+                                        </h3>
+                                        {(() => {
+                                            const pkg = packages.find(p => p.id === packageBookingData.package_id);
+                                            return pkg && (
+                                                <p className="text-sm font-body text-neutral-500 mt-1 ml-9">
+                                                    {pkg.title} {pkg.branch?.name ? `• ${pkg.branch.name}` : ''}
+                                                </p>
+                                            );
+                                        })()}
+                                    </div>
+                                    <button 
+                                        onClick={() => setIsPackageBookingFormOpen(false)} 
+                                        className={`p-2 rounded-full text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 transition-all`}
+                                    >
+                                        <X className="w-6 h-6" />
+                                    </button>
                                 </div>
                                 {/* Error message inside modal */}
                                 {bannerMessage.text && bannerMessage.type === 'error' && (
@@ -4227,35 +4820,68 @@ export default function App() {
                                     </div>
                                 )}
                                 <form onSubmit={handlePackageBookingSubmit} className="p-4 space-y-4 overflow-y-auto">
-                                    <div className="space-y-2">
-                                        <label className={`block text-sm font-medium ${theme.textSecondary}`}>Package ID</label>
-                                        <input type="number" name="package_id" value={packageBookingData.package_id || ''} readOnly className={`w-full p-3 rounded-xl ${theme.placeholderBg} ${theme.placeholderText} focus:outline-none`} />
-                                    </div>
+                                    {/* Package Info Summary */}
+                                    {(() => {
+                                        const pkg = packages.find(p => p.id === packageBookingData.package_id);
+                                        if (!pkg) return null;
+                                        return (
+                                            <div className={`p-5 rounded-2xl bg-neutral-900 text-white shadow-xl relative overflow-hidden group`}>
+                                                <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full -mr-16 -mt-16 blur-2xl group-hover:bg-amber-500/20 transition-all duration-700"></div>
+                                                <div className="relative z-10 flex justify-between items-start">
+                                                    <div>
+                                                        <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-500 mb-1 block">Selected Experience</span>
+                                                        <h4 className="text-xl font-display uppercase tracking-wider mb-2">{pkg.title}</h4>
+                                                        <div className="flex gap-4">
+                                                            <div className="flex items-center text-xs text-neutral-400">
+                                                                <Clock className="w-3.5 h-3.5 mr-1.5 text-amber-500" />
+                                                                {pkg.max_stay_days || 'Flex'} Days Max
+                                                            </div>
+                                                            <div className="flex items-center text-xs text-neutral-400">
+                                                                <Users className="w-3.5 h-3.5 mr-1.5 text-amber-500" />
+                                                                {pkg.default_adults}A, {pkg.default_children}C
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <div className="text-2xl font-display text-amber-500">{formatCurrency(pkg.price)}</div>
+                                                        <div className="text-[8px] uppercase tracking-widest text-neutral-500 font-bold mt-1">Starting Price</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
+
+                                    <div className="flex flex-col sm:grid sm:grid-cols-2 gap-4">
                                     {/* Always show editable date inputs */}
-                                    <div className="flex space-x-4">
-                                        <div className="space-y-2 w-1/2">
-                                            <label className={`block text-sm font-medium ${theme.textSecondary}`}>Check-in Date</label>
-                                            <input
-                                                type="date"
-                                                name="check_in"
-                                                value={packageBookingData.check_in || ''}
-                                                onChange={handlePackageBookingChange}
-                                                min={new Date().toISOString().split('T')[0]}
-                                                required
-                                                className={`w-full p-3 rounded-xl ${theme.bgSecondary} ${theme.textPrimary} border ${theme.border} focus:outline-none focus:ring-2 focus:ring-amber-500 transition-colors`}
-                                            />
+                                        <div className="space-y-2">
+                                            <label className="block text-[10px] font-bold uppercase tracking-widest text-neutral-400 ml-1">Check-in Date</label>
+                                            <div className="relative group">
+                                                <input
+                                                    type="date"
+                                                    name="check_in"
+                                                    value={packageBookingData.check_in || ''}
+                                                    onChange={handlePackageBookingChange}
+                                                    min={new Date().toISOString().split('T')[0]}
+                                                    required
+                                                    className={`w-full p-4 rounded-2xl bg-neutral-50 text-neutral-900 border-2 border-neutral-100 focus:border-amber-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-amber-500/5 transition-all duration-300 font-medium`}
+                                                />
+                                                <Calendar className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-300 pointer-events-none group-focus-within:text-amber-500 transition-colors" />
+                                            </div>
                                         </div>
-                                        <div className="space-y-2 w-1/2">
-                                            <label className={`block text-sm font-medium ${theme.textSecondary}`}>Check-out Date</label>
-                                            <input
-                                                type="date"
-                                                name="check_out"
-                                                value={packageBookingData.check_out || ''}
-                                                onChange={handlePackageBookingChange}
-                                                min={packageBookingData.check_in || new Date().toISOString().split('T')[0]}
-                                                required
-                                                className={`w-full p-3 rounded-xl ${theme.bgSecondary} ${theme.textPrimary} border ${theme.border} focus:outline-none focus:ring-2 focus:ring-amber-500 transition-colors`}
-                                            />
+                                        <div className="space-y-2">
+                                            <label className="block text-[10px] font-bold uppercase tracking-widest text-neutral-400 ml-1">Check-out Date</label>
+                                            <div className="relative group">
+                                                <input
+                                                    type="date"
+                                                    name="check_out"
+                                                    value={packageBookingData.check_out || ''}
+                                                    onChange={handlePackageBookingChange}
+                                                    min={packageBookingData.check_in || new Date().toISOString().split('T')[0]}
+                                                    required
+                                                    className={`w-full p-4 rounded-2xl bg-neutral-50 text-neutral-900 border-2 border-neutral-100 focus:border-amber-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-amber-500/5 transition-all duration-300 font-medium`}
+                                                />
+                                                <Calendar className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-300 pointer-events-none group-focus-within:text-amber-500 transition-colors" />
+                                            </div>
                                         </div>
                                     </div>
                                     {/* Room Selection - Only show for room_type packages */}
@@ -4277,9 +4903,9 @@ export default function App() {
 
                                         // Show room selection for both room_type and whole_property packages
                                         return (
-                                            <div className="space-y-2">
-                                                <label className={`block text-sm font-medium ${theme.textSecondary}`}>
-                                                    {isWholeProperty ? 'Available Rooms (Full Property Booking)' : 'Available Rooms for Selected Dates'}
+                                            <div className="space-y-4">
+                                                <label className="block text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-400 ml-1">
+                                                    {isWholeProperty ? 'Exclusive Property Access' : 'Select Your Sanctuaries'}
                                                 </label>
                                                 {!packageBookingData.check_in || !packageBookingData.check_out ? (
                                                     <div className={`p-6 text-center rounded-xl ${theme.bgSecondary} border-2 border-dashed ${theme.border}`}>
@@ -4299,20 +4925,26 @@ export default function App() {
                                                         <p className={`text-xs ${theme.textSecondary} mb-2`}>Showing rooms available from {packageBookingData.check_in} to {packageBookingData.check_out}</p>
                                                         <div className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-48 overflow-y-auto p-3 rounded-xl ${theme.bgSecondary}`}>
                                                             {(() => {
-                                                                // Filter rooms based on package type
-                                                                let roomsToShow = rooms;
+                                                                    // Filter rooms based on package type AND branch
+                                                                    const pkgBranchId = selectedPackage.branch_id;
+                                                                    let roomsToShow = allRooms;
 
-                                                                if (isWholeProperty) {
-                                                                    // For whole_property: Show ALL available rooms
-                                                                    roomsToShow = rooms;
-                                                                } else if (selectedPackage && selectedPackage.room_types) {
-                                                                    // For room_type: Only show rooms matching the package's room_types
-                                                                    const allowedRoomTypes = selectedPackage.room_types.split(',').map(t => t.trim().toLowerCase());
-                                                                    roomsToShow = rooms.filter(room => {
-                                                                        const roomType = room.type ? room.type.trim().toLowerCase() : '';
-                                                                        return allowedRoomTypes.includes(roomType);
-                                                                    });
-                                                                } else {
+                                                                    // Ensure we only show rooms for the package's branch
+                                                                    if (pkgBranchId) {
+                                                                        roomsToShow = roomsToShow.filter(r => r.branch_id === pkgBranchId);
+                                                                    }
+
+                                                                    if (isWholeProperty) {
+                                                                        // For whole_property: Show ALL available rooms (within branch)
+                                                                        // Already filtered by branch above
+                                                                    } else if (selectedPackage && selectedPackage.room_types) {
+                                                                        // For room_type: Only show rooms matching the package's room_types
+                                                                        const allowedRoomTypes = selectedPackage.room_types.split(',').map(t => t.trim().toLowerCase());
+                                                                        roomsToShow = roomsToShow.filter(room => {
+                                                                            const roomType = room.type ? room.type.trim().toLowerCase() : '';
+                                                                            return allowedRoomTypes.includes(roomType);
+                                                                        });
+                                                                    } else {
                                                                     // Invalid package type - no room_types specified and not whole_property
                                                                     return (
                                                                         <div className="col-span-full text-center py-8 text-gray-500">
@@ -4338,22 +4970,42 @@ export default function App() {
                                                                             <div
                                                                                 key={room.id}
                                                                                 onClick={() => !isWholeProperty ? handlePackageRoomSelection(room.id) : null}
-                                                                                className={`rounded-lg border-2 transition-all duration-200 overflow-hidden ${!isWholeProperty ? 'cursor-pointer' : 'cursor-default'} ${isSelected ? `${theme.buttonBg} ${theme.buttonText} border-transparent` : `${theme.bgCard} ${theme.textPrimary} ${theme.border} ${!isWholeProperty ? 'hover:border-[#c99c4e]' : ''}`}`}
+                                                                                className={`group relative rounded-2xl border-2 transition-all duration-500 overflow-hidden ${!isWholeProperty ? 'cursor-pointer' : 'cursor-default'} ${isSelected ? 'border-amber-500 ring-4 ring-amber-500/10' : 'border-neutral-100 hover:border-amber-200 bg-white shadow-sm hover:shadow-md'}`}
                                                                             >
-                                                                                <img
-                                                                                    src={getImageUrl(room.image_url)}
-                                                                                    alt={room.type}
-                                                                                    className="w-full h-20 object-cover"
-                                                                                    onError={(e) => { e.target.src = ITEM_PLACEHOLDER; }}
-                                                                                />
-                                                                                <div className="p-2 text-center">
-                                                                                    <p className="font-semibold text-xs">Room {room.number}</p>
-                                                                                    <p className="text-xs opacity-80">{room.type}</p>
-                                                                                    <p className="text-xs opacity-60 mt-1">Max: {room.adults}A, {room.children}C</p>
-                                                                                    <p className="text-xs font-bold mt-1">{formatCurrency(room.price)}</p>
-                                                                                    {isWholeProperty && isSelected && (
-                                                                                        <p className="text-xs font-semibold mt-1 text-green-600">✓ Selected</p>
+                                                                                <div className="aspect-video overflow-hidden relative">
+                                                                                    <img
+                                                                                        src={getImageUrl(room.image_url)}
+                                                                                        alt={room.type}
+                                                                                        className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                                                                                        onError={(e) => { e.target.src = ITEM_PLACEHOLDER; }}
+                                                                                    />
+                                                                                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60"></div>
+                                                                                    <div className="absolute top-2 right-2">
+                                                                                        <div className={`px-2.5 py-1 rounded-lg text-[9px] font-bold uppercase tracking-widest backdrop-blur-md ${isSelected ? 'bg-amber-500 text-white' : 'bg-black/50 text-white shadow-lg'}`}>
+                                                                                            {room.type}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    {isSelected && (
+                                                                                        <div className="absolute inset-0 flex items-center justify-center bg-amber-500/20 backdrop-blur-[1px]">
+                                                                                            <div className="w-10 h-10 rounded-full bg-amber-500 text-white flex items-center justify-center shadow-xl transform scale-110 transition-all duration-300">
+                                                                                                <Check className="w-6 h-6" />
+                                                                                            </div>
+                                                                                        </div>
                                                                                     )}
+                                                                                </div>
+                                                                                <div className="p-4">
+                                                                                    <div className="flex justify-between items-center mb-1.5">
+                                                                                        <h4 className="font-display text-neutral-900 group-hover:text-amber-800 transition-colors uppercase tracking-widest text-[11px] font-bold">Room {room.number}</h4>
+                                                                                        <span className="text-amber-700 font-bold text-xs tabular-nums">{formatCurrency(room.price)}</span>
+                                                                                    </div>
+                                                                                    <div className="flex items-center gap-4 text-neutral-500 text-[10px] uppercase tracking-widest font-semibold opacity-70">
+                                                                                        <span className="flex items-center gap-1.5">
+                                                                                            <User className="w-3 h-3" /> {room.adults}
+                                                                                        </span>
+                                                                                        <span className="flex items-center gap-1.5">
+                                                                                            <SiGhost className="w-3 h-3" /> {room.children}
+                                                                                        </span>
+                                                                                    </div>
                                                                                 </div>
                                                                             </div>
                                                                         );
@@ -4372,36 +5024,68 @@ export default function App() {
                                             </div>
                                         );
                                     })()}
-                                    <div className="space-y-2">
-                                        <label className={`block text-sm font-medium ${theme.textSecondary}`}>Full Name</label>
-                                        <input type="text" name="guest_name" value={packageBookingData.guest_name} onChange={handlePackageBookingChange} placeholder="Enter your full name" required className={`w-full p-3 rounded-xl ${theme.bgSecondary} ${theme.textPrimary} border ${theme.border} focus:outline-none focus:ring-2 focus:ring-amber-500 transition-colors`} />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <label className={`block text-sm font-medium ${theme.textSecondary}`}>Email Address</label>
-                                        <input type="email" name="guest_email" value={packageBookingData.guest_email || ''} onChange={handlePackageBookingChange} placeholder="user@example.com (optional)" className={`w-full p-3 rounded-xl ${theme.bgSecondary} ${theme.textPrimary} border ${theme.border} focus:outline-none focus:ring-2 focus:ring-amber-500 transition-colors`} />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <label className={`block text-sm font-medium ${theme.textSecondary}`}>Phone Number</label>
-                                        <input type="tel" name="guest_mobile" value={packageBookingData.guest_mobile} onChange={handlePackageBookingChange} placeholder="Enter your mobile number" required className={`w-full p-3 rounded-xl ${theme.bgSecondary} ${theme.textPrimary} border ${theme.border} focus:outline-none focus:ring-2 focus:ring-amber-500 transition-colors`} />
-                                    </div>
-                                    <div className="flex space-x-4">
-                                        <div className="space-y-2 w-1/2">
-                                            <label className={`block text-sm font-medium ${theme.textSecondary}`}>Adults</label>
-                                            <input type="number" name="adults" value={packageBookingData.adults} onChange={handlePackageBookingChange} min="1" required className={`w-full p-3 rounded-xl ${theme.bgSecondary} ${theme.textPrimary} border ${theme.border} focus:outline-none focus:ring-2 focus:ring-amber-500 transition-colors`} />
+                                    <div className="flex flex-col sm:grid sm:grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <label className="block text-[10px] font-bold uppercase tracking-widest text-neutral-400 ml-1">Full Name</label>
+                                            <input type="text" name="guest_name" value={packageBookingData.guest_name} onChange={handlePackageBookingChange} placeholder="Enter your full name" required className="w-full p-4 rounded-2xl bg-neutral-50 text-neutral-900 border-2 border-neutral-100 focus:border-amber-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-amber-500/5 transition-all duration-300 font-medium" />
                                         </div>
-                                        <div className="space-y-2 w-1/2">
-                                            <label className={`block text-sm font-medium ${theme.textSecondary}`}>Children</label>
-                                            <input type="number" name="children" value={packageBookingData.children} onChange={handlePackageBookingChange} min="0" required className={`w-full p-3 rounded-xl ${theme.bgSecondary} ${theme.textPrimary} border ${theme.border} focus:outline-none focus:ring-2 focus:ring-amber-500 transition-colors`} />
+                                        <div className="space-y-2">
+                                            <label className="block text-[10px] font-bold uppercase tracking-widest text-neutral-400 ml-1">Phone Number</label>
+                                            <input type="tel" name="guest_mobile" value={packageBookingData.guest_mobile} onChange={handlePackageBookingChange} placeholder="Enter your mobile number" required className="w-full p-4 rounded-2xl bg-neutral-50 text-neutral-900 border-2 border-neutral-100 focus:border-amber-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-amber-500/5 transition-all duration-300 font-medium" />
                                         </div>
                                     </div>
+
                                     <div className="space-y-2">
-                                        <label className={`block text-sm font-medium ${theme.textSecondary}`}>Food Preferences / Food Orders</label>
-                                        <textarea name="food_preferences" value={packageBookingData.food_preferences} onChange={handlePackageBookingChange} placeholder="Order your food or mention dietary needs..." className={`w-full p-3 rounded-xl ${theme.bgSecondary} ${theme.textPrimary} border ${theme.border} focus:outline-none focus:ring-2 focus:ring-amber-500 transition-colors`} rows="2" />
+                                        <label className="block text-[10px] font-bold uppercase tracking-widest text-neutral-400 ml-1">Email Address (Optional)</label>
+                                        <input type="email" name="guest_email" value={packageBookingData.guest_email || ''} onChange={handlePackageBookingChange} placeholder="user@example.com" className="w-full p-4 rounded-2xl bg-neutral-50 text-neutral-900 border-2 border-neutral-100 focus:border-amber-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-amber-500/5 transition-all duration-300 font-medium" />
                                     </div>
+
+                                    <div className="flex flex-col sm:grid sm:grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <label className="block text-[10px] font-bold uppercase tracking-widest text-neutral-400 ml-1">Adults</label>
+                                            <input type="number" name="adults" value={packageBookingData.adults} onChange={handlePackageBookingChange} min="1" required className="w-full p-4 rounded-2xl bg-neutral-50 text-neutral-900 border-2 border-neutral-100 focus:border-amber-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-amber-500/5 transition-all duration-300 font-medium" />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="block text-[10px] font-bold uppercase tracking-widest text-neutral-400 ml-1">Children</label>
+                                            <input type="number" name="children" value={packageBookingData.children} onChange={handlePackageBookingChange} min="0" required className="w-full p-4 rounded-2xl bg-neutral-50 text-neutral-900 border-2 border-neutral-100 focus:border-amber-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-amber-500/5 transition-all duration-300 font-medium" />
+                                        </div>
+                                    </div>
+
                                     <div className="space-y-2">
-                                        <label className={`block text-sm font-medium ${theme.textSecondary}`}>Special Requests (Stay)</label>
-                                        <textarea name="special_requests" value={packageBookingData.special_requests} onChange={handlePackageBookingChange} placeholder="Mention any special needs for your stay..." className={`w-full p-3 rounded-xl ${theme.bgSecondary} ${theme.textPrimary} border ${theme.border} focus:outline-none focus:ring-2 focus:ring-amber-500 transition-colors`} rows="2" />
+                                        <label className="block text-[10px] font-bold uppercase tracking-widest text-neutral-400 ml-1">Preferences & Special Requests</label>
+                                        <textarea 
+                                            name="special_requests" 
+                                            value={packageBookingData.special_requests} 
+                                            onChange={handlePackageBookingChange} 
+                                            placeholder="Mention any special needs or dietary preferences..." 
+                                            className="w-full p-4 rounded-2xl bg-neutral-50 text-neutral-900 border-2 border-neutral-100 focus:border-amber-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-amber-500/5 transition-all duration-300 font-medium" 
+                                            rows="3" 
+                                        />
                                     </div>
+
+                                    {/* Final Summary & Total */}
+                                    {(() => {
+                                        const pkg = packages.find(p => p.id === packageBookingData.package_id);
+                                        if (!pkg) return null;
+                                        
+                                        const selectedRooms = packageBookingData.room_ids.map(id => allRooms.find(r => r.id === id)).filter(Boolean);
+                                        const roomTotal = selectedRooms.reduce((sum, r) => sum + (r.price || 0), 0);
+                                        const packageBase = pkg.price || 0;
+                                        const total = packageBase + roomTotal;
+
+                                        return (
+                                            <div className="mt-8 pt-8 border-t-2 border-dashed border-neutral-100">
+                                                <div className="flex justify-between items-center mb-4">
+                                                    <span className="text-sm font-bold text-neutral-900 uppercase tracking-widest">Est. Total Investment</span>
+                                                    <div className="text-2xl font-display text-neutral-900">{formatCurrency(total)}</div>
+                                                </div>
+                                                <p className="text-[10px] text-neutral-400 leading-relaxed italic text-center mb-6">
+                                                    * Final pricing may adjust based on specific requests and seasonal availability. 
+                                                    Our concierge team will confirm all details.
+                                                </p>
+                                            </div>
+                                        );
+                                    })()}
                                     <button type="submit" className={`w-full py-3 rounded-full ${theme.buttonBg} ${theme.buttonText} font-bold shadow-lg ${theme.buttonHover} transition-colors disabled:opacity-50`} disabled={isBookingLoading}>
                                         {isBookingLoading ? 'Booking...' : 'Confirm Booking'}
                                     </button>
@@ -4599,36 +5283,292 @@ export default function App() {
                     )
                 }
 
-                <footer data-contact-section className="bg-transparent text-white py-8 px-4 md:px-12 mt-12">
-                    <div className="container mx-auto flex flex-col md:flex-row items-center justify-between space-y-4 md:space-y-0">
-                        {resortInfo && (
-                            <>
-                                <div className="text-center md:text-left">
-                                    <h3 className="text-xl font-bold tracking-tight text-gray-800">{resortInfo.name}</h3>
-                                    <p className="text-sm text-gray-700 mt-1">{resortInfo.address}</p>
-                                    <p className="text-xs text-gray-600 mt-2">&copy; 2024 Elysian Retreat. All Rights Reserved.</p>
+                <footer data-contact-section className="bg-[#0f0f15] text-white py-20 px-4 md:px-12 mt-20 relative overflow-hidden">
+                    {/* Ambient glow */}
+                    <div className="absolute top-0 left-1/4 w-96 h-96 bg-amber-500/5 blur-[120px] rounded-full pointer-events-none"></div>
+
+                    <div className="container mx-auto">
+                        <div className="grid grid-cols-1 lg:grid-cols-4 gap-12 mb-16">
+                            {/* Brand Column */}
+                            <div className="lg:col-span-1 space-y-6">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-1 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                                        <img src={logoSrc} alt="Zeebull Group" className="h-12 w-auto" />
+                                    </div>
+                                    <span className="text-xl font-display tracking-wider uppercase text-white">Zeebull <span className="text-amber-500">Group</span></span>
                                 </div>
-                                <div className="flex space-x-4 text-gray-700">
-                                    <a href={formatUrl(resortInfo.facebook)} target="_blank" rel="noopener noreferrer" className="hover:text-gray-900 transition-colors"><Facebook /></a>
-                                    <a href={formatUrl(resortInfo.instagram)} target="_blank" rel="noopener noreferrer" className="hover:text-gray-900 transition-colors"><Instagram /></a>
-                                    <a href={formatUrl(resortInfo.twitter)} target="_blank" rel="noopener noreferrer" className="hover:text-gray-900 transition-colors"><Twitter /></a>
-                                    <a href={formatUrl(resortInfo.linkedin)} target="_blank" rel="noopener noreferrer" className="hover:text-gray-900 transition-colors"><Linkedin /></a>
+                                <p className="text-sm text-gray-400 leading-relaxed font-serif italic">
+                                    Crafting world-class sanctuaries for the discerning traveler. Zeebull Group represents the pinnacle of hospitality, serenity, and unparalleled service across our handpicked collection of resorts.
+                                </p>
+                                <div className="flex space-x-5 pt-4">
+                                    <a href="#" className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center hover:bg-amber-500 hover:border-amber-500 transition-all duration-300 group">
+                                        <Facebook className="w-4 h-4 text-gray-400 group-hover:text-white" />
+                                    </a>
+                                    <a href="#" className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center hover:bg-amber-500 hover:border-amber-500 transition-all duration-300 group">
+                                        <Instagram className="w-4 h-4 text-gray-400 group-hover:text-white" />
+                                    </a>
+                                    <a href="#" className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center hover:bg-amber-500 hover:border-amber-500 transition-all duration-300 group">
+                                        <Twitter className="w-4 h-4 text-gray-400 group-hover:text-white" />
+                                    </a>
                                 </div>
-                            </>
-                        )}
-                    </div>
-                    <div className="mt-6 pt-6 border-t border-gray-300/20 text-center">
-                        <a
-                            href="https://teqmates.com"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-sm text-gray-600 hover:text-gray-800 transition-colors"
-                        >
-                            Powered by <span className="font-semibold">TeqMates</span>
-                        </a>
+                            </div>
+
+                            {/* Branches Directory */}
+                            <div className="lg:col-span-3">
+                                <h4 className="text-[10px] uppercase tracking-[0.3em] font-black text-amber-500/80 mb-8 pb-2 border-b border-white/5 inline-block">Our Sanctuaries Directory</h4>
+                                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
+                                    {branches.map(branch => (
+                                        <div key={branch.id} className="group cursor-pointer" onClick={() => {
+                                            setSelectedBranch(branch);
+                                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                                        }}>
+                                            <h5 className="text-white font-display uppercase tracking-widest text-sm mb-2 group-hover:text-amber-500 transition-colors">
+                                                {branch.name}
+                                            </h5>
+                                            <div className="flex items-start gap-2 text-gray-500 text-xs leading-relaxed group-hover:text-gray-300 transition-colors">
+                                                <MapPin className="w-3 h-3 mt-0.5 flex-shrink-0 text-amber-500/40" />
+                                                <span>{branch.address || 'Exclusive Property Location'}</span>
+                                            </div>
+                                            <div className="mt-3 flex items-center gap-4 text-[9px] uppercase tracking-widest font-bold text-amber-500/40 opacity-0 group-hover:opacity-100 transition-all transform translate-x-[-10px] group-hover:translate-x-0">
+                                                Visit Destination <ChevronRight className="w-3 h-3" />
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {branches.length === 0 && (
+                                        <div className="text-gray-600 text-sm italic">Expanding our horizons... more sanctuaries coming soon.</div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="pt-10 border-t border-white/5 flex flex-col md:flex-row items-center justify-between gap-6">
+                            <p className="text-[10px] uppercase tracking-[0.2em] text-gray-500 font-medium">
+                                &copy; {new Date().getFullYear()} Zeebull Business Group. All Rights Reserved.
+                            </p>
+                            <div className="flex items-center gap-8">
+                                <a href="https://www.teqmates.com" className="flex items-center gap-2 group">
+                                    <span className="text-[10px] uppercase tracking-[0.2em] text-gray-600 group-hover:text-gray-400 transition-colors">Powered by</span>
+                                    <span className="text-[11px] font-black uppercase tracking-widest text-gray-500 group-hover:text-white transition-colors">www.teqmates.com</span>
+                                </a>
+                            </div>
+                        </div>
                     </div>
                 </footer>
+
+                {/* ── Sticky Branch Picker Footer ── */}
+                {branches.length > 0 && (
+                    <div
+                        className="branch-footer-strip"
+                        style={{
+                            position: 'fixed',
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            zIndex: 200,
+                            background: 'linear-gradient(0deg, rgba(10,10,15,0.97) 0%, rgba(15,15,22,0.94) 100%)',
+                            backdropFilter: 'blur(20px)',
+                            borderTop: '1px solid rgba(201,168,76,0.2)',
+                            padding: '0.55rem 1rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.6rem',
+                            overflowX: 'auto',
+                        }}
+                    >
+                        <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.6rem', letterSpacing: '0.2em', textTransform: 'uppercase', color: 'rgba(201,168,76,0.7)', whiteSpace: 'nowrap', flexShrink: 0, paddingRight: '0.4rem' }}>
+                            Property
+                        </span>
+                        <div style={{ width: '1px', height: '1.2rem', background: 'rgba(201,168,76,0.2)', flexShrink: 0 }} />
+                        <button
+                            onClick={() => setSelectedBranch(null)}
+                            style={{
+                                fontFamily: 'var(--font-body)',
+                                fontSize: '0.62rem',
+                                fontWeight: '600',
+                                letterSpacing: '0.15em',
+                                textTransform: 'uppercase',
+                                padding: '0.3rem 0.85rem',
+                                borderRadius: '999px',
+                                border: selectedBranch === null ? '1px solid #c9a84c' : '1px solid rgba(255,255,255,0.15)',
+                                background: selectedBranch === null ? 'rgba(201,168,76,0.18)' : 'transparent',
+                                color: selectedBranch === null ? '#c9a84c' : 'rgba(255,255,255,0.55)',
+                                cursor: 'pointer',
+                                whiteSpace: 'nowrap',
+                                transition: 'all 0.25s',
+                                flexShrink: 0,
+                            }}
+                        >
+                            All
+                        </button>
+                        {branches.map(branch => (
+                            <button
+                                key={branch.id}
+                                onClick={() => {
+                                    setSelectedBranch(branch);
+                                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                                }}
+                                style={{
+                                    fontFamily: 'var(--font-body)',
+                                    fontSize: '0.62rem',
+                                    fontWeight: '600',
+                                    letterSpacing: '0.15em',
+                                    textTransform: 'uppercase',
+                                    padding: '0.3rem 0.85rem',
+                                    borderRadius: '999px',
+                                    border: selectedBranch?.id === branch.id ? '1px solid #c9a84c' : '1px solid rgba(255,255,255,0.15)',
+                                    background: selectedBranch?.id === branch.id ? 'rgba(201,168,76,0.18)' : 'transparent',
+                                    color: selectedBranch?.id === branch.id ? '#c9a84c' : 'rgba(255,255,255,0.55)',
+                                    cursor: 'pointer',
+                                    whiteSpace: 'nowrap',
+                                    transition: 'all 0.25s',
+                                    flexShrink: 0,
+                                }}
+                            >
+                                {branch.name}
+                            </button>
+                        ))}
+                    </div>
+                )}
             </div>
+
+            {/* ── WhatsApp Floating Chat Button ── */}
+            <WhatsAppButton />
         </>
+    );
+}
+
+/* ─── WhatsApp Floating Button Component ─────────────────────────── */
+const WHATSAPP_NUMBER = "919188234567"; // Change to your WhatsApp number (country code + number, no + or spaces)
+const WHATSAPP_MESSAGE = "Hello! I'd like to know more about your resort.";
+
+function WhatsAppButton() {
+    const [hovered, setHovered] = React.useState(false);
+    const [visible, setVisible] = React.useState(false);
+
+    React.useEffect(() => {
+        const timer = setTimeout(() => setVisible(true), 1500);
+        return () => clearTimeout(timer);
+    }, []);
+
+    const handleClick = () => {
+        const url = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(WHATSAPP_MESSAGE)}`;
+        window.open(url, "_blank", "noopener,noreferrer");
+    };
+
+    return (
+        <div
+            className="whatsapp-fab"
+            style={{
+                position: "fixed",
+                bottom: "28px",
+                right: "28px",
+                zIndex: 9999,
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                opacity: visible ? 1 : 0,
+                transform: visible ? "translateY(0)" : "translateY(20px)",
+                transition: "opacity 0.5s ease, transform 0.5s ease",
+                pointerEvents: visible ? "auto" : "none",
+            }}
+        >
+            {/* Tooltip label */}
+            <div
+                style={{
+                    background: "#fff",
+                    color: "#075e54",
+                    fontFamily: "'Montserrat', sans-serif",
+                    fontWeight: 600,
+                    fontSize: "0.78rem",
+                    letterSpacing: "0.03em",
+                    padding: "7px 14px",
+                    borderRadius: "6px",
+                    boxShadow: "0 4px 18px rgba(0,0,0,0.15)",
+                    whiteSpace: "nowrap",
+                    opacity: hovered ? 1 : 0,
+                    transform: hovered ? "translateX(0)" : "translateX(8px)",
+                    transition: "opacity 0.25s ease, transform 0.25s ease",
+                    pointerEvents: "none",
+                    border: "1px solid rgba(7,94,84,0.15)",
+                }}
+            >
+                Chat with us on WhatsApp
+            </div>
+
+            {/* Main button */}
+            <button
+                onClick={handleClick}
+                onMouseEnter={() => setHovered(true)}
+                onMouseLeave={() => setHovered(false)}
+                title="Chat with us on WhatsApp"
+                aria-label="Open WhatsApp Chat"
+                style={{
+                    width: "58px",
+                    height: "58px",
+                    borderRadius: "50%",
+                    background: hovered
+                        ? "linear-gradient(135deg, #25d366 0%, #128c7e 100%)"
+                        : "linear-gradient(135deg, #25d366 0%, #075e54 100%)",
+                    border: "none",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    boxShadow: hovered
+                        ? "0 6px 28px rgba(37,211,102,0.55), 0 0 0 4px rgba(37,211,102,0.18)"
+                        : "0 4px 18px rgba(37,211,102,0.40), 0 0 0 3px rgba(37,211,102,0.12)",
+                    transform: hovered ? "scale(1.1)" : "scale(1)",
+                    transition: "all 0.3s cubic-bezier(0.23,1,0.32,1)",
+                    flexShrink: 0,
+                }}
+            >
+                {/* WhatsApp SVG Icon */}
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 48 48"
+                    width="30"
+                    height="30"
+                    fill="white"
+                >
+                    <path d="M4.9 43.3l2.7-9.9C5.9 30.7 5 27.4 5 24 5 13.5 13.5 5 24 5s19 8.5 19 19-8.5 19-19 19c-3.3 0-6.4-.8-9.1-2.3L4.9 43.3z" />
+                    <path
+                        fill="#25d366"
+                        d="M4.9 43.3l2.7-9.9C5.9 30.7 5 27.4 5 24 5 13.5 13.5 5 24 5s19 8.5 19 19-8.5 19-19 19c-3.3 0-6.4-.8-9.1-2.3L4.9 43.3z"
+                    />
+                    <path
+                        fill="white"
+                        d="M24 7c-9.4 0-17 7.6-17 17 0 3.1.8 6 2.3 8.6l.4.7-1.7 6.2 6.4-1.7.7.4C17.8 39.9 20.8 41 24 41c9.4 0 17-7.6 17-17S33.4 7 24 7zm8.5 23.5c-.4 1-2.1 1.9-2.9 2-.8.1-1.5.4-5-1.1-4.2-1.7-6.8-6-7-6.3-.2-.3-1.5-2-.1-4 .4-.5 1-.8 1.6-1 .2 0 .4 0 .5.1.5.1.8.3 1.1 1.1l1.3 3.2c.1.3.1.7-.1 1l-.5.7c-.2.2-.3.4-.2.7.5.9 1.4 2 2.4 2.8 1.2 1 2.5 1.6 3.5 1.9.3.1.6 0 .8-.2l.8-.9c.2-.3.5-.4.8-.3l3.1 1.5c.3.1.5.3.6.6.1.3.1 1.4-.3 2.2z"
+                    />
+                </svg>
+            </button>
+
+            {/* Pulse ring animation */}
+            <style>{`
+                @keyframes wa-pulse {
+                    0% { transform: scale(1); opacity: 0.7; }
+                    70% { transform: scale(1.6); opacity: 0; }
+                    100% { transform: scale(1.6); opacity: 0; }
+                }
+                .wa-pulse-ring {
+                    position: absolute;
+                    width: 58px;
+                    height: 58px;
+                    border-radius: 50%;
+                    background: rgba(37, 211, 102, 0.4);
+                    animation: wa-pulse 2.2s ease-out infinite;
+                    pointer-events: none;
+                }
+            `}</style>
+            <div
+                style={{
+                    position: "absolute",
+                    right: "28px",
+                    bottom: "28px",
+                    zIndex: 9998,
+                }}
+            >
+                <div className="wa-pulse-ring" />
+            </div>
+        </div>
     );
 }

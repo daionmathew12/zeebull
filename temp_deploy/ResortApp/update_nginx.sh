@@ -1,0 +1,254 @@
+#!/bin/bash
+# Backup current nginx config
+sudo cp /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/default.backup.$(date +%Y%m%d_%H%M%S)
+
+# Create new config with orchidadmin block
+sudo tee /etc/nginx/sites-enabled/default > /dev/null << 'NGINX_EOF'
+# Nginx configuration for TeqMates Resort Management System
+# Domain: www.teqmates.com
+
+# Rate limiting
+limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
+limit_req_zone $binary_remote_addr zone=general:10m rate=1r/s;
+
+# Upstream backend server
+upstream resort_backend {
+    server 127.0.0.1:8000;
+    keepalive 32;
+}
+
+# Redirect HTTP to HTTPS
+server {
+    listen 80;
+    server_name teqmates.com www.teqmates.com;
+    return 301 https://www.teqmates.com$request_uri;
+}
+
+# Main server block - HTTPS
+server {
+    listen 443 ssl http2;
+    server_name www.teqmates.com teqmates.com;
+
+    # SSL Configuration
+    ssl_certificate /etc/letsencrypt/live/teqmates.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/teqmates.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-SHA256:ECDHE-RSA-AES256-SHA384;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+    ssl_stapling on;
+    ssl_stapling_verify on;
+
+    # Security Headers
+    add_header X-Frame-Options DENY always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https:;" always;
+
+    # Gzip Compression
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css text/xml text/javascript application/javascript application/xml+rss application/json;
+
+    # Client settings
+    client_max_body_size 50M;
+    client_body_timeout 12;
+    client_header_timeout 12;
+    keepalive_timeout 15;
+    send_timeout 10;
+
+    # Root directory for static files
+    root /var/www/resort/Resort_first;
+
+    # Landing Page - Root path (/)
+    location = / {
+        try_files /landingpage/index.html @backend;
+    }
+
+    # Landing page static assets
+    location /landing/ {
+        alias /var/www/resort/Resort_first/landingpage/;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files $uri $uri/ =404;
+    }
+
+    # Admin Dashboard - /admin routes
+    location /admin {
+        alias /var/www/resort/Resort_first/dasboard/build;
+        try_files $uri $uri/ /admin/index.html;
+
+        # Cache static assets
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+    }
+
+    # Admin dashboard static files
+    location /admin-static/ {
+        alias /var/www/resort/Resort_first/dasboard/build/static/;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Orchid Admin Dashboard - /orchidadmin routes
+    location /orchidadmin {
+        alias /var/www/resort/Resort_first/dasboard/build;
+        try_files $uri $uri/ /orchidadmin/index.html;
+
+        # Cache static assets
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+    }
+
+    # Orchid admin dashboard static files
+    location /orchidadmin-static/ {
+        alias /var/www/resort/Resort_first/dasboard/build/static/;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # User/Resort interface - /resort routes
+    location /resort {
+        alias /var/www/resort/Resort_first/userend/build;
+        try_files $uri $uri/ /resort/index.html;
+
+        # Cache static assets
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+    }
+
+    # User interface static files
+    location /user-static/ {
+        alias /var/www/resort/Resort_first/userend/build/static/;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # API routes - All API calls
+    location /api/ {
+        limit_req zone=api burst=20 nodelay;
+        proxy_pass http://resort_backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+        proxy_buffering off;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # Timeouts
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    # Health check endpoint
+    location /health {
+        proxy_pass http://resort_backend;
+        proxy_set_header Host $host;
+        access_log off;
+    }
+
+    # Uploads directory
+    location /uploads/ {
+        alias /var/www/resort/Resort_first/ResortApp/uploads/;
+        expires 30d;
+        add_header Cache-Control "public";
+    }
+
+    # Static files
+    location /static/ {
+        alias /var/www/resort/Resort_first/ResortApp/static/;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Favicon
+    location = /favicon.ico {
+        alias /var/www/resort/Resort_first/landingpage/assets/img/favicon.ico;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Robots.txt
+    location = /robots.txt {
+        alias /var/www/resort/Resort_first/landingpage/robots.txt;
+        expires 1d;
+    }
+
+    # Security - Block access to sensitive files
+    location ~ /\. {
+        deny all;
+        access_log off;
+        log_not_found off;
+    }
+
+    location ~* \.(env|ini|conf|yml|yaml)$ {
+        deny all;
+        access_log off;
+        log_not_found off;
+    }
+
+    # Backend fallback for any unmatched routes
+    location @backend {
+        proxy_pass http://resort_backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Error pages
+    error_page 404 /404.html;
+    error_page 500 502 503 504 /50x.html;
+
+    location = /404.html {
+        root /var/www/resort/Resort_first/landingpage;
+    }
+
+    location = /50x.html {
+        root /var/www/resort/Resort_first/landingpage;
+    }
+
+    # Logging
+    access_log /var/log/nginx/resort_access.log;
+    error_log /var/log/nginx/resort_error.log;
+}
+
+# Separate server block for non-www redirect
+server {
+    listen 443 ssl http2;
+    server_name teqmates.com;
+
+    ssl_certificate /etc/letsencrypt/live/teqmates.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/teqmates.com/privkey.pem;
+
+    return 301 https://www.teqmates.com$request_uri;
+}
+NGINX_EOF
+
+# Test nginx configuration
+echo "Testing nginx configuration..."
+sudo nginx -t
+
+# If test passes, reload nginx
+if [ $? -eq 0 ]; then
+    echo "Configuration valid. Reloading nginx..."
+    sudo systemctl reload nginx
+    echo "✓ Nginx reloaded successfully!"
+    echo "✓ /orchidadmin route is now configured"
+else
+    echo "✗ Configuration test failed!"
+    exit 1
+fi

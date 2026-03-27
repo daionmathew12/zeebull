@@ -21,7 +21,7 @@ Before you begin, ensure you have the following installed:
 
 4. **SSH Access to Server**
    - Ensure you have the SSH key at: `%USERPROFILE%\.ssh\gcp_key`
-   - Server IP: `34.30.59.169`
+   - Server IP: `34.134.50.147`
    - Username: `basilabrahamaby`
 
 ## Quick Start (Automated)

@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, model_validator
 from datetime import date, datetime
 from typing import List, Optional
+from .checkout import CheckoutFull
 
 
 class PackageImageOut(BaseModel):
@@ -11,8 +12,18 @@ class PackageImageOut(BaseModel):
         from_attributes = True
 
 
+class BranchMinimal(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
+
+
 class PackageOut(BaseModel):
     id: int
+    branch_id: Optional[int] = None
+    branch: Optional[BranchMinimal] = None
     title: str
     description: Optional[str] = None
     price: float
@@ -61,6 +72,9 @@ class PackageBookingBase(BaseModel):
     children: int = 0
     food_preferences: Optional[str] = None
     special_requests: Optional[str] = None
+    branch_id: Optional[int] = None
+    checked_in_at: Optional[datetime] = None
+    checked_out_at: Optional[datetime] = None
     class Config:
         from_attributes = True
 
@@ -84,9 +98,11 @@ class PackageBookingOut(PackageBookingBase):
     created_at: Optional[datetime] = None # Added for sorting
     display_id: Optional[str] = None  # Format: PK-000001
     status: str
+    branch_id: Optional[int] = None
     total_amount: Optional[float] = 0.0
     rooms: List[PackageBookingRoomOut] = Field(default_factory=list)
     package: Optional[PackageOut]
+    checkout: Optional[CheckoutFull] = None # Support detailed checkout info
     
     @model_validator(mode='after')
     def set_display_id(self):

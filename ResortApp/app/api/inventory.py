@@ -1,13 +1,25 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+import os
+# Absolute project root path (ResortApp/)
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_UPLOAD_ROOT = os.path.join(_BASE_DIR, "uploads")
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError # Added import
+from sqlalchemy import func
 from typing import List, Optional
-import os
 import shutil
 import uuid
 from datetime import datetime
 from app.utils.auth import get_db, get_current_user
+from app.utils.branch_scope import get_branch_id
+from app.utils.booking_id import parse_display_id, format_display_id
 from app.models.user import User
+from app.models.inventory import (
+    InventoryCategory, InventoryItem, Vendor, PurchaseMaster, PurchaseDetail,
+    InventoryTransaction, StockRequisition, StockIssue, WasteLog, Location,
+    AssetMapping, AssetRegistry, LocationStock, LaundryLog
+)
+
 from app.curd import inventory as inventory_crud
 from app.schemas.inventory import (
     InventoryCategoryCreate, InventoryCategoryUpdate, InventoryCategoryOut,
@@ -22,12 +34,14 @@ from app.schemas.inventory import (
     AssetMappingCreate, AssetMappingOut, AssetMappingUpdate,
     AssetRegistryCreate, AssetRegistryOut, AssetRegistryUpdate,
     StockAdjustmentCreate,
-    LaundryLogCreate, LaundryLogOut, LaundryLogUpdate
+    LaundryLogCreate, LaundryLogOut, LaundryLogUpdate,
+    InterBranchTransferCreate, InterBranchTransferOut
 )
+
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
 
-UPLOAD_DIR = "uploads/inventory_items"
+UPLOAD_DIR = os.path.join(_UPLOAD_ROOT, "inventory_items")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
@@ -36,7 +50,8 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 def create_category(
     category: InventoryCategoryCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     return inventory_crud.create_category(db, category)
 
@@ -47,9 +62,11 @@ def get_categories(
     limit: int = 100,
     active_only: bool = True,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
-    return inventory_crud.get_all_categories(db, skip=skip, limit=limit, active_only=active_only)
+    categories = inventory_crud.get_all_categories(db, skip=skip, limit=limit, active_only=active_only)
+    return categories
 
 
 @router.put("/categories/{category_id}", response_model=InventoryCategoryOut)
@@ -57,7 +74,8 @@ def update_category(
     category_id: int,
     category: InventoryCategoryUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     updated = inventory_crud.update_category(db, category_id, category)
     if not updated:
@@ -69,7 +87,8 @@ def update_category(
 def delete_category(
     category_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     # Check if category exists
     category = inventory_crud.get_category_by_id(db, category_id)
@@ -77,7 +96,6 @@ def delete_category(
         raise HTTPException(status_code=404, detail="Category not found")
     
     # Check if category has active items
-    from app.models.inventory import InventoryItem
     items_count = db.query(InventoryItem).filter(InventoryItem.category_id == category_id, InventoryItem.is_active == True).count()
     if items_count > 0:
         raise HTTPException(status_code=400, detail="Cannot delete category with active items")
@@ -120,8 +138,10 @@ async def create_item(
     is_active: bool = Form(True),
     image: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
+
     try:
         # Verify category exists
         category = inventory_crud.get_category_by_id(db, category_id)
@@ -137,20 +157,19 @@ async def create_item(
                 shutil.copyfileobj(image.file, buffer)
             image_path = f"uploads/inventory_items/{filename}".replace("\\", "/")
         
+        # Sanitize optional unique fields to avoid empty string duplicates
+        if barcode == "" or (isinstance(barcode, str) and barcode.lower() == "null"):
+            barcode = None
+        if vendor_item_code == "" or (isinstance(vendor_item_code, str) and vendor_item_code.lower() == "null"):
+            vendor_item_code = None
+        if item_code == "" or (isinstance(item_code, str) and item_code.lower() == "null"):
+            item_code = None
         
         # Check if category enforces fixed asset status
         if category.is_asset_fixed:
             is_asset_fixed = True
 
-        # Create item
-        from app.models.inventory import InventoryItem, InventoryTransaction, Location, LocationStock
-        
-        # Sanitize optional unique fields
-        if barcode == "":
-            barcode = None
-        if vendor_item_code == "":
-            vendor_item_code = None
-        
+        # Create item with 0 initial stock
         created_item = InventoryItem(
             name=name,
             item_code=item_code,
@@ -159,7 +178,7 @@ async def create_item(
             sub_category=sub_category,
             hsn_code=hsn_code,
             unit=unit,
-            current_stock=initial_stock if initial_stock > 0 else 0.0,
+            current_stock=0.0,  # Always 0 at creation
             min_stock_level=min_stock_level,
             max_stock_level=max_stock_level,
             unit_price=unit_price,
@@ -179,7 +198,8 @@ async def create_item(
             preferred_vendor_id=preferred_vendor_id,
             vendor_item_code=vendor_item_code,
             lead_time_days=lead_time_days,
-            is_active=is_active,
+            is_active=is_active
+            # branch_id=branch_id  # Item is global
         )
         
         db.add(created_item)
@@ -187,53 +207,18 @@ async def create_item(
             db.flush()  # Get the ID
         except IntegrityError as e:
             db.rollback()
-            err_msg = str(e)
-            if "ix_inventory_items_item_code" in err_msg:
+            err_msg = str(e).lower()
+            if "uix_inventory_item_code" in err_msg or "item_code" in err_msg:
                 raise HTTPException(status_code=400, detail="Item Code already exists. Please use a unique code.")
-            elif "ix_inventory_items_barcode" in err_msg:
+            elif "uix_inventory_item_barcode" in err_msg or "barcode" in err_msg:
                 raise HTTPException(status_code=400, detail="Barcode already exists.")
-            elif "ix_inventory_items_name" in err_msg: # Assuming name might be unique too
+            elif "uix_inventory_item_name" in err_msg or "inventory_items_name_key" in err_msg:
                  raise HTTPException(status_code=400, detail="Item Name already exists.")
             else:
                 print(f"Database Error: {e}")
-                raise HTTPException(status_code=400, detail=f"Database error: {err_msg}")
+                raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
         
-        # Create transaction record for initial stock if provided
-        if initial_stock and initial_stock > 0:
-            transaction = InventoryTransaction(
-                item_id=created_item.id,
-                transaction_type="adjustment",
-                quantity=initial_stock,
-                unit_price=unit_price,
-                total_amount=initial_stock * unit_price,
-                notes="Initial stock",
-                created_by=current_user.id,
-                destination_location_id=location.id if location else None
-            )
-            db.add(transaction)
-
-            # Create LocationStock entry if location is specified
-            if location:
-                # Try to find location by name (case-insensitive)
-                # We need to be careful with exact matches vs partial
-                loc_obj = db.query(Location).filter(Location.name.ilike(location.strip())).first()
-                
-                # If not found directly, try seeing if it matches known patterns or valid locations
-                if not loc_obj:
-                    # Fallback: Check if user typed something like "General Store" that maps to "Central Warehouse"?
-                    # For now, strict match or partial contains might be safer?
-                    pass
-
-                if loc_obj:
-                    loc_stock = LocationStock(
-                        location_id=loc_obj.id,
-                        item_id=created_item.id,
-                        quantity=initial_stock
-                    )
-                    db.add(loc_stock)
-                else:
-                    # Optional: Log warning that location name didn't match any Location ID
-                    print(f"Warning: Item created with location '{location}' but no matching Location found in DB.")
+        # NOTE: Initial stock transaction logic removed as per user request (initial stock always 0)
         
         db.commit()
         db.refresh(created_item)
@@ -245,7 +230,8 @@ async def create_item(
         }
         item_dict["category_name"] = category.name
         item_dict["department"] = category.parent_department  # Add department from category
-        item_dict["is_low_stock"] = created_item.current_stock <= created_item.min_stock_level if created_item.min_stock_level else False
+        item_dict["current_stock"] = 0.0
+        item_dict["is_low_stock"] = False
         
         return item_dict
     except HTTPException:
@@ -265,8 +251,10 @@ def get_items(
     active_only: bool = True,
     is_fixed_asset: Optional[bool] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
+
     """Optimized endpoint with eager loading - no N+1 queries"""
     try:
         items = inventory_crud.get_all_items(
@@ -282,7 +270,6 @@ def get_items(
         item_ids = [i.id for i in items]
         last_prices = {}
         if item_ids:
-            from app.models.inventory import PurchaseDetail, PurchaseMaster
             # Fetch most recent purchase details for these items
             # statuses: confirmed or received are valid for "last price"
             rows = db.query(PurchaseDetail.item_id, PurchaseDetail.unit_price, PurchaseMaster.purchase_date, PurchaseMaster.vendor_id)\
@@ -306,32 +293,61 @@ def get_items(
             # Fetch vendor names
             vendor_names = {}
             if vendor_ids:
-                from app.models.inventory import Vendor
-                vendors = db.query(Vendor).filter(Vendor.id.in_(vendor_ids)).all()
+                v_query = db.query(Vendor).filter(Vendor.id.in_(vendor_ids))
+                if branch_id is not None:
+                    v_query = v_query.filter(Vendor.branch_id == branch_id)
+                vendors = v_query.all()
                 vendor_names = {v.id: v.name for v in vendors}
+
+        # Fetch branch-specific stocks
+        stock_q = db.query(
+            LocationStock.item_id, 
+            func.sum(LocationStock.quantity).label("total")
+        ).filter(
+            LocationStock.item_id.in_(item_ids)
+        )
+        if branch_id is not None:
+            stock_q = stock_q.filter(LocationStock.branch_id == branch_id)
+        branch_stocks = stock_q.group_by(LocationStock.item_id).all()
+        
+        branch_stock_map = {item_id: float(total) for item_id, total in branch_stocks}
 
         result = []
         for item in items:
-            # Category is already loaded via eager loading (when configured), no extra query needed
-            category = getattr(item, "category", None)
-            last_p = last_prices.get(item.id, {})
-            item_dict = {
-                **item.__dict__,
-                "category_name": category.name if category else None,
-                "department": category.parent_department if category else None,  # Add department from category
-                "is_low_stock": item.current_stock <= item.min_stock_level if item.min_stock_level else False,
-                "last_purchase_price": last_p.get("price", 0.0),
-                "last_purchase_date": last_p.get("date"),
-                "last_vendor_name": vendor_names.get(last_p.get("vendor_id")) if last_p.get("vendor_id") else None
-            }
-            # Add category object for frontend grouping
-            if category:
-                item_dict["category"] = {
-                    "id": category.id,
-                    "name": category.name,
-                    "classification": category.classification
+            try:
+                # Category is already loaded via eager loading (when configured), no extra query needed
+                category = getattr(item, "category", None)
+                last_p = last_prices.get(item.id, {})
+                
+                # Use branch-specific stock if available, else 0
+                current_branch_stock = branch_stock_map.get(item.id, 0.0)
+                
+                item_dict = {
+                    **item.__dict__,
+                    "category_name": category.name if category else None,
+                    "department": category.parent_department if category else None,  # Add department from category
+                    "current_stock": current_branch_stock, # Override shared current_stock with branch-specific one
+                    "is_low_stock": current_branch_stock <= item.min_stock_level if item.min_stock_level else False,
+                    "last_purchase_price": last_p.get("price", 0.0),
+                    "last_purchase_date": last_p.get("date"),
+                    "last_vendor_name": vendor_names.get(last_p.get("vendor_id")) if last_p.get("vendor_id") else None,
+                    "branch_name": "Enterprise",
+                    "branch_id": branch_id or 1 # Use current context branch for pydantic
                 }
-            result.append(item_dict)
+
+                # Add category object for frontend grouping
+                if category:
+                    item_dict["category"] = {
+                        "id": category.id,
+                        "name": category.name,
+                        "classification": category.classification
+                    }
+                result.append(item_dict)
+            except Exception as item_err:
+                print(f"Error processing item {item.id}: {item_err}")
+                import traceback
+                traceback.print_exc()
+                continue
         return result
     except Exception as e:
         import traceback
@@ -340,36 +356,56 @@ def get_items(
 
 
 @router.get("/items/{item_id}", response_model=InventoryItemOut)
-def get_item(item_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    item = inventory_crud.get_item_by_id(db, item_id)
+def get_item(
+    item_id: int, 
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
+):
+    item = inventory_crud.get_item_by_id(db, item_id, branch_id=branch_id)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
+    
+    # Fetch branch-specific stock
+    stock_q = db.query(func.sum(LocationStock.quantity)).filter(
+        LocationStock.item_id == item_id
+    )
+    if branch_id is not None:
+        stock_q = stock_q.filter(LocationStock.branch_id == branch_id)
+    branch_stock = stock_q.scalar() or 0.0
+    
     category = inventory_crud.get_category_by_id(db, item.category_id)
     return {
         **item.__dict__,
         "category_name": category.name if category else None,
         "department": category.parent_department if category else None,  # Add department from category
-        "is_low_stock": item.current_stock <= item.min_stock_level
+        "current_stock": float(branch_stock),
+        "is_low_stock": float(branch_stock) <= item.min_stock_level
     }
 
 
 
+
 @router.get("/items/{item_id}/stocks")
-def get_item_stocks(item_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Get stock distribution for an item across all locations"""
-    return inventory_crud.get_item_stocks(db, item_id)
+def get_item_stocks(
+    item_id: int, 
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
+):
+    """Get stock distribution for an item across all locations in the current branch"""
+    return inventory_crud.get_item_stocks(db, item_id, branch_id=branch_id)
+
 
 
 @router.get("/items/{item_id}/comprehensive-details")
 def get_item_comprehensive_details(
     item_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
-    from app.models.inventory import (
-        InventoryItem, LocationStock, Location, PurchaseDetail, PurchaseMaster,
-        InventoryTransaction, WasteLog
-    )
+
     from sqlalchemy import func
 
     # 1. Basic Item Details
@@ -380,9 +416,13 @@ def get_item_comprehensive_details(
     category = inventory_crud.get_category_by_id(db, item.category_id)
     
     # 2. Location Stocks
-    stocks_query = db.query(LocationStock, Location.name, Location.location_type)\
+    stocks_q = db.query(LocationStock, Location.name, Location.location_type)\
         .join(Location, LocationStock.location_id == Location.id)\
-        .filter(LocationStock.item_id == item_id, LocationStock.quantity != 0).all()
+        .filter(LocationStock.item_id == item_id, LocationStock.quantity != 0)
+    if branch_id is not None:
+        stocks_q = stocks_q.filter(LocationStock.branch_id == branch_id)
+    stocks_query = stocks_q.all()
+
         
     location_stocks = []
     for stock, loc_name, loc_type in stocks_query:
@@ -395,10 +435,13 @@ def get_item_comprehensive_details(
         })
 
     # 3. Purchase History & Stats
-    purchases_query = db.query(PurchaseDetail, PurchaseMaster)\
+    purchases_q = db.query(PurchaseDetail, PurchaseMaster)\
         .join(PurchaseMaster, PurchaseDetail.purchase_master_id == PurchaseMaster.id)\
-        .filter(PurchaseDetail.item_id == item_id, PurchaseMaster.status.in_(['received', 'confirmed']))\
-        .order_by(PurchaseMaster.purchase_date.desc()).all()
+        .filter(PurchaseDetail.item_id == item_id, PurchaseMaster.status.in_(['received', 'confirmed']))
+    if branch_id is not None:
+        purchases_q = purchases_q.filter(PurchaseMaster.branch_id == branch_id)
+    purchases_query = purchases_q.order_by(PurchaseMaster.purchase_date.desc()).all()
+
 
     total_purchased_qty = 0.0
     total_purchased_val = 0.0
@@ -425,12 +468,16 @@ def get_item_comprehensive_details(
     avg_purchase_price = (total_purchased_val / total_purchased_qty) if total_purchased_qty > 0 else 0.0
 
     # 4. Usage (Consumption) History & Stats (Transactions type='out', Ref starts with ISS)
-    usage_query = db.query(InventoryTransaction)\
+    usage_q = db.query(InventoryTransaction)\
         .filter(
             InventoryTransaction.item_id == item_id, 
             InventoryTransaction.transaction_type == 'out',
             InventoryTransaction.reference_number.like('ISS-%')
-        ).order_by(InventoryTransaction.created_at.desc()).all()
+        )
+    if branch_id is not None:
+        usage_q = usage_q.filter(InventoryTransaction.branch_id == branch_id)
+    usage_query = usage_q.order_by(InventoryTransaction.created_at.desc()).all()
+
 
     total_consumed_qty = 0.0
     total_consumed_val = 0.0
@@ -450,10 +497,13 @@ def get_item_comprehensive_details(
         })
 
     # 5. Wastage History & Stats
-    waste_query = db.query(WasteLog, Location.name)\
+    waste_q = db.query(WasteLog, Location.name)\
         .outerjoin(Location, WasteLog.location_id == Location.id)\
-        .filter(WasteLog.item_id == item_id)\
-        .order_by(WasteLog.waste_date.desc()).all()
+        .filter(WasteLog.item_id == item_id)
+    if branch_id is not None:
+        waste_q = waste_q.filter(WasteLog.branch_id == branch_id)
+    waste_query = waste_q.order_by(WasteLog.waste_date.desc()).all()
+
         
     total_wasted_qty = 0.0
     waste_history = []
@@ -472,20 +522,28 @@ def get_item_comprehensive_details(
         })
 
     # Calculate wastage value from transactions
-    waste_trans_query = db.query(func.sum(InventoryTransaction.total_amount))\
+    waste_val_q = db.query(func.sum(InventoryTransaction.total_amount))\
         .filter(
             InventoryTransaction.item_id == item_id,
             InventoryTransaction.transaction_type == 'out',
             InventoryTransaction.reference_number.like('WASTE-%')
-        ).scalar()
+        )
+    if branch_id is not None:
+        waste_val_q = waste_val_q.filter(InventoryTransaction.branch_id == branch_id)
+    waste_trans_query = waste_val_q.scalar()
+
     total_wasted_val = float(waste_trans_query or 0)
 
     # 6. Transfers (Stock Movement)
-    transfer_query = db.query(InventoryTransaction)\
+    transfer_q = db.query(InventoryTransaction)\
         .filter(
             InventoryTransaction.item_id == item_id,
             InventoryTransaction.transaction_type.in_(['transfer_out', 'transfer_in'])
-        ).order_by(InventoryTransaction.created_at.desc()).all()
+        )
+    if branch_id is not None:
+        transfer_q = transfer_q.filter(InventoryTransaction.branch_id == branch_id)
+    transfer_query = transfer_q.order_by(InventoryTransaction.created_at.desc()).all()
+
         
     transfer_history = []
     for trans in transfer_query:
@@ -503,8 +561,9 @@ def get_item_comprehensive_details(
     item_dict["category_name"] = category.name if category else None
 
     return {
-        "item": item_dict,
+        "item": {**item_dict, "current_stock": float(sum(ls["quantity"] for ls in location_stocks))},
         "location_stocks": location_stocks,
+
         "stats": {
             "total_purchased_qty": total_purchased_qty,
             "total_purchased_val": total_purchased_val,
@@ -554,8 +613,10 @@ async def update_item(
     is_active: Optional[bool] = Form(None),
     image: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
+
     try:
         # Handle image upload if provided
         image_path = None
@@ -627,20 +688,29 @@ async def update_item(
         # Get category for response
         category = inventory_crud.get_category_by_id(db, updated.category_id)
         
+        # Fetch branch-specific stock for response
+        from app.models.inventory import LocationStock
+        branch_stock = db.query(func.sum(LocationStock.quantity)).filter(
+            LocationStock.item_id == updated.id,
+            LocationStock.branch_id == branch_id
+        ).scalar() or 0.0
+
         return {
             **updated.__dict__,
             "category_name": category.name if category else None,
             "department": category.parent_department if category else None,
-            "is_low_stock": updated.current_stock <= updated.min_stock_level if updated.min_stock_level else False
+            "current_stock": float(branch_stock),
+            "is_low_stock": float(branch_stock) <= updated.min_stock_level if updated.min_stock_level else False
         }
+
     except IntegrityError as e:
         db.rollback()
-        err_msg = str(e)
-        if "ix_inventory_items_item_code" in err_msg:
+        err_msg = str(e).lower()
+        if "uix_inventory_item_code" in err_msg or "item_code" in err_msg:
             raise HTTPException(status_code=400, detail="Item Code already exists.")
-        elif "ix_inventory_items_barcode" in err_msg:
+        elif "uix_inventory_item_barcode" in err_msg or "barcode" in err_msg:
             raise HTTPException(status_code=400, detail="Barcode already exists.")
-        elif "ix_inventory_items_name" in err_msg:
+        elif "uix_inventory_item_name" in err_msg or "ix_inventory_items_name" in err_msg:
             raise HTTPException(status_code=400, detail="Item Name already exists.")
         else:
              raise HTTPException(status_code=400, detail=f"Database integrity error: {err_msg}")
@@ -657,7 +727,8 @@ async def update_item(
 def delete_item(
     item_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     try:
         item = inventory_crud.get_item_by_id(db, item_id)
@@ -680,9 +751,10 @@ def delete_item(
 def create_vendor(
     vendor: VendorCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
-    return inventory_crud.create_vendor(db, vendor)
+    return inventory_crud.create_vendor(db, vendor, branch_id=branch_id)
 
 
 @router.get("/vendors", response_model=List[VendorOut])
@@ -691,14 +763,31 @@ def get_vendors(
     limit: int = 100,
     active_only: bool = False,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
-    return inventory_crud.get_all_vendors(db, skip=skip, limit=limit, active_only=active_only)
+    vendors = inventory_crud.get_all_vendors(db, branch_id=branch_id, skip=skip, limit=limit, active_only=active_only)
+    
+    # Enrich with branch name
+    result = []
+    for v in vendors:
+        v_dict = {**v.__dict__}
+        if hasattr(v, 'branch') and v.branch:
+            v_dict['branch_name'] = v.branch.name
+        else:
+            v_dict['branch_name'] = "Main"
+        result.append(v_dict)
+    return result
 
 
 @router.get("/vendors/{vendor_id}", response_model=VendorOut)
-def get_vendor(vendor_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    vendor = inventory_crud.get_vendor_by_id(db, vendor_id)
+def get_vendor(
+    vendor_id: int, 
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
+):
+    vendor = inventory_crud.get_vendor_by_id(db, vendor_id, branch_id=branch_id)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
     return vendor
@@ -709,9 +798,10 @@ def update_vendor(
     vendor_id: int,
     vendor_update: VendorUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
-    vendor = inventory_crud.get_vendor_by_id(db, vendor_id)
+    vendor = inventory_crud.get_vendor_by_id(db, vendor_id, branch_id=branch_id)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
     
@@ -728,14 +818,17 @@ def update_vendor(
 def create_purchase(
     purchase: PurchaseMasterCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
+
     print(f"[DEBUG CREATE_PURCHASE] Received purchase data:")
     print(f"  Status: {purchase.status}")
     print(f"  Destination Location ID: {purchase.destination_location_id}")
     print(f"  Details count: {len(purchase.details)}")
     
-    created = inventory_crud.create_purchase_master(db, purchase, created_by=current_user.id)
+    created = inventory_crud.create_purchase_master(db, purchase, branch_id=branch_id, created_by=current_user.id)
+
     
     # Use centralized status update logic to handle inventory, prices, and journal entries
     # This avoids redundant logic and ensures atomicity
@@ -748,7 +841,8 @@ def create_purchase(
             from app.models.inventory import Location
             # Try to find a default warehouse location
             default_location = db.query(Location).filter(
-                Location.location_type.in_(["WAREHOUSE", "CENTRAL_WAREHOUSE", "BRANCH_STORE"])
+                Location.location_type.in_(["WAREHOUSE", "CENTRAL_WAREHOUSE", "BRANCH_STORE"]),
+                (Location.branch_id == branch_id if branch_id is not None else True)
             ).first()
             
             if not default_location:
@@ -780,12 +874,11 @@ def create_purchase(
     detail_item_ids = [d.item_id for d in created.details if d.item_id]
     items_map = {}
     if detail_item_ids:
-        from app.models.inventory import InventoryItem
         items = db.query(InventoryItem).filter(InventoryItem.id.in_(detail_item_ids)).all()
         items_map = {item.id: item for item in items}
     
     # Load vendor
-    vendor = inventory_crud.get_vendor_by_id(db, created.vendor_id)
+    vendor = inventory_crud.get_vendor_by_id(db, created.vendor_id, branch_id=branch_id)
     
     # Build details with item names from map
     details = []
@@ -811,10 +904,12 @@ def get_purchases(
     limit: int = 100,
     status: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
     """Optimized with eager loading - no N+1 queries"""
-    purchases = inventory_crud.get_all_purchases(db, skip=skip, limit=limit, status=status)
+    purchases = inventory_crud.get_all_purchases(db, branch_id=branch_id, skip=skip, limit=limit, status=status)
+
     result = []
     for purchase in purchases:
         # Vendor and details.items already loaded via eager loading
@@ -831,8 +926,8 @@ def get_purchases(
         # Get destination location if set
         location_name = None
         if purchase.destination_location_id:
-            from app.models.inventory import Location
-            location = db.query(Location).filter(Location.id == purchase.destination_location_id).first()
+            location = db.query(Location).filter(Location.id == purchase.destination_location_id, (Location.branch_id == branch_id if branch_id is not None else True)).first()
+
             if location:
                 location_name = location.name or f"{location.building} - {location.room_area}"
         result.append({
@@ -847,20 +942,29 @@ def get_purchases(
 
 
 @router.get("/purchases/{purchase_id}", response_model=PurchaseMasterOut)
-def get_purchase(purchase_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    purchase = inventory_crud.get_purchase_by_id(db, purchase_id)
+def get_purchase(
+    purchase_id: int, 
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
+):
+    query = db.query(PurchaseMaster).filter(PurchaseMaster.id == purchase_id)
+    if branch_id is not None:
+        query = query.filter(PurchaseMaster.branch_id == branch_id)
+    
+    purchase = query.first()
+
     if not purchase:
         raise HTTPException(status_code=404, detail="Purchase not found")
     
     # Optimized: Batch load to avoid N+1 queries
-    vendor = inventory_crud.get_vendor_by_id(db, purchase.vendor_id)
+    vendor = inventory_crud.get_vendor_by_id(db, purchase.vendor_id, branch_id=branch_id)
     user = db.query(User).filter(User.id == purchase.created_by).first()
     
     # Batch load items
     detail_item_ids = [d.item_id for d in purchase.details if d.item_id]
     items_map = {}
     if detail_item_ids:
-        from app.models.inventory import InventoryItem
         items = db.query(InventoryItem).filter(InventoryItem.id.in_(detail_item_ids)).all()
         items_map = {item.id: item for item in items}
     
@@ -875,8 +979,7 @@ def get_purchase(purchase_id: int, db: Session = Depends(get_db), current_user: 
     # Get destination location name
     location_name = None
     if purchase.destination_location_id:
-        from app.models.inventory import Location
-        location = db.query(Location).filter(Location.id == purchase.destination_location_id).first()
+        location = db.query(Location).filter(Location.id == purchase.destination_location_id, (Location.branch_id == branch_id if branch_id is not None else True)).first()
         if location:
             location_name = location.name or f"{location.building} - {location.room_area}"
     
@@ -895,13 +998,17 @@ def update_purchase(
     purchase_id: int,
     purchase_update: PurchaseMasterUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
-    from app.models.inventory import InventoryItem, InventoryTransaction, LocationStock
+    query = db.query(PurchaseMaster).filter(PurchaseMaster.id == purchase_id)
+    if branch_id is not None:
+        query = query.filter(PurchaseMaster.branch_id == branch_id)
     
-    purchase = inventory_crud.get_purchase_by_id(db, purchase_id)
+    purchase = query.first()
     if not purchase:
-        raise HTTPException(status_code=404, detail="Purchase not found")
+        raise HTTPException(status_code=404, detail="Purchase not found in this branch")
+
     
     old_status = purchase.status
     new_status = purchase_update.status if purchase_update.status is not None else old_status
@@ -915,10 +1022,11 @@ def update_purchase(
     if purchase_update.status is not None and purchase_update.status.lower() != old_status.lower():
         # Handle auto-assign location for receiving if needed
         if purchase_update.status.lower() == "received" and not updated.destination_location_id:
-            from app.models.inventory import Location
             default_location = db.query(Location).filter(
-                Location.location_type.in_(["WAREHOUSE", "CENTRAL_WAREHOUSE", "BRANCH_STORE"])
+                Location.location_type.in_(["WAREHOUSE", "CENTRAL_WAREHOUSE", "BRANCH_STORE"]),
+                (Location.branch_id == branch_id if branch_id is not None else True)
             ).first()
+
             if default_location:
                 updated.destination_location_id = default_location.id
                 db.commit()
@@ -927,16 +1035,23 @@ def update_purchase(
         updated = inventory_crud.update_purchase_status(db, updated.id, purchase_update.status, current_user_id=current_user.id)
     
     db.commit()
-    return get_purchase(purchase_id, db, current_user)
+    return get_purchase(purchase_id, db, current_user, branch_id=branch_id)
+
 
 
 @router.delete("/purchases/{purchase_id}")
 def delete_purchase(
     purchase_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
-    purchase = inventory_crud.get_purchase_by_id(db, purchase_id)
+
+    query = db.query(PurchaseMaster).filter(PurchaseMaster.id == purchase_id)
+    if branch_id is not None:
+        query = query.filter(PurchaseMaster.branch_id == branch_id)
+    
+    purchase = query.first()
     if not purchase:
         raise HTTPException(status_code=404, detail="Purchase not found")
     
@@ -945,7 +1060,6 @@ def delete_purchase(
         raise HTTPException(status_code=400, detail="Cannot delete purchase that is not draft or cancelled")
     
     # Delete details first
-    from app.models.inventory import PurchaseDetail
     db.query(PurchaseDetail).filter(PurchaseDetail.purchase_master_id == purchase_id).delete()
     
     db.delete(purchase)
@@ -958,10 +1072,16 @@ def create_purchase_payment(
     purchase_id: int,
     payment_data: dict,  # {amount: float, payment_method: str, notes: str}
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """Record a payment for a purchase (Vendor Payment)"""
-    purchase = inventory_crud.get_purchase_by_id(db, purchase_id)
+    query = db.query(PurchaseMaster).filter(PurchaseMaster.id == purchase_id)
+    if branch_id is not None:
+        query = query.filter(PurchaseMaster.branch_id == branch_id)
+    
+    purchase = query.first()
+
     if not purchase:
         raise HTTPException(status_code=404, detail="Purchase not found")
     
@@ -1012,8 +1132,10 @@ def create_purchase_payment(
             reference_id=purchase.id,
             description=f"Vendor Payment - {purchase.purchase_number}",
             notes=f"Method: {payment_method}. {notes}",
-            lines=lines
+            lines=lines,
+            branch_id=branch_id
         )
+
         
         journal_entry = create_journal_entry(db, entry, current_user.id)
         
@@ -1039,9 +1161,20 @@ def update_purchase_status(
     purchase_id: int,
     status: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
+    # Verify purchase belongs to branch
+    query = db.query(PurchaseMaster).filter(PurchaseMaster.id == purchase_id)
+    if branch_id is not None:
+        query = query.filter(PurchaseMaster.branch_id == branch_id)
+    
+    purchase_check = query.first()
+    if not purchase_check:
+        raise HTTPException(status_code=404, detail="Purchase not found in this branch")
+        
     purchase = inventory_crud.update_purchase_status(db, purchase_id, status, current_user_id=current_user.id)
+
     if not purchase:
         raise HTTPException(status_code=404, detail="Purchase not found")
         
@@ -1058,10 +1191,16 @@ def update_purchase_payment_status(
     payment_status: str,
     payment_method: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """Update payment status and payment method for a purchase order"""
-    purchase = inventory_crud.get_purchase_by_id(db, purchase_id)
+    query = db.query(PurchaseMaster).filter(PurchaseMaster.id == purchase_id)
+    if branch_id is not None:
+        query = query.filter(PurchaseMaster.branch_id == branch_id)
+    
+    purchase = query.first()
+
     if not purchase:
         raise HTTPException(status_code=404, detail="Purchase not found")
     
@@ -1111,20 +1250,24 @@ def get_transactions(
     search: Optional[str] = None,
     category: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
     """Optimized with eager loading - no N+1 queries"""
-    from app.models.inventory import InventoryTransaction, StockIssue, InventoryItem, InventoryCategory
     from sqlalchemy.orm import joinedload
     from sqlalchemy import or_, and_
 
     query = db.query(InventoryTransaction).join(InventoryItem).options(
+
         joinedload(InventoryTransaction.item),
         joinedload(InventoryTransaction.user),
         joinedload(InventoryTransaction.source_location),
         joinedload(InventoryTransaction.destination_location)
     )
     
+    if branch_id is not None:
+        query = query.filter(InventoryTransaction.branch_id == branch_id)
+        
     if item_id:
         query = query.filter(InventoryTransaction.item_id == item_id)
         
@@ -1171,10 +1314,15 @@ def get_transactions(
              )
         elif type == "laundry":
              query = query.filter(
-                 InventoryTransaction.transaction_type == "transfer",
                  or_(
-                     InventoryTransaction.reference_number.ilike("%LAUNDRY%"),
-                     InventoryTransaction.notes.ilike("%laundry%")
+                     InventoryTransaction.transaction_type == "laundry",
+                     and_(
+                         InventoryTransaction.transaction_type == "transfer",
+                         or_(
+                             InventoryTransaction.reference_number.ilike("%LAUNDRY%"),
+                             InventoryTransaction.notes.ilike("%laundry%")
+                         )
+                     )
                  )
              )
         else:
@@ -1231,22 +1379,20 @@ def get_transactions(
             issue = db.query(StockIssue).filter(StockIssue.issue_number == trans.reference_number).first()
             if issue:
                 if issue.source_location_id:
-                    src_loc = inventory_crud.get_location_by_id(db, issue.source_location_id)
+                    src_loc = db.query(Location).filter(Location.id == issue.source_location_id, (Location.branch_id == branch_id if branch_id is not None else True)).first()
                     if src_loc:
                         trans_dict["source_location_name"] = f"{src_loc.building} - {src_loc.room_area}" if (src_loc.building or src_loc.room_area) else src_loc.name
                 
                 if issue.destination_location_id:
-                    dest_loc = inventory_crud.get_location_by_id(db, issue.destination_location_id)
+                    dest_loc = db.query(Location).filter(Location.id == issue.destination_location_id, (Location.branch_id == branch_id if branch_id is not None else True)).first()
                     if dest_loc:
                         trans_dict["destination_location_name"] = f"{dest_loc.building} - {dest_loc.room_area}" if (dest_loc.building or dest_loc.room_area) else dest_loc.name
 
         # 2. Handle Waste Logs
         elif not trans_dict["source_location_name"] and trans.reference_number and trans.reference_number.startswith("WASTE-"):
-            # Import WasteLog locally to avoid circular imports
-            from app.models.inventory import WasteLog
             waste = db.query(WasteLog).filter(WasteLog.log_number == trans.reference_number).first()
             if waste and waste.location_id:
-                w_loc = inventory_crud.get_location_by_id(db, waste.location_id)
+                w_loc = db.query(Location).filter(Location.id == waste.location_id, (Location.branch_id == branch_id if branch_id is not None else True)).first()
                 if w_loc:
                     trans_dict["source_location_name"] = f"{w_loc.building} - {w_loc.room_area}" if (w_loc.building or w_loc.room_area) else w_loc.name
 
@@ -1275,11 +1421,13 @@ def get_transactions(
 def create_requisition(
     requisition: StockRequisitionCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     try:
         requisition_data = requisition.model_dump()
-        created = inventory_crud.create_stock_requisition(db, requisition_data, created_by=current_user.id)
+        created = inventory_crud.create_stock_requisition(db, requisition_data, branch_id=branch_id, created_by=current_user.id)
+
         
         # Load relationships for response
         requester = db.query(User).filter(User.id == created.requested_by).first()
@@ -1309,10 +1457,12 @@ def get_requisitions(
     limit: int = 100,
     status: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
     """Optimized with eager loading - no N+1 queries"""
-    requisitions = inventory_crud.get_all_requisitions(db, skip=skip, limit=limit, status=status)
+    requisitions = inventory_crud.get_all_requisitions(db, branch_id=branch_id, skip=skip, limit=limit, status=status)
+
     result = []
     for req in requisitions:
         # Items already loaded via eager loading
@@ -1340,9 +1490,16 @@ def update_requisition_status(
     requisition_id: int,
     status: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
+    # Verify requisition belongs to branch
+    requisition = db.query(StockRequisition).filter(StockRequisition.id == requisition_id, StockRequisition.branch_id == branch_id).first()
+    if not requisition:
+        raise HTTPException(status_code=404, detail="Requisition not found in this branch")
+        
     requisition = inventory_crud.update_requisition_status(db, requisition_id, status, approved_by=current_user.id)
+
     if not requisition:
         raise HTTPException(status_code=404, detail="Requisition not found")
     return {"message": "Requisition status updated successfully", "status": requisition.status}
@@ -1356,7 +1513,6 @@ def approve_requisition_quantities(
     current_user: User = Depends(get_current_user)
 ):
     """Update approved quantities for requisition details"""
-    from app.models.inventory import StockRequisitionDetail
     for detail_id, approved_qty in approved_quantities.items():
         detail = db.query(StockRequisitionDetail).filter(StockRequisitionDetail.id == detail_id).first()
         if detail and detail.requisition_id == requisition_id:
@@ -1368,10 +1524,14 @@ def approve_requisition_quantities(
 @router.get("/stocks", response_model=List[dict])
 def get_all_stocks(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
-    from app.models.inventory import LocationStock
-    stocks = db.query(LocationStock).filter(LocationStock.quantity > 0).all()
+    stocks_q = db.query(LocationStock).filter(LocationStock.quantity > 0)
+    if branch_id is not None:
+        stocks_q = stocks_q.filter(LocationStock.branch_id == branch_id)
+    stocks = stocks_q.all()
+
     result = []
     for s in stocks:
         result.append({
@@ -1387,11 +1547,13 @@ def get_all_stocks(
 def create_issue(
     issue: StockIssueCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     try:
         issue_data = issue.model_dump()
-        created = inventory_crud.create_stock_issue(db, issue_data, issued_by=current_user.id)
+        created = inventory_crud.create_stock_issue(db, issue_data, branch_id=branch_id, issued_by=current_user.id)
+
         
         # Optimized: Batch load to avoid N+1 queries
         issuer = db.query(User).filter(User.id == created.issued_by).first()
@@ -1446,10 +1608,12 @@ def get_issues(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
     """Optimized with eager loading - no N+1 queries"""
-    issues = inventory_crud.get_all_issues(db, skip=skip, limit=limit)
+    issues = inventory_crud.get_all_issues(db, branch_id=branch_id, skip=skip, limit=limit)
+
     result = []
     for issue in issues:
         # Locations and items already loaded via eager loading
@@ -1489,9 +1653,10 @@ def update_issue_detail(
     """Update issue detail payable/paid status"""
     from app.models.inventory import StockIssueDetail
     
-    detail = db.query(StockIssueDetail).filter(
+    detail = db.query(StockIssueDetail).join(StockIssue).filter(
         StockIssueDetail.id == detail_id,
-        StockIssueDetail.issue_id == issue_id
+        StockIssueDetail.issue_id == issue_id,
+        StockIssue.branch_id == branch_id
     ).first()
     
     if not detail:
@@ -1561,8 +1726,10 @@ def create_waste_log(
     notes: Optional[str] = Form(None),
     photo: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
+
     try:
         from datetime import datetime as dt
         
@@ -1590,7 +1757,7 @@ def create_waste_log(
         
         # Handle photo upload
         if photo and photo.filename:
-            WASTE_UPLOAD_DIR = "uploads/waste_logs"
+            WASTE_UPLOAD_DIR = os.path.join(_UPLOAD_ROOT, "waste_logs")
             os.makedirs(WASTE_UPLOAD_DIR, exist_ok=True)
             filename = f"waste_{uuid.uuid4().hex}_{photo.filename}"
             file_path = os.path.join(WASTE_UPLOAD_DIR, filename)
@@ -1598,7 +1765,8 @@ def create_waste_log(
                 shutil.copyfileobj(photo.file, buffer)
             waste_data["photo_path"] = f"uploads/waste_logs/{filename}".replace("\\", "/")
         
-        created = inventory_crud.create_waste_log(db, waste_data, reported_by=current_user.id)
+        created = inventory_crud.create_waste_log(db, waste_data, branch_id=branch_id, reported_by=current_user.id)
+
         
         # Load relationships for response
         reporter = db.query(User).filter(User.id == created.reported_by).first()
@@ -1606,9 +1774,9 @@ def create_waste_log(
         food_item = None
         if created.food_item_id:
             from app.models.food_item import FoodItem
-            food_item = db.query(FoodItem).filter(FoodItem.id == created.food_item_id).first()
+            food_item = db.query(FoodItem).filter(FoodItem.id == created.food_item_id, FoodItem.branch_id == branch_id).first()
             
-        location = inventory_crud.get_location_by_id(db, created.location_id) if created.location_id else None
+        location = db.query(Location).filter(Location.id == created.location_id, (Location.branch_id == branch_id if branch_id is not None else True)).first() if created.location_id else None
         
         return {
             **created.__dict__,
@@ -1632,15 +1800,20 @@ def get_waste_logs(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
     """Optimized with eager loading"""
     from app.models.inventory import WasteLog
     from sqlalchemy.orm import joinedload
-    waste_logs = db.query(WasteLog).options(
+    query = db.query(WasteLog).options(
         joinedload(WasteLog.item),
         joinedload(WasteLog.location)
-    ).order_by(WasteLog.created_at.desc()).offset(skip).limit(limit).all()
+    )
+    if branch_id is not None:
+        query = query.filter(WasteLog.branch_id == branch_id)
+        
+    waste_logs = query.order_by(WasteLog.created_at.desc()).offset(skip).limit(limit).all()
     
     result = []
     for log in waste_logs:
@@ -1650,7 +1823,10 @@ def get_waste_logs(
         
         if log.is_food_item and not item_name:
              from app.models.food_item import FoodItem
-             food_item = db.query(FoodItem).filter(FoodItem.id == log.food_item_id).first()
+             fi_query = db.query(FoodItem).filter(FoodItem.id == log.food_item_id)
+             if branch_id is not None:
+                 fi_query = fi_query.filter(FoodItem.branch_id == branch_id)
+             food_item = fi_query.first()
              if food_item:
                  food_item_name = food_item.name
                  
@@ -1670,19 +1846,22 @@ def get_waste_logs(
 def create_location(
     location: LocationCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     location_data = location.model_dump()
-    created = inventory_crud.create_location(db, location_data)
+    created = inventory_crud.create_location(db, location_data, branch_id=branch_id)
+
     return created
 
 
-@router.get("/locations", response_model=List[dict])
+@router.get("/locations", response_model=List[LocationOut])
 def get_locations(
     skip: int = 0,
     limit: int = 10000,  # Increased limit to show all rooms
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
     # Auto-sync rooms to locations
     from app.models.room import Room
@@ -1690,86 +1869,108 @@ def get_locations(
     from sqlalchemy import or_
     
     # Optimized: Only sync if there are unsynced rooms (performance optimization)
-    unsynced_count = db.query(Room).filter(Room.inventory_location_id == None).count()
-    
-    if unsynced_count > 0:
-        # Auto-sync rooms to locations (batch operation for better performance)
-        try:
-            rooms_to_sync = db.query(Room).filter(Room.inventory_location_id == None).all()
-            
-            for room in rooms_to_sync:
-                try:
-                    # Check if location already exists for this room
-                    existing_location = db.query(Location).filter(
-                        or_(
-                            Location.name == f"Room {room.number}",
-                            Location.room_area == f"Room {room.number}"
-                        ),
-                        Location.location_type == "GUEST_ROOM"
-                    ).first()
-                    
-                    if not existing_location:
-                        # Create new location for room
-                        location_data = {
-                            "name": f"Room {room.number}",
-                            "building": "Main Building",
-                            "floor": None,
-                            "room_area": f"Room {room.number}",
-                            "location_type": "GUEST_ROOM",
-                            "is_inventory_point": False,
-                            "description": f"Guest room {room.number} - {room.type or 'Standard'}",
-                            "is_active": (room.status != "Deleted" if room.status else True)
-                        }
-                        location = inventory_crud.create_location(db, location_data)
-                        room.inventory_location_id = location.id
-                        db.commit()
-                    else:
-                        # Link room to existing location
-                        room.inventory_location_id = existing_location.id
-                        db.commit()
-                except Exception as e:
-                    # Skip this room and continue
-                    db.rollback()
-                    print(f"Warning: Could not sync room {room.number}: {str(e)}")
-                    continue
-        except Exception as e:
-            # If sync fails completely, just log and continue
-            print(f"Warning: Room sync skipped: {str(e)}")
+    # Only sync rooms for a specific branch. Skip if superadmin/enterprise view (branch_id=None)
+    if branch_id is not None:
+        unsynced_count = db.query(Room).filter(Room.inventory_location_id == None, Room.branch_id == branch_id).count()
+        
+        if unsynced_count > 0:
+            # Auto-sync rooms to locations (batch operation for better performance)
             try:
-                db.rollback()
-            except:
-                pass
+                rooms_to_sync = db.query(Room).filter(Room.inventory_location_id == None, Room.branch_id == branch_id).all()
+                
+                for room in rooms_to_sync:
+                    try:
+                        # Check if location already exists for this room
+                        existing_location = db.query(Location).filter(
+                            or_(
+                                Location.name == f"Room {room.number}",
+                                Location.room_area == f"Room {room.number}"
+                            ),
+                            Location.location_type == "GUEST_ROOM",
+                            (Location.branch_id == branch_id if branch_id is not None else True)
+                        ).first()
+                        
+                        if not existing_location:
+                            # Create new location for room
+                            location_data = {
+                                "name": f"Room {room.number}",
+                                "building": "Main Building",
+                                "floor": None,
+                                "room_area": f"Room {room.number}",
+                                "location_type": "GUEST_ROOM",
+                                "is_inventory_point": False,
+                                "description": f"Guest room {room.number} - {room.type or 'Standard'}",
+                                "is_active": (room.status != "Deleted" if room.status else True)
+                            }
+                            location = inventory_crud.create_location(db, location_data, branch_id=branch_id)
+
+                            room.inventory_location_id = location.id
+                            db.commit()
+                        else:
+                            # Link room to existing location
+                            room.inventory_location_id = existing_location.id
+                            db.commit()
+                    except Exception as e:
+                        # Skip this room and continue
+                        db.rollback()
+                        print(f"Warning: Could not sync room {room.number}: {str(e)}")
+                        continue
+            except Exception as e:
+                # If sync fails completely, just log and continue
+                print(f"Warning: Room sync skipped: {str(e)}")
+                try:
+                    db.rollback()
+                except:
+                    pass
     
     # Now fetch all locations (optimized with eager loading)
     from sqlalchemy.orm import joinedload
     from sqlalchemy import func
     from app.models.inventory import LocationStock, InventoryItem, AssetRegistry
     
-    locations = db.query(Location).options(
-        joinedload(Location.parent_location)
-    ).filter(Location.is_active == True).offset(skip).limit(limit).all()
+    loc_query = db.query(Location).options(
+        joinedload(Location.parent_location),
+        joinedload(Location.branch)
+    ).filter(Location.is_active == True)
+    
+    # Scope by branch if not enterprise view
+    if branch_id is not None:
+        loc_query = loc_query.filter(Location.branch_id == branch_id)
+    
+    locations = loc_query.offset(skip).limit(limit).all()
+
     
     # Bulk Calculate Stats (Optimization)
     
     # 1. Consumables (LocationStock)
-    stock_stats = db.query(
+    stock_query = db.query(
         LocationStock.location_id,
         func.count(LocationStock.id),
         func.sum(LocationStock.quantity * InventoryItem.unit_price)
     ).join(InventoryItem, LocationStock.item_id == InventoryItem.id)\
-     .filter(LocationStock.quantity > 0)\
-     .group_by(LocationStock.location_id).all()
+     .filter(LocationStock.quantity > 0)
+    
+    if branch_id is not None:
+        stock_query = stock_query.filter(LocationStock.branch_id == branch_id)
+    
+    stock_stats = stock_query.group_by(LocationStock.location_id).all()
+
      
     stock_map = {loc_id: {"count": c, "value": v or 0} for loc_id, c, v in stock_stats}
     
     # 2. Fixed Assets (AssetRegistry) - Include these in value/count
-    asset_stats = db.query(
+    asset_query = db.query(
         AssetRegistry.current_location_id,
         func.count(AssetRegistry.id),
         func.sum(InventoryItem.unit_price)
     ).join(InventoryItem, AssetRegistry.item_id == InventoryItem.id)\
-     .filter(AssetRegistry.status == 'active')\
-     .group_by(AssetRegistry.current_location_id).all()
+     .filter(AssetRegistry.status == 'active')
+    
+    if branch_id is not None:
+        asset_query = asset_query.filter(AssetRegistry.branch_id == branch_id)
+    
+    asset_stats = asset_query.group_by(AssetRegistry.current_location_id).all()
+
      
     asset_map = {loc_id: {"count": c, "value": v or 0} for loc_id, c, v in asset_stats}
     
@@ -1793,7 +1994,9 @@ def get_locations(
             "total_items": total_items,
             "total_value": total_value,
             "asset_count": a_data["count"],
-            "consumable_count": s_data["count"]
+            "consumable_count": s_data["count"],
+            "branch_id": loc.branch_id,
+            "branch_name": loc.branch.name if loc.branch else "Main"
         })
     return result
 
@@ -1805,10 +2008,12 @@ def get_location_items(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
-    """Get all inventory items and their stock levels for a specific location"""
-    from app.models.inventory import InventoryItem, AssetMapping, AssetRegistry, StockIssueDetail, StockIssue, LocationStock, WasteLog
+    """Get all inventory items and their stock levels for a specific location in this branch"""
+
+    from app.models.inventory import InventoryItem, AssetMapping, AssetRegistry, StockIssueDetail, StockIssue, LocationStock, WasteLog, Location
     from app.models.booking import Booking
     from app.models.Package import PackageBooking
     from sqlalchemy import func
@@ -1823,19 +2028,19 @@ def get_location_items(
     if booking_id:
         try:
             # Handle display ID BK-000001 or PK-000001
-            working_id = booking_id
-            is_package = False
-            if "-" in str(booking_id):
-                parts = str(booking_id).split("-")
-                working_id = int(parts[1])
-                is_package = parts[0].upper() == "PK"
+            numeric_id, booking_type = parse_display_id(str(booking_id))
+            if numeric_id:
+                working_id = numeric_id
+                is_package = (booking_type == 'package')
             else:
                 working_id = int(booking_id)
+                is_package = False
             
             if is_package:
-                b = db.query(PackageBooking).filter(PackageBooking.id == working_id).first()
+                b = db.query(PackageBooking).filter(PackageBooking.id == working_id, PackageBooking.branch_id == branch_id).first()
             else:
-                b = db.query(Booking).filter(Booking.id == working_id).first()
+                b = db.query(Booking).filter(Booking.id == working_id, Booking.branch_id == branch_id).first()
+
             
             if b:
                 filter_start = b.checked_in_at or b.check_in
@@ -1868,27 +2073,34 @@ def get_location_items(
         if isinstance(filter_end, datetime):
             filter_end = filter_end.replace(hour=23, minute=59, second=59)
     
-    location = inventory_crud.get_location_by_id(db, location_id)
+    location = db.query(Location).filter(Location.id == location_id, (Location.branch_id == branch_id if branch_id is not None else True)).first()
     if not location:
-        raise HTTPException(status_code=404, detail="Location not found")
+        raise HTTPException(status_code=404, detail="Location not found in this branch")
+
     
     # 1. Get items from LocationStock (Primary Source for bulk items)
     # 1. Get items from LocationStock (Primary Source for bulk items)
     location_stocks = db.query(LocationStock).filter(
-        LocationStock.location_id == location_id
+        LocationStock.location_id == location_id,
+        LocationStock.branch_id == branch_id
     ).all()
+
     
     # 2. Get items assigned to this location via asset mappings
     asset_mappings = db.query(AssetMapping).filter(
         AssetMapping.location_id == location_id,
-        AssetMapping.is_active == True
+        AssetMapping.is_active == True,
+        AssetMapping.branch_id == branch_id
     ).all()
+
     
     # 3. Get items from asset registry (Only active/in_stock assets should count as current location stock)
     asset_registry = db.query(AssetRegistry).filter(
         AssetRegistry.current_location_id == location_id,
-        AssetRegistry.status.in_(["active", "in_stock", "In Stock"])
+        AssetRegistry.status.in_(["active", "in_stock", "In Stock"]),
+        AssetRegistry.branch_id == branch_id
     ).all()
+
     
     # Combine all items
     items_dict = {}
@@ -1910,8 +2122,10 @@ def get_location_items(
             # that might overlap on the same day due to loose date filtering.
             issue_query = db.query(StockIssueDetail).join(StockIssue).filter(
                 StockIssue.destination_location_id == location_id,
-                StockIssueDetail.item_id == item.id
+                StockIssueDetail.item_id == item.id,
+                StockIssue.branch_id == branch_id
             )
+
             
             # Use working_id (numeric ID) derived from booking_id prefix parsing if available
             w_id = None
@@ -1937,7 +2151,14 @@ def get_location_items(
 
             # Post-filter: If we have a booking context, exclude records that explicitly belong to OTHER bookings (in notes)
             if w_id:
-                display_id_patterns = [f"BK-{str(w_id).zfill(6)}", f"PK-{str(w_id).zfill(6)}", f"#{w_id}", f"BK-{w_id}", f"PK-{w_id}"]
+                # Include new branch-scoped format and old format patterns
+                display_id_patterns = [
+                    format_display_id(w_id, branch_id=branch_id, is_package=False),
+                    format_display_id(w_id, branch_id=branch_id, is_package=True),
+                    f"BK-{str(w_id).zfill(6)}", 
+                    f"PK-{str(w_id).zfill(6)}", 
+                    f"#{w_id}"
+                ]
                 issue_details = []
                 for d in issue_details_all:
                     if d.issue.booking_id == w_id:
@@ -2235,8 +2456,10 @@ def get_location_items(
         joinedload(StockIssue.details).joinedload(StockIssueDetail.item),
         joinedload(StockIssue.issuer)
     ).filter(
-        StockIssue.destination_location_id == location_id
+        StockIssue.destination_location_id == location_id,
+        StockIssue.branch_id == branch_id
     )
+
     
     if filter_start:
         stock_issues_in_query = stock_issues_in_query.filter(StockIssue.issue_date >= filter_start)
@@ -2266,8 +2489,10 @@ def get_location_items(
         joinedload(StockIssue.issuer),
         joinedload(StockIssue.destination_location)
     ).filter(
-        StockIssue.source_location_id == location_id
+        StockIssue.source_location_id == location_id,
+        StockIssue.branch_id == branch_id
     )
+
     
     if filter_start:
         stock_issues_out_query = stock_issues_out_query.filter(StockIssue.issue_date >= filter_start)
@@ -2298,8 +2523,10 @@ def get_location_items(
         joinedload(WasteLog.food_item),
         joinedload(WasteLog.reporter)
     ).filter(
-        WasteLog.location_id == location_id
+        WasteLog.location_id == location_id,
+        WasteLog.branch_id == branch_id
     )
+
     
     if filter_start:
         waste_logs_query = waste_logs_query.filter(WasteLog.waste_date >= filter_start)
@@ -2332,6 +2559,10 @@ def get_location_items(
         PurchaseMaster.destination_location_id == location_id,
         PurchaseMaster.status == "received"
     )
+    
+    if branch_id is not None:
+        purchases_query = purchases_query.filter(PurchaseMaster.branch_id == branch_id)
+
     
     if filter_start:
         purchases_query = purchases_query.filter(PurchaseMaster.updated_at >= filter_start)
@@ -2394,8 +2625,10 @@ def get_location_items(
             joinedload(InventoryTransaction.user)
         ).filter(
             InventoryTransaction.item_id.in_(location_item_ids),
-            InventoryTransaction.created_at >= (datetime.now() - timedelta(days=30))
+            InventoryTransaction.created_at >= (datetime.now() - timedelta(days=30)),
+            InventoryTransaction.branch_id == branch_id
         ).all()
+
 
     # Iterate and filter manually for this location context
     existing_refs = set(item['reference'] for item in history if item.get('reference'))
@@ -2452,7 +2685,7 @@ def get_location_items(
             if 'b' in locals() and b:
                 booking_metadata = {
                     "booking_id": b.id,
-                    "display_id": getattr(b, 'display_id', f"BK-{str(b.id).zfill(6)}"),
+                    "display_id": getattr(b, 'display_id', format_display_id(b.id, branch_id=branch_id)),
                     "guest_name": b.guest_name,
                     "guest_id": getattr(b, 'user_id', None),
                     "check_in": b.check_in,
@@ -2482,8 +2715,10 @@ def get_location_items(
 @router.get("/stock-by-location")
 def get_stock_by_location(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
+
     """Get inventory stock summary grouped by location - OPTIMIZED"""
     from app.models.inventory import Location, AssetMapping, AssetRegistry, LocationStock, InventoryItem, InventoryCategory
     from sqlalchemy import func
@@ -2491,32 +2726,45 @@ def get_stock_by_location(
     
     try:
         # 1. Fetch all locations at once
-        locations = inventory_crud.get_all_locations(db, skip=0, limit=1000)
+        locations = inventory_crud.get_all_locations(db, branch_id=branch_id, skip=0, limit=1000)
+
         location_ids = [loc.id for loc in locations]
         location_map = {loc.id: loc for loc in locations}
         
         # 2. Bulk fetch all LocationStock with eager loading
-        all_location_stocks = db.query(LocationStock).options(
+        stock_query = db.query(LocationStock).options(
             joinedload(LocationStock.item),
             joinedload(LocationStock.location)
         ).filter(
             LocationStock.location_id.in_(location_ids)
-        ).all()
+        )
+        if branch_id is not None:
+             stock_query = stock_query.filter(LocationStock.branch_id == branch_id)
+        all_location_stocks = stock_query.all()
+
         
         # 3. Bulk fetch all AssetMappings
-        all_asset_mappings = db.query(AssetMapping).options(
+        asset_q = db.query(AssetMapping).options(
             joinedload(AssetMapping.item)
         ).filter(
             AssetMapping.location_id.in_(location_ids),
             AssetMapping.is_active == True
-        ).all()
+        )
+        if branch_id is not None:
+             asset_q = asset_q.filter(AssetMapping.branch_id == branch_id)
+        all_asset_mappings = asset_q.all()
+
         
         # 4. Bulk fetch all AssetRegistry
-        all_registry_items = db.query(AssetRegistry).options(
+        registry_q = db.query(AssetRegistry).options(
             joinedload(AssetRegistry.item)
         ).filter(
             AssetRegistry.current_location_id.in_(location_ids)
-        ).all()
+        )
+        if branch_id is not None:
+            registry_q = registry_q.filter(AssetRegistry.branch_id == branch_id)
+        all_registry_items = registry_q.all()
+
         
         # 5. Bulk fetch all categories for items
         item_ids = set()
@@ -2622,15 +2870,18 @@ def get_stock_by_location(
 @router.post("/locations/sync-rooms")
 def sync_rooms_to_locations(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
+
     """Synchronize existing rooms from rooms table to locations table for inventory"""
     from app.models.room import Room
     from app.models.inventory import Location
     from app.curd import inventory as inventory_crud
     
     try:
-        rooms = db.query(Room).all()
+        rooms = db.query(Room).filter(Room.branch_id == branch_id).all()
+
         synced_count = 0
         created_count = 0
         linked_count = 0
@@ -2643,8 +2894,10 @@ def sync_rooms_to_locations(
                     Location.name == f"Room {room.number}",
                     Location.room_area == f"Room {room.number}"
                 ),
-                Location.location_type == "GUEST_ROOM"
+                Location.location_type == "GUEST_ROOM",
+                (Location.branch_id == branch_id if branch_id is not None else True)
             ).first()
+
             
             if existing_location:
                 # Link room to existing location
@@ -2665,7 +2918,8 @@ def sync_rooms_to_locations(
                     "is_active": (room.status != "Deleted" if room.status else True)
                 }
                 try:
-                    location = inventory_crud.create_location(db, location_data)
+                    location = inventory_crud.create_location(db, location_data, branch_id=branch_id)
+
                     
                     # Link room to location
                     room.inventory_location_id = location.id
@@ -2675,7 +2929,8 @@ def sync_rooms_to_locations(
                     db.rollback()
                     # Location might already exist, try to find and link
                     existing = db.query(Location).filter(
-                        Location.name == f"Room {room.number}"
+                        Location.name == f"Room {room.number}",
+                        (Location.branch_id == branch_id if branch_id is not None else True)
                     ).first()
                     if existing and not room.inventory_location_id:
                         room.inventory_location_id = existing.id
@@ -2703,17 +2958,19 @@ def sync_rooms_to_locations(
 def create_asset_mapping(
     mapping: AssetMappingCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     try:
         mapping_data = mapping.model_dump()
-        created = inventory_crud.create_asset_mapping(db, mapping_data, assigned_by=current_user.id)
+        created = inventory_crud.create_asset_mapping(db, mapping_data, branch_id=branch_id, assigned_by=current_user.id)
+
         
         
         # Load relationships for response
         assigner = db.query(User).filter(User.id == created.assigned_by).first()
         item = inventory_crud.get_item_by_id(db, created.item_id)
-        location = inventory_crud.get_location_by_id(db, created.location_id)
+        location = db.query(Location).filter(Location.id == created.location_id, (Location.branch_id == branch_id if branch_id is not None else True)).first()
         
         # Construct location name safely
         location_name = None
@@ -2759,13 +3016,18 @@ def get_asset_mappings(
     location_id: Optional[int] = None,
     is_fixed_asset: Optional[bool] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
+
     from app.models.inventory import AssetMapping, InventoryItem, LocationStock, Location
     from sqlalchemy import or_
 
     # 1. Fetch Real Mappings
-    mapping_query = db.query(AssetMapping).join(InventoryItem)
+    mapping_query = db.query(AssetMapping).join(InventoryItem).filter(AssetMapping.is_active == True)
+    if branch_id is not None:
+        mapping_query = mapping_query.filter(AssetMapping.branch_id == branch_id)
+
     if location_id:
         mapping_query = mapping_query.filter(AssetMapping.location_id == location_id)
     if is_fixed_asset is not None:
@@ -2774,7 +3036,8 @@ def get_asset_mappings(
     real_mappings = mapping_query.all()
     
     # 2. Fetch Location Stock
-    stock_query = db.query(LocationStock).join(InventoryItem).join(Location)
+    stock_query = db.query(LocationStock).filter(LocationStock.branch_id == branch_id).join(InventoryItem).join(Location)
+
     if location_id:
         stock_query = stock_query.filter(LocationStock.location_id == location_id)
     else:
@@ -2810,7 +3073,7 @@ def get_asset_mappings(
     
     # Add Real Mappings
     for m in real_mappings:
-        location = inventory_crud.get_location_by_id(db, m.location_id)
+        location = db.query(Location).filter(Location.id == m.location_id, (Location.branch_id == branch_id if branch_id is not None else True)).first()
         # Skip if location is inventory point AND NOT a Guest Room (unless specific location requested)
         if not location_id and location and location.is_inventory_point and location.location_type != "GUEST_ROOM":
             continue
@@ -2850,7 +3113,7 @@ def get_asset_mappings(
             
             # Ensure location name is available
             if not location:
-                location = inventory_crud.get_location_by_id(db, loc_id)
+                location = db.query(Location).filter(Location.id == loc_id, (Location.branch_id == branch_id if branch_id is not None else True)).first()
             
             # Prioritize location.name (e.g., "Room 101"), fallback to building-room_area format
             if location.name:
@@ -2891,9 +3154,16 @@ def update_asset_mapping(
     mapping_id: int,
     update_data: AssetMappingUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
+    # Verify mapping belongs to branch
+    mapping = db.query(AssetMapping).filter(AssetMapping.id == mapping_id, AssetMapping.branch_id == branch_id).first()
+    if not mapping:
+        raise HTTPException(status_code=404, detail="Asset Mapping not found in this branch")
+        
     data = update_data.model_dump(exclude_unset=True)
+
     updated = inventory_crud.update_asset_mapping(db, mapping_id, data)
     
     if not updated:
@@ -2902,7 +3172,7 @@ def update_asset_mapping(
     # Load relationships for response
     assigner = db.query(User).filter(User.id == updated.assigned_by).first() if updated.assigned_by else None
     item = inventory_crud.get_item_by_id(db, updated.item_id)
-    location = inventory_crud.get_location_by_id(db, updated.location_id)
+    location = db.query(Location).filter(Location.id == updated.location_id, (Location.branch_id == branch_id if branch_id is not None else True)).first()
     
     return {
         **updated.__dict__,
@@ -2917,10 +3187,36 @@ def unassign_asset(
     mapping_id: int,
     destination_location_id: Optional[int] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
+    from app.models.inventory import AssetMapping, LocationStock
+    
+    # Handle Virtual Mapping (Negative ID implies it refers to LocationStock ID)
+    if mapping_id < 0:
+        stock_id = abs(mapping_id)
+        stock_check = db.query(LocationStock).filter(LocationStock.id == stock_id).first()
+        if not stock_check:
+             raise HTTPException(status_code=404, detail="Virtual Asset Mapping (Stock) not found")
+        
+        if branch_id is not None and stock_check.branch_id != branch_id:
+             raise HTTPException(status_code=403, detail="Access denied for this branch's stock")
+        
+        # Virtual mappings are always "active" if they exist in stock
+        mapping_check = stock_check
+    else:
+        # Verify mapping exists and belongs to branch (if branch_id is provided)
+        query = db.query(AssetMapping).filter(AssetMapping.id == mapping_id)
+        if branch_id is not None:
+            query = query.filter(AssetMapping.branch_id == branch_id)
+        
+        mapping_check = query.first()
+        if not mapping_check:
+            raise HTTPException(status_code=404, detail="Asset Mapping not found or access denied for this branch")
+        
     try:
-        mapping = inventory_crud.unassign_asset(db, mapping_id, destination_location_id=destination_location_id)
+        mapping = inventory_crud.unassign_asset(db, mapping_id, destination_location_id=destination_location_id, unassigned_by=current_user.id)
+
         if not mapping:
             raise HTTPException(status_code=404, detail="Asset mapping not found")
         return {"message": "Asset unassigned successfully"}
@@ -2936,14 +3232,16 @@ def unassign_asset(
 def create_asset_registry(
     asset: AssetRegistryCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     asset_data = asset.model_dump()
-    created = inventory_crud.create_asset_registry(db, asset_data, created_by=current_user.id)
+    created = inventory_crud.create_asset_registry(db, asset_data, branch_id=branch_id, created_by=current_user.id)
+
     
     # Load relationships for response
     item = inventory_crud.get_item_by_id(db, created.item_id)
-    location = inventory_crud.get_location_by_id(db, created.current_location_id) if created.current_location_id else None
+    location = db.query(Location).filter(Location.id == created.current_location_id, (Location.branch_id == branch_id if branch_id is not None else True)).first() if created.current_location_id else None
     
     return {
         **created.__dict__,
@@ -2959,13 +3257,15 @@ def get_asset_registry(
     location_id: Optional[int] = None,
     status: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
-    assets = inventory_crud.get_all_asset_registry(db, skip=skip, limit=limit, location_id=location_id, status=status)
+    assets = inventory_crud.get_all_asset_registry(db, branch_id=branch_id, skip=skip, limit=limit, location_id=location_id, status=status)
+
     result = []
     for asset in assets:
         item = inventory_crud.get_item_by_id(db, asset.item_id)
-        location = inventory_crud.get_location_by_id(db, asset.current_location_id) if asset.current_location_id else None
+        location = db.query(Location).filter(Location.id == asset.current_location_id, (Location.branch_id == branch_id if branch_id is not None else True)).first() if asset.current_location_id else None
         result.append({
             **asset.__dict__,
             "item_name": item.name if item else None,
@@ -2975,13 +3275,19 @@ def get_asset_registry(
 
 
 @router.get("/asset-registry/{asset_id}", response_model=AssetRegistryOut)
-def get_asset_registry_by_id(asset_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    asset = inventory_crud.get_asset_registry_by_id(db, asset_id)
+def get_asset_registry_by_id(
+    asset_id: int, 
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
+):
+    asset = db.query(AssetRegistry).filter(AssetRegistry.id == asset_id, AssetRegistry.branch_id == branch_id).first()
+
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
     
     item = inventory_crud.get_item_by_id(db, asset.item_id)
-    location = inventory_crud.get_location_by_id(db, asset.current_location_id) if asset.current_location_id else None
+    location = db.query(Location).filter(Location.id == asset.current_location_id, (Location.branch_id == branch_id if branch_id is not None else True)).first() if asset.current_location_id else None
     
     return {
         **asset.__dict__,
@@ -2995,15 +3301,22 @@ def update_asset_registry(
     asset_id: int,
     asset_update: AssetRegistryUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
+    # Verify asset belongs to branch
+    asset_check = db.query(AssetRegistry).filter(AssetRegistry.id == asset_id, AssetRegistry.branch_id == branch_id).first()
+    if not asset_check:
+        raise HTTPException(status_code=404, detail="Asset not found in this branch")
+        
     asset_data = asset_update.model_dump(exclude_unset=True)
+
     updated = inventory_crud.update_asset_registry(db, asset_id, asset_data)
     if not updated:
         raise HTTPException(status_code=404, detail="Asset not found")
     
     item = inventory_crud.get_item_by_id(db, updated.item_id)
-    location = inventory_crud.get_location_by_id(db, updated.current_location_id) if updated.current_location_id else None
+    location = db.query(Location).filter(Location.id == updated.current_location_id, (Location.branch_id == branch_id if branch_id is not None else True)).first() if updated.current_location_id else None
     
     return {
         **updated.__dict__,
@@ -3017,9 +3330,11 @@ def update_asset_registry(
 def create_stock_requisition(
     requisition: StockRequisitionCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
-    return inventory_crud.create_stock_requisition(db, requisition, requested_by_id=current_user.id)
+    return inventory_crud.create_stock_requisition(db, requisition, branch_id=branch_id, requested_by_id=current_user.id)
+
 
 
 @router.get("/requisitions", response_model=List[StockRequisitionOut])
@@ -3028,18 +3343,22 @@ def get_stock_requisitions(
     limit: int = 100,
     status: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
-    return inventory_crud.get_all_stock_requisitions(db, skip=skip, limit=limit, status=status)
+    return inventory_crud.get_all_stock_requisitions(db, branch_id=branch_id, skip=skip, limit=limit, status=status)
+
 
 
 @router.get("/requisitions/{requisition_id}", response_model=StockRequisitionOut)
 def get_stock_requisition(
     requisition_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
-    requisition = inventory_crud.get_stock_requisition_by_id(db, requisition_id)
+    requisition = db.query(StockRequisition).filter(StockRequisition.id == requisition_id, StockRequisition.branch_id == branch_id).first()
+
     if not requisition:
         raise HTTPException(status_code=404, detail="Requisition not found")
     return requisition
@@ -3083,20 +3402,24 @@ def get_stock_issues(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
-    return inventory_crud.get_all_stock_issues(db, skip=skip, limit=limit)
+    return inventory_crud.get_all_stock_issues(db, branch_id=branch_id, skip=skip, limit=limit)
+
 
 @router.get("/assets/registry", response_model=List[AssetRegistryOut])
 def get_all_assets_registry(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
     """Get all individual fixed asset instances"""
     from app.models.inventory import AssetRegistry
-    assets = db.query(AssetRegistry).options(
+    assets = db.query(AssetRegistry).filter(AssetRegistry.branch_id == branch_id).options(
+
         joinedload(AssetRegistry.item),
         joinedload(AssetRegistry.current_location)
     ).order_by(AssetRegistry.created_at.desc()).offset(skip).limit(limit).all()
@@ -3109,18 +3432,23 @@ def get_all_transactions(
     limit: int = 50,
     skip: int = 0,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
     """Get global transaction history"""
     from app.models.inventory import InventoryTransaction, InventoryItem
     from app.models.user import User
     
-    transactions = db.query(InventoryTransaction).options(
+    query = db.query(InventoryTransaction).options(
         joinedload(InventoryTransaction.item),
         joinedload(InventoryTransaction.user),
         joinedload(InventoryTransaction.source_location),
         joinedload(InventoryTransaction.destination_location)
-    ).order_by(InventoryTransaction.created_at.desc()).offset(skip).limit(limit).all()
+    )
+    if branch_id is not None:
+        query = query.filter(InventoryTransaction.branch_id == branch_id)
+        
+    transactions = query.order_by(InventoryTransaction.created_at.desc()).offset(skip).limit(limit).all()
     
     result = []
     for txn in transactions:
@@ -3140,8 +3468,10 @@ def get_all_transactions(
 def get_item_transactions(
     item_id: int, 
     db: Session = Depends(get_db), 
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
+
     """
     Get all transactions for a specific item to show history/audit trail.
     """
@@ -3158,9 +3488,10 @@ def get_item_transactions(
             joinedload(InventoryTransaction.source_location),
             joinedload(InventoryTransaction.destination_location)
         )\
-        .filter(InventoryTransaction.item_id == item_id)\
+        .filter(InventoryTransaction.item_id == item_id, InventoryTransaction.branch_id == branch_id)\
         .order_by(InventoryTransaction.created_at.desc())\
         .all()
+
     
     # Enrich with details if needed (User name, Reference context)
     # The response model InventoryTransactionOut should handle basic fields.
@@ -3184,8 +3515,10 @@ def get_item_transactions(
 def fix_item_stock(
     item_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
+
     """
     Recalculate item stock based on transaction history and update the current_stock value.
     This fixes discrepancies caused by manual edits or phantom updates.
@@ -3197,7 +3530,8 @@ def fix_item_stock(
         raise HTTPException(status_code=404, detail="Item not found")
         
     # Calculate stock from transaction history
-    transactions = db.query(InventoryTransaction).filter(InventoryTransaction.item_id == item_id).all()
+    transactions = db.query(InventoryTransaction).filter(InventoryTransaction.item_id == item_id, InventoryTransaction.branch_id == branch_id).all()
+
     
     calculated_stock = 0.0
     for txn in transactions:
@@ -3219,16 +3553,20 @@ def fix_item_stock(
         **item.__dict__,
         "category_name": category.name if category else None,
         "department": category.parent_department if category else None,
-        "is_low_stock": item.current_stock <= item.min_stock_level if item.min_stock_level else False
+        "is_low_stock": item.current_stock <= item.min_stock_level if item.min_stock_level else False,
+        "branch_id": branch_id
     }
+
 
 
 @router.post("/adjustments")
 def create_stock_adjustment(
     adjustment: StockAdjustmentCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
+
     from app.models.inventory import InventoryItem, LocationStock, InventoryTransaction
     
     item = db.query(InventoryItem).filter(InventoryItem.id == adjustment.item_id).first()
@@ -3237,8 +3575,10 @@ def create_stock_adjustment(
         
     loc_stock = db.query(LocationStock).filter(
         LocationStock.location_id == adjustment.location_id,
-        LocationStock.item_id == adjustment.item_id
+        LocationStock.item_id == adjustment.item_id,
+        LocationStock.branch_id == branch_id
     ).first()
+
     
     current_qty = loc_stock.quantity if loc_stock else 0.0
     actual_qty = float(adjustment.actual_stock)
@@ -3265,8 +3605,10 @@ def create_stock_adjustment(
         created_by=current_user.id,
         reference_number=f"ADJ-{datetime.now().strftime('%Y%m%d%H%M')}",
         source_location_id=adjustment.location_id if diff < 0 else None,
-        destination_location_id=adjustment.location_id if diff > 0 else None
+        destination_location_id=adjustment.location_id if diff > 0 else None,
+        branch_id=branch_id
     )
+
     db.add(trx)
     
     # Update Location Stock
@@ -3277,7 +3619,8 @@ def create_stock_adjustment(
         new_stock = LocationStock(
             location_id=adjustment.location_id,
             item_id=adjustment.item_id,
-            quantity=actual_qty
+            quantity=actual_qty,
+            branch_id=branch_id
         )
         db.add(new_stock)
         
@@ -3294,9 +3637,11 @@ def create_stock_adjustment(
 def get_location_stock_endpoint(
     location_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
-    return inventory_crud.get_location_stock(db, location_id)
+    return inventory_crud.get_location_stock(db, location_id, branch_id=branch_id)
+
 
 
 @router.get("/recipes")
@@ -3338,11 +3683,12 @@ def get_asset_registry(
 ):
     from app.models.inventory import AssetRegistry
     
-    query = db.query(AssetRegistry)
+    query = db.query(AssetRegistry).filter(AssetRegistry.branch_id == branch_id)
     if active_only:
         query = query.filter(AssetRegistry.status != 'written_off')
         
     assets = query.offset(skip).limit(limit).all()
+
     
     result = []
     for asset in assets:
@@ -3361,15 +3707,22 @@ def get_asset_registry(
 @router.get("/laundry/items", response_model=List[LaundryLogOut])
 def get_laundry_items(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
     from app.models.inventory import LaundryLog
     from sqlalchemy.orm import joinedload
     
-    logs = db.query(LaundryLog).options(
+    query = db.query(LaundryLog).options(
         joinedload(LaundryLog.item),
         joinedload(LaundryLog.source_location)
-    ).filter(LaundryLog.status != "Returned").order_by(LaundryLog.sent_at.desc()).all()
+    ).filter(LaundryLog.status != "Returned")
+    
+    if branch_id is not None:
+        query = query.filter(LaundryLog.branch_id == branch_id)
+        
+    logs = query.order_by(LaundryLog.sent_at.desc()).all()
+
     
     result = []
     for log in logs:
@@ -3387,11 +3740,13 @@ def update_laundry_status(
     status: str,
     notes: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     from app.models.inventory import LaundryLog
     
-    log = db.query(LaundryLog).filter(LaundryLog.id == log_id).first()
+    log = db.query(LaundryLog).filter(LaundryLog.id == log_id, LaundryLog.branch_id == branch_id).first()
+
     if not log:
         raise HTTPException(status_code=404, detail="Laundry log not found")
     
@@ -3411,21 +3766,25 @@ def update_laundry_status(
     return {"message": f"Laundry status updated to {status}"}
 
 
+
 @router.post("/laundry/return-items")
 def return_laundry_items(
     log_id: int,
     target_location_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
+
     from app.models.inventory import LaundryLog, LocationStock, InventoryTransaction, Location
     
-    log = db.query(LaundryLog).filter(LaundryLog.id == log_id).first()
+    log = db.query(LaundryLog).filter(LaundryLog.id == log_id, LaundryLog.branch_id == branch_id).first()
     if not log:
         raise HTTPException(status_code=404, detail="Laundry log not found")
     
     # 1. Find Laundry Location
-    laundry_loc = db.query(Location).filter(Location.location_type == "LAUNDRY").first()
+    laundry_loc = db.query(Location).filter(Location.location_type == "LAUNDRY", (Location.branch_id == branch_id if branch_id is not None else True)).first()
+
     if not laundry_loc:
          raise HTTPException(status_code=400, detail="Laundry location not found")
 
@@ -3433,7 +3792,8 @@ def return_laundry_items(
     # Decrease Laundry stock
     laundry_stock = db.query(LocationStock).filter(
         LocationStock.location_id == laundry_loc.id,
-        LocationStock.item_id == log.item_id
+        LocationStock.item_id == log.item_id,
+        LocationStock.branch_id == branch_id
     ).first()
     
     if laundry_stock:
@@ -3442,14 +3802,16 @@ def return_laundry_items(
     # Increase Target stock
     target_stock = db.query(LocationStock).filter(
         LocationStock.location_id == target_location_id,
-        LocationStock.item_id == log.item_id
+        LocationStock.item_id == log.item_id,
+        LocationStock.branch_id == branch_id
     ).first()
     
     if not target_stock:
         target_stock = LocationStock(
             location_id=target_location_id,
             item_id=log.item_id,
-            quantity=0
+            quantity=0,
+            branch_id=branch_id
         )
         db.add(target_stock)
     
@@ -3460,7 +3822,7 @@ def return_laundry_items(
     log.returned_at = datetime.utcnow()
     
     # 4. Transaction
-    target_loc = db.query(Location).filter(Location.id == target_location_id).first()
+    target_loc = db.query(Location).filter(Location.id == target_location_id, (Location.branch_id == branch_id if branch_id is not None else True)).first()
     target_name = target_loc.name if target_loc else f"Location {target_location_id}"
     
     transaction = InventoryTransaction(
@@ -3472,8 +3834,10 @@ def return_laundry_items(
         notes=f"Returned from Laundry to {target_name}",
         created_by=current_user.id,
         source_location_id=laundry_loc.id,
-        destination_location_id=target_location_id
+        destination_location_id=target_location_id,
+        branch_id=branch_id
     )
+
     db.add(transaction)
     
     db.commit()
@@ -3483,8 +3847,10 @@ def return_laundry_items(
 @router.post("/cleanup-orphaned-assets")
 def cleanup_orphaned_asset_mappings(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
+
     """
     Cleanup endpoint to deactivate orphaned asset mappings in checked-out rooms.
     This fixes asset mappings that weren't properly deactivated during return service completion.
@@ -3493,7 +3859,8 @@ def cleanup_orphaned_asset_mappings(
     from app.models.room import Room
     
     # Find all Available rooms (checked out)
-    available_rooms = db.query(Room).filter(Room.status == "Available").all()
+    available_rooms = db.query(Room).filter(Room.status == "Available", Room.branch_id == branch_id).all()
+
     
     total_deactivated = 0
     rooms_cleaned = []
@@ -3505,7 +3872,8 @@ def cleanup_orphaned_asset_mappings(
         # Find active asset mappings in this room
         active_mappings = db.query(AssetMapping).filter(
             AssetMapping.location_id == room.inventory_location_id,
-            AssetMapping.is_active == True
+            AssetMapping.is_active == True,
+            AssetMapping.branch_id == branch_id
         ).all()
         
         if active_mappings:
@@ -3527,3 +3895,97 @@ def cleanup_orphaned_asset_mappings(
         "total_deactivated": total_deactivated,
         "rooms_cleaned": rooms_cleaned
     }
+
+
+# Inter-branch Transfer Endpoints
+@router.post("/transfers", response_model=InterBranchTransferOut)
+def create_transfer_endpoint(
+    transfer: InterBranchTransferCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
+):
+    try:
+        # Check if item exists
+        item = inventory_crud.get_item_by_id(db, transfer.item_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="Item not found")
+
+        # Check if source location exists and belongs to this branch
+        from app.models.inventory import Location
+        source_loc = db.query(Location).filter(Location.id == transfer.source_location_id, Location.branch_id == branch_id).first()
+        if not source_loc:
+            raise HTTPException(status_code=404, detail="Source location not found in this branch")
+
+        # Check if destination branch exists
+        from app.models.branch import Branch
+        dest_branch = db.query(Branch).filter(Branch.id == transfer.destination_branch_id).first()
+        if not dest_branch:
+            raise HTTPException(status_code=404, detail="Destination branch not found")
+
+        created = inventory_crud.create_inter_branch_transfer(
+            db, transfer.model_dump(), source_branch_id=branch_id, created_by=current_user.id
+        )
+        return created
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/transfers", response_model=List[InterBranchTransferOut])
+def get_transfers_endpoint(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
+):
+    transfers = inventory_crud.get_all_inter_branch_transfers(db, branch_id=branch_id, skip=skip, limit=limit)
+    result = []
+    for t in transfers:
+        result.append({
+            **t.__dict__,
+            "item_name": t.item.name if t.item else None,
+            "source_branch_name": t.source_branch.name if t.source_branch else None,
+            "destination_branch_name": t.destination_branch.name if t.destination_branch else None,
+            "source_location_name": t.source_location.name if t.source_location else None,
+            "destination_location_name": t.destination_location.name if t.destination_location else None
+        })
+    return result
+
+
+@router.patch("/transfers/{transfer_id}/status")
+def update_transfer_status_endpoint(
+    transfer_id: int,
+    status: str,
+    location_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
+):
+    """
+    Update status of a transfer.
+    - 'in_transit': Can only be done by source branch. Deducts stock.
+    - 'received': Can only be done by destination branch. Adds stock to location_id.
+    - 'cancelled': Can be done by source branch if not in transit.
+    """
+    transfer = inventory_crud.get_transfer_by_id(db, transfer_id)
+    if not transfer:
+        raise HTTPException(status_code=404, detail="Transfer not found")
+
+    if status == "in_transit":
+        if transfer.source_branch_id != branch_id:
+            raise HTTPException(status_code=403, detail="Only source branch can mark as in-transit")
+    
+    if status == "received":
+        if transfer.destination_branch_id != branch_id:
+            raise HTTPException(status_code=403, detail="Only destination branch can mark as received")
+        if not location_id:
+            raise HTTPException(status_code=400, detail="location_id is required for receipt")
+
+    updated = inventory_crud.update_transfer_status(db, transfer_id, status, location_id)
+    if not updated:
+        raise HTTPException(status_code=400, detail="Failed to update status")
+    
+    return updated
+

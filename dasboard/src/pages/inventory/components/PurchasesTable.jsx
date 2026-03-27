@@ -1,8 +1,10 @@
 import React from "react";
 import { formatDateIST } from "../../../utils/dateUtils";
 import { formatCurrency } from "../../../utils/currency";
+import { usePermissions } from "../../../hooks/usePermissions";
 
 const PurchasesTable = ({ purchases, onPurchaseClick }) => {
+    const { hasPermission } = usePermissions();
     return (
         <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
@@ -39,8 +41,12 @@ const PurchasesTable = ({ purchases, onPurchaseClick }) => {
                         purchases.map((purchase) => (
                             <tr
                                 key={purchase.id}
-                                className="hover:bg-indigo-50 cursor-pointer transition-colors"
-                                onClick={() => onPurchaseClick && onPurchaseClick(purchase)}
+                                className={`hover:bg-indigo-50 transition-colors ${hasPermission('inventory_purchase:view') ? 'cursor-pointer' : ''}`}
+                                onClick={() => {
+                                    if (hasPermission('inventory_purchase:view')) {
+                                        onPurchaseClick && onPurchaseClick(purchase);
+                                    }
+                                }}
                             >
                                 <td className="px-4 py-3 text-sm font-medium text-gray-900">
                                     {purchase.purchase_number}

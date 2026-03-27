@@ -1,8 +1,10 @@
 import React from "react";
 import { Eye } from "lucide-react";
 import { formatCurrency } from "../../../utils/currency";
+import { usePermissions } from "../../../hooks/usePermissions";
 
 const LocationStockView = ({ locations, onLocationClick }) => {
+    const { hasPermission } = usePermissions();
     return (
         <div className="space-y-4">
             {/* Mobile Card View */}
@@ -125,16 +127,18 @@ const LocationStockView = ({ locations, onLocationClick }) => {
                                         {formatCurrency(loc.total_stock_value || 0)}
                                     </td>
                                     <td className="px-4 py-3">
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                onLocationClick(loc.id);
-                                            }}
-                                            className="px-3 py-1 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700 flex items-center gap-1"
-                                        >
-                                            <Eye className="w-4 h-4" />
-                                            View Items
-                                        </button>
+                                        {hasPermission('inventory_location_stock:view') && (
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onLocationClick(loc.id);
+                                                }}
+                                                className="px-3 py-1 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700 flex items-center gap-1"
+                                            >
+                                                <Eye className="w-4 h-4" />
+                                                View Items
+                                            </button>
+                                        )}
                                     </td>
                                 </tr>
                             ))

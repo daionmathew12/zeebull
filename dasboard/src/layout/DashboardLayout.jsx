@@ -25,8 +25,11 @@ import {
   Activity,
 } from "lucide-react";
 import { jwtDecode } from "jwt-decode";
-import orchidLogo from "../assets/orchidlogo.png";
+import zeebullLogo from "../assets/zeebulllogo.png";
 import { NotificationBell } from "../contexts/NotificationContext";
+import { useBranch } from "../contexts/BranchContext";
+import { Building2, ChevronDown } from "lucide-react";
+import { usePermissions } from "../hooks/usePermissions";
 
 import { CreditCard } from "lucide-react";
 
@@ -80,17 +83,17 @@ const themes = {
     '--primary-button-hover': '#b8945f',
     '--border-color': '#e8dcc6',
   },
-  'orchid': {
+  'zeebull-signature': {
     '--bg-primary': '#faf8f5', // Soft cream/ivory background
     '--bg-secondary': '#ffffff',
     '--text-primary': '#2d3748', // Deep charcoal
     '--text-secondary': '#718096', // Medium gray
-    '--accent-bg': '#e8f5e9', // Light orchid green
+    '--accent-bg': '#e8f5e9', // Light zeebull green
     '--accent-text': '#2d5016', // Deep forest green
-    '--bubble-color': 'rgba(139, 195, 74, 0.25)', // Soft orchid green bubbles
-    '--primary-button': '#8bc34a', // Fresh orchid green
-    '--primary-button-hover': '#7cb342', // Darker orchid green
-    '--border-color': '#c5e1a5', // Light orchid green border
+    '--bubble-color': 'rgba(139, 195, 74, 0.25)', // Soft zeebull green bubbles
+    '--primary-button': '#8bc34a', // Fresh zeebull green
+    '--primary-button-hover': '#7cb342', // Darker zeebull green
+    '--border-color': '#c5e1a5', // Light zeebull green border
   },
 };
 
@@ -107,44 +110,38 @@ const applyTheme = (themeName) => {
   }
 };
 
-const getUserPermissions = () => {
-  const token = localStorage.getItem("token");
-  if (!token) {
-    return { role: 'guest', permissions: [], user: null };
-  }
-  try {
-    const decodedUser = jwtDecode(token);
-    // Normalize role to lowercase for consistent comparison
-    const normalizedRole = decodedUser?.role ? decodedUser.role.toLowerCase() : 'guest';
-    return {
-      role: normalizedRole,
-      permissions: decodedUser?.permissions || [],
-      user: decodedUser,
-    };
-  } catch (error) {
-    console.error("Invalid token", error);
-    return { role: 'guest', permissions: [], user: null };
-  }
+// Map routes to internal module IDs
+const routeToModuleMap = {
+  "/dashboard": "dashboard",
+  "/account": ["account", "finance"],
+  "/bookings": "bookings",
+  "/rooms": "rooms",
+  "/services": ["services", "concierge"],
+  "/food-orders": "food_orders",
+  "/food-orders/orders": "food_orders_list",
+  "/food-orders/requests": "food_orders_requests",
+  "/food-orders/management": "food_orders_management",
+  "/expenses": "expenses",
+  "/employee-management": ["employee_management", "employees"],
+  "/inventory": ["inventory", "warehouse"],
+  "/settings": ["settings_group", "settings"],
+  "/roles": "roles",
+  "/branch-management": ["settings_group", "branches"],
+  "/activity-logs": ["settings_group", "activity_logs"],
+  "/guestprofiles": ["guest_profiles", "guests"],
+  "/billing": "billing",
+  "/package": ["packages", "promotions"],
+  "/Userfrontend_data": ["web_management", "website"],
+  "/report": ["reports_global", "reports"]
 };
 
 export const ProtectedRoute = ({ children, requiredPermission }) => {
-  const { role, permissions } = getUserPermissions();
+  const { isSuperadmin: isSuper, hasModuleAccess, permissions } = usePermissions();
 
-  // Admin has access to everything.
-  // Otherwise, check if the user's permissions array includes the required permission.
-  const hasAccess = role === 'admin' || permissions.includes(requiredPermission);
+  const hasAccess = isSuper || (requiredPermission ? hasModuleAccess(routeToModuleMap[requiredPermission] || requiredPermission) : true);
 
   if (!hasAccess) {
-    // Redirect to the first available permission if dashboard access is denied
-    if (permissions.length > 0) {
-      return <Navigate to={permissions[0]} replace />;
-    }
-    return <div className="flex items-center justify-center h-screen text-red-600 font-bold text-xl">Access Denied: No permissions assigned.</div>;
-  }
-
-  // Ensure children are rendered properly
-  if (!children) {
-    return null;
+    return <div className="flex items-center justify-center h-screen text-red-600 font-bold text-xl">Access Denied: Insufficient Privileges</div>;
   }
 
   return <>{children}</>;
@@ -153,11 +150,9 @@ export const ProtectedRoute = ({ children, requiredPermission }) => {
 export default function DashboardLayout({ children }) {
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
-  const [currentTheme, setCurrentTheme] = useState('orchid'); // Default theme - orchid
+  const [currentTheme, setCurrentTheme] = useState('zeebull-signature'); // Default theme - zeebull-signature
 
-  // State and ref for managing scroll position
   const navRef = useRef(null);
-  const [scrollTop, setScrollTop] = useState(0);
 
   // Load theme from localStorage on initial render
   useEffect(() => {
@@ -166,18 +161,12 @@ export default function DashboardLayout({ children }) {
       setCurrentTheme(savedTheme);
       applyTheme(savedTheme);
     } else {
-      // Set orchid as default theme
-      setCurrentTheme('orchid');
-      applyTheme('orchid');
+      // Set zeebull-signature as default theme
+      setCurrentTheme('zeebull-signature');
+      applyTheme('zeebull-signature');
     }
   }, []);
 
-  // Restore scroll position when the route changes
-  useEffect(() => {
-    if (navRef.current) {
-      navRef.current.scrollTop = scrollTop;
-    }
-  }, [location.pathname, scrollTop]);
 
   // Effect to create and manage the animated bubble background
   useEffect(() => {
@@ -209,55 +198,45 @@ export default function DashboardLayout({ children }) {
   }, [currentTheme]);
 
 
-  const { role, permissions, user } = getUserPermissions();
-  // Menu items with role-based access control
+  const { role, permissions, user, isSuperadmin: isSuper, hasModuleAccess } = usePermissions();
+  const { branches, activeBranchId, switchBranch, activeBranch } = useBranch();
+
+  // Sync activeBranchId for non-superadmins
+  useEffect(() => {
+    if (user && !user.is_superadmin && user.branch_id) {
+      if (activeBranchId.toString() !== user.branch_id.toString()) {
+        switchBranch(user.branch_id);
+      }
+    }
+  }, [user, activeBranchId, switchBranch]);
+  const [showBranchMenu, setShowBranchMenu] = useState(false);
+
   const allMenuItems = [
+    ...(user?.is_superadmin ? [{ label: "Enterprise Dashboard", icon: <Home size={18} />, to: "/superadmin-dashboard" }] : []),
     { label: "Dashboard", icon: <Home size={18} />, to: "/dashboard" },
-    { label: "Finance", icon: <UserCircle size={18} />, to: "/account", roles: ["admin"] },
+    { label: "Finance", icon: <UserCircle size={18} />, to: "/account" },
     { label: "Bookings", icon: <CalendarCheck2 size={18} />, to: "/bookings" },
     { label: "Services", icon: <ConciergeBell size={18} />, to: "/services" },
     { label: "Expenses", icon: <PiggyBank size={18} />, to: "/expenses" },
-
-    {
-      label: "Food Management",
-      icon: <Grid size={18} />,
-      to: "/food-orders",
-      roles: ["admin", "manager", "fnb"],
-    },
-    // {
-    //   label: "Food Items",
-    //   icon: <ChefHat size={18} />,
-    //   to: "/food-items",
-    //   roles: ["admin", "manager", "fnb"],
-    // },
-    {
-      label: "Billing",
-      icon: <Receipt size={18} />,
-      to: "/billing",
-      roles: ["admin", "manager", "fnb"],
-    },
-    {
-      label: "WEB Management",
-      icon: <Globe size={18} />,
-      to: "/Userfrontend_data",
-      roles: ["admin", "manager", "fnb"],
-    },
-    { label: "Reports", icon: <Sun size={18} />, to: "/report", roles: ["admin", "manager", "fnb"] },
-    { label: "GuestProfiles", icon: <Sun size={18} />, to: "/guestprofiles", roles: ["admin", "manager", "fnb"] },
-    { label: "User History", icon: <Users size={18} />, to: "/user-history", roles: ["admin", "manager"] },
-    { label: "Employee Mgt", icon: <Briefcase size={18} />, to: "/employee-management", roles: ["admin", "manager"] },
-    { label: "Inventory", icon: <Warehouse size={18} />, to: "/inventory", roles: ["admin", "manager"] },
-    { label: "Settings", icon: <Settings size={18} />, to: "/settings", roles: ["admin"] },
-    { label: "Activity Logs", icon: <Activity size={18} />, to: "/activity-logs", roles: ["admin"] },
+    { label: "Food Management", icon: <Grid size={18} />, to: "/food-orders" },
+    { label: "Billing", icon: <Receipt size={18} />, to: "/billing" },
+    { label: "WEB Management", icon: <Globe size={18} />, to: "/Userfrontend_data" },
+    { label: "Reports", icon: <Sun size={18} />, to: "/report" },
+    { label: "GuestProfiles", icon: <Sun size={18} />, to: "/guestprofiles" },
+    { label: "Employee Mgt", icon: <Briefcase size={18} />, to: "/employee-management" },
+    { label: "Inventory", icon: <Warehouse size={18} />, to: "/inventory" },
+    { label: "Settings", icon: <Settings size={18} />, to: "/settings" },
+    { label: "Branch Mgt", icon: <Building2 size={18} />, to: "/branch-management" },
+    { label: "Activity Logs", icon: <Activity size={18} />, to: "/activity-logs" },
   ];
 
   const menuItems = allMenuItems.filter((item) => {
-    // Admin role has access to everything, regardless of permissions.
-    if (role === 'admin') {
-      return true;
-    }
-    // For other roles, check if their permissions list includes the item's route.
-    return permissions.includes(item.to);
+    if (isSuper) return true;
+    
+    const moduleId = routeToModuleMap[item.to];
+    if (!moduleId) return permissions.includes(item.to);
+    
+    return hasModuleAccess(moduleId);
   });
 
   return (
@@ -315,14 +294,83 @@ export default function DashboardLayout({ children }) {
         >
           {/* Header section with logo, app name, and menu toggle */}
           <div className="flex items-center justify-between p-6 border-b" style={{ borderColor: 'var(--accent-bg)' }}>
-            {/* Left side: App Logo */}
-            <div className="flex items-center gap-4">
-              <div className="p-4 rounded-xl flex items-center justify-center shadow-lg border-2 bg-gradient-to-br from-gray-800 via-gray-900 to-black" style={{ borderColor: 'var(--accent-bg)' }}>
-                <img src={orchidLogo} className="h-20 w-auto object-contain drop-shadow-md" alt="Orchid Resort Logo" />
+            {/* Left side: App Logo and Branch Switcher */}
+            <div className="flex flex-col items-center gap-4 w-full">
+              <div className="p-0 rounded-xl flex items-center justify-center w-full">
+                <img src={zeebullLogo} className="h-32 md:h-40 w-auto object-contain drop-shadow-2xl" alt="Zeebull Resort Logo" />
+              </div>
+
+              {/* Branch name/switcher section */}
+              <div className="w-full mt-2">
+                {user?.is_superadmin ? (
+                  /* Branch Switcher for superadmins only */
+                  <div className="relative w-full">
+                    <button
+                      onClick={() => setShowBranchMenu(!showBranchMenu)}
+                      className="flex items-center justify-between w-full px-4 py-2.5 rounded-lg bg-gray-100/80 hover:bg-gray-200 transition-colors text-sm font-semibold border border-gray-200 shadow-sm"
+                    >
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        <Building2 size={16} className="text-[#2d5016] shrink-0" />
+                        <span className="truncate">
+                          {activeBranchId === 'all' ? "Enterprise View" : (activeBranch?.name || "Select Property")}
+                        </span>
+                      </div>
+                      <ChevronDown size={14} className={`shrink-0 transition-transform ${showBranchMenu ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {showBranchMenu && (
+                      <div className="absolute left-0 mt-2 w-full bg-white rounded-xl shadow-2xl border border-gray-100 py-2 z-[100] animate-in zoom-in-95 duration-200 origin-top">
+                        <div className="px-4 py-2 text-xs font-semibold text-gray-500 border-b mb-1 uppercase tracking-wider">Switch Property</div>
+
+                        {/* Global View Option */}
+                        <button
+                          onClick={() => {
+                            switchBranch('all');
+                            setShowBranchMenu(false);
+                          }}
+                          className={`w-full text-left px-4 py-2.5 text-sm flex items-center justify-between hover:bg-gray-50 transition-colors ${activeBranchId === 'all' ? 'bg-[#e8f5e9] text-[#2d5016] font-bold' : 'text-gray-700'}`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Globe size={16} className="text-blue-500 shrink-0" />
+                            <span className="truncate">All Branches</span>
+                          </div>
+                          {activeBranchId === 'all' && <div className="w-1.5 h-1.5 rounded-full bg-[#2d5016] shrink-0"></div>}
+                        </button>
+
+                        <div className="h-px bg-gray-100 my-1"></div>
+
+                        {branches.map(branch => (
+                          <button
+                            key={branch.id}
+                            onClick={() => {
+                              switchBranch(branch.id);
+                              setShowBranchMenu(false);
+                            }}
+                            className={`w-full text-left px-4 py-2.5 text-sm flex items-center justify-between hover:bg-[#e8f5e9] transition-colors ${activeBranchId.toString() === branch.id.toString() ? 'bg-[#e8f5e9] text-[#2d5016] font-bold' : 'text-gray-700'}`}
+                          >
+                            <div className="flex items-center gap-3 overflow-hidden">
+                              <span className="w-2 h-2 rounded-full bg-[#8bc34a] shrink-0"></span>
+                              <span className="truncate">{branch.name}</span>
+                            </div>
+                            {activeBranchId.toString() === branch.id.toString() && <div className="w-1.5 h-1.5 rounded-full bg-[#2d5016] shrink-0"></div>}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  /* Fixed Branch Name for managers/employees */
+                  <div className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-gray-100/80 text-sm font-semibold border border-gray-200 shadow-sm w-full">
+                    <Building2 size={16} className="text-[#2d5016] shrink-0" />
+                    <span className="truncate uppercase tracking-wide">
+                      {activeBranch?.name || branches.find(b => b.id.toString() === user?.branch_id?.toString())?.name || "My Branch"}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
             {/* Right side: Notification Bell and Menu Toggle */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-4 ml-auto">
               {!collapsed && <NotificationBell />}
               <button
                 onClick={() => setCollapsed(!collapsed)}
@@ -337,13 +385,13 @@ export default function DashboardLayout({ children }) {
           {/* Theme Switcher UI with image previews */}
           <div className={`p-4 transition-all duration-300 flex justify-center gap-2 border-b`} style={{ borderColor: 'var(--accent-bg)' }}>
             <motion.button
-              animate={{ scale: currentTheme === 'orchid' ? 1.15 : 1, y: currentTheme === 'orchid' ? -2 : 0 }}
+              animate={{ scale: currentTheme === 'zeebull-signature' ? 1.15 : 1, y: currentTheme === 'zeebull-signature' ? -2 : 0 }}
               whileHover={{ scale: 1.2, y: -2 }} whileTap={{ scale: 1.1 }} transition={{ type: 'spring', stiffness: 300 }}
-              className={`w-8 h-8 rounded-full overflow-hidden ${currentTheme === 'orchid' ? 'shadow-lg border-2 border-[#8bc34a]' : ''}`}
-              onClick={() => { setCurrentTheme('orchid'); applyTheme('orchid'); }}
-              title="Orchid"
+              className={`w-8 h-8 rounded-full overflow-hidden ${currentTheme === 'zeebull-signature' ? 'shadow-lg border-2 border-[#8bc34a]' : ''}`}
+              onClick={() => { setCurrentTheme('zeebull-signature'); applyTheme('zeebull-signature'); }}
+              title="Zeebull Signature"
             >
-              <img src={orchidLogo} alt="Orchid Theme" className="w-full h-full object-cover" />
+              <img src={zeebullLogo} alt="Zeebull Theme" className="w-full h-full object-cover" />
             </motion.button>
             <motion.button
               animate={{ scale: currentTheme === 'eco-friendly' ? 1.15 : 1, y: currentTheme === 'eco-friendly' ? -2 : 0 }}
@@ -386,11 +434,9 @@ export default function DashboardLayout({ children }) {
           {/* Main navigation menu */}
           <nav
             ref={navRef}
-            className="flex-1 p-4 space-y-2 z-30 overflow-y-auto"
-            onScroll={() => {
-              if (navRef.current) {
-                setScrollTop(navRef.current.scrollTop);
-              }
+            className="flex-1 p-4 space-y-2 z-30 overflow-y-auto premium-scrollbar"
+            style={{ 
+              scrollBehavior: 'smooth'
             }}
           >
             {menuItems.map((item, idx) => {
@@ -405,13 +451,13 @@ export default function DashboardLayout({ children }) {
                   to={item.to}
                   className={`
                     group block flex items-center gap-4 p-3 rounded-xl
-                    transition-all duration-200 cursor-pointer
-                    ${isActive ? "font-semibold" : ""}
+                    transition-colors duration-200 cursor-pointer
                   `}
                   style={{
                     backgroundColor: isActive ? 'var(--accent-bg)' : 'transparent',
                     color: isActive ? 'var(--accent-text)' : 'var(--text-secondary)',
                     boxShadow: isActive ? '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)' : 'none',
+                    fontWeight: isActive ? 600 : 400, // Explicit font weight without class
                   }}
                 >
                   <motion.span whileHover={{ scale: isActive ? 1 : 1.1, rotate: isActive ? 0 : -5 }} className="transition-transform duration-200">

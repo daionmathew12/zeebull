@@ -1,0 +1,14 @@
+{
+  "files": {
+    "main.css": "/zeebull/static/css/main.dabe9966.css",
+    "main.js": "/zeebull/static/js/main.0d2e295f.js",
+    "static/media/zeebulllogo.png": "/zeebull/static/media/zeebulllogo.6125a6a60869fa1fc3e7.png",
+    "index.html": "/zeebull/index.html",
+    "main.dabe9966.css.map": "/zeebull/static/css/main.dabe9966.css.map",
+    "main.0d2e295f.js.map": "/zeebull/static/js/main.0d2e295f.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.dabe9966.css",
+    "static/js/main.0d2e295f.js"
+  ]
+}

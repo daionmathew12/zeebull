@@ -1,7 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+import os
+# Absolute project root path (ResortApp/)
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_UPLOAD_ROOT = os.path.join(_BASE_DIR, "uploads")
 from typing import Optional, List
 import json
-from app.utils.auth import get_current_user
+from app.utils.auth import get_current_user, require_permission
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from app.database import SessionLocal
@@ -10,8 +14,10 @@ from app.curd import room as crud_room
 from app.models.room import Room
 from app.models.booking import Booking, BookingRoom
 import shutil
-import os
+from app.utils.branch_scope import get_branch_id
+from app.models.user import User
 from uuid import uuid4
+
 from datetime import date
 
 router = APIRouter(prefix="/rooms", tags=["Rooms"])
@@ -23,7 +29,7 @@ def get_db():
     finally:
         db.close()
 
-UPLOAD_DIR = os.path.join("uploads", "rooms")
+UPLOAD_DIR = os.path.join(_UPLOAD_ROOT, "rooms")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
@@ -49,12 +55,26 @@ def create_room_test(
     dining: bool = Form(False),
     breakfast: bool = Form(False),
     images: List[UploadFile] = File(None),
+    branch_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    scoped_branch_id: Optional[int] = Depends(get_branch_id)
 ):
+
+    # Use explicitly passed branch_id if user is superadmin or it matches scoped branch
+    effective_branch_id = scoped_branch_id
+    if branch_id is not None:
+        if getattr(current_user, "is_superadmin", False) or branch_id == scoped_branch_id:
+            effective_branch_id = branch_id
+    
+    if effective_branch_id is None:
+        # Fallback to user's branch if still None
+        effective_branch_id = getattr(current_user, "branch_id", None) or 1
+
     try:
-        # Check if room number already exists
-        existing_room = db.query(Room).filter(Room.number == number).first()
+        # Check if room number already exists in this branch
+        existing_room = db.query(Room).filter(Room.number == number, Room.branch_id == effective_branch_id).first()
+
         if existing_room:
             raise HTTPException(status_code=400, detail=f"Room {number} already exists")
 
@@ -117,8 +137,10 @@ def create_room_test(
             bbq=bbq,
             garden=garden,
             dining=dining,
-            breakfast=breakfast
+            breakfast=breakfast,
+            branch_id=effective_branch_id
         )
+
         db.add(db_room)
         db.commit()
         db.refresh(db_room)
@@ -129,13 +151,14 @@ def create_room_test(
             from app.curd import inventory as inventory_crud
             from sqlalchemy import or_
             
-            # Check if location already exists
+            # Check if location already exists in THIS branch
             existing_location = db.query(Location).filter(
                 or_(
                     Location.name == f"Room {number}",
                     Location.room_area == f"Room {number}"
                 ),
-                Location.location_type == "GUEST_ROOM"
+                Location.location_type == "GUEST_ROOM",
+                Location.branch_id == effective_branch_id
             ).first()
             
             if not existing_location:
@@ -149,7 +172,8 @@ def create_room_test(
                     "description": f"Guest room {number} - {type or 'Standard'}",
                     "is_active": (status != "Deleted" if status else True)
                 }
-                location = inventory_crud.create_location(db, location_data)
+                location = inventory_crud.create_location(db, location_data, branch_id=effective_branch_id)
+
                 db_room.inventory_location_id = location.id
                 db.commit()
                 db.refresh(db_room)
@@ -177,9 +201,11 @@ def test_simple():
 
 # Test delete endpoint
 @router.delete("/test/{room_id}")
-def delete_room_test(room_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def delete_room_test(room_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+
     try:
-        db_room = db.query(Room).filter(Room.id == room_id).first()
+        db_room = db.query(Room).filter(Room.id == room_id, Room.branch_id == branch_id).first()
+
         if db_room is None:
             raise HTTPException(status_code=404, detail="Room not found")
 
@@ -199,7 +225,8 @@ def delete_room_test(room_id: int, db: Session = Depends(get_db), current_user: 
 
 # Test GET endpoint for fetching rooms
 @router.get("/test", response_model=list[RoomOut])
-def get_rooms_test(db: Session = Depends(get_db), skip: int = 0, limit: int = 100, current_user: dict = Depends(get_current_user)):
+def get_rooms_test(db: Session = Depends(get_db), skip: int = 0, limit: int = 100, current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+
     try:
         # Update room statuses before fetching (non-blocking - continues even if update fails)
         try:
@@ -209,7 +236,11 @@ def get_rooms_test(db: Session = Depends(get_db), skip: int = 0, limit: int = 10
             print(f"Room status update failed (continuing): {status_error}")
             # Continue fetching rooms even if status update fails
         
-        rooms = db.query(Room).offset(skip).limit(limit).all()
+        q = db.query(Room)
+        if branch_id is not None:
+            q = q.filter(Room.branch_id == branch_id)
+        rooms = q.offset(skip).limit(limit).all()
+
         return rooms
         
     except Exception as e:
@@ -245,9 +276,22 @@ def create_room(
     dining: bool = Form(False),
     breakfast: bool = Form(False),
     images: List[UploadFile] = File(None),
+    branch_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(require_permission("rooms:create")),
+    scoped_branch_id: Optional[int] = Depends(get_branch_id)
 ):
+
+    # Use explicitly passed branch_id if user is superadmin or it matches scoped branch
+    effective_branch_id = scoped_branch_id
+    if branch_id is not None:
+        if getattr(current_user, "is_superadmin", False) or branch_id == scoped_branch_id:
+            effective_branch_id = branch_id
+    
+    if effective_branch_id is None:
+        # Fallback to user's branch if still None
+        effective_branch_id = getattr(current_user, "branch_id", None) or 1
+
     try:
         image_urls = []
         if images:
@@ -308,8 +352,10 @@ def create_room(
             bbq=bbq,
             garden=garden,
             dining=dining,
-            breakfast=breakfast
+            breakfast=breakfast,
+            branch_id=effective_branch_id
         )
+
         db.add(db_room)
         db.commit()
         db.refresh(db_room)
@@ -320,13 +366,14 @@ def create_room(
             from app.curd import inventory as inventory_crud
             from sqlalchemy import or_
             
-            # Check if location already exists
+            # Check if location already exists in THIS branch
             existing_location = db.query(Location).filter(
                 or_(
                     Location.name == f"Room {number}",
                     Location.room_area == f"Room {number}"
                 ),
-                Location.location_type == "GUEST_ROOM"
+                Location.location_type == "GUEST_ROOM",
+                Location.branch_id == effective_branch_id
             ).first()
             
             if not existing_location:
@@ -340,7 +387,9 @@ def create_room(
                     "description": f"Guest room {number} - {type or 'Standard'}",
                     "is_active": (status != "Deleted" if status else True)
                 }
-                location = inventory_crud.create_location(db, location_data)
+                location = inventory_crud.create_location(db, location_data, branch_id=effective_branch_id)
+                db_room.inventory_location_id = location.id
+                db.commit()
                 db_room.inventory_location_id = location.id
                 db.commit()
                 db.refresh(db_room)
@@ -363,7 +412,8 @@ def create_room(
 
 # ---------------- READ ----------------
 @router.post("/update-statuses")
-def update_room_statuses_endpoint(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def update_room_statuses_endpoint(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+
     """
     Manually trigger room status update based on current bookings.
     This endpoint can be called to refresh room statuses.
@@ -375,7 +425,8 @@ def update_room_statuses_endpoint(db: Session = Depends(get_db), current_user: d
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error updating room statuses: {str(e)}")
 
-def _get_rooms_impl(db: Session, skip: int = 0, limit: int = 20):
+def _get_rooms_impl(db: Session, branch_id: int, skip: int = 0, limit: int = 20):
+
     """Helper function for get_rooms"""
     try:
         # Optimized for low network - reduced to 50
@@ -407,7 +458,11 @@ def _get_rooms_impl(db: Session, skip: int = 0, limit: int = 20):
         
         # Query rooms with proper error handling - ORDER BY number to ensure consistent ordering
         try:
-            rooms = db.query(Room).order_by(Room.number).offset(skip).limit(limit).all()
+            q = db.query(Room)
+            if branch_id is not None:
+                q = q.filter(Room.branch_id == branch_id)
+            rooms = q.order_by(Room.number).offset(skip).limit(limit).all()
+
         except Exception as query_error:
             print(f"Room query failed: {query_error}")
             db.rollback()
@@ -460,18 +515,22 @@ def _get_rooms_impl(db: Session, skip: int = 0, limit: int = 20):
         raise HTTPException(status_code=500, detail=f"Error fetching rooms: {str(e)}")
 
 @router.get("", response_model=list[RoomOut])
-def get_rooms(db: Session = Depends(get_db), skip: int = 0, limit: int = 20, current_user: dict = Depends(get_current_user)):
-    return _get_rooms_impl(db, skip, limit)
+def get_rooms(db: Session = Depends(get_db), skip: int = 0, limit: int = 20, current_user: User = Depends(require_permission("rooms:view")), branch_id: int = Depends(get_branch_id)):
+    return _get_rooms_impl(db, branch_id, skip, limit)
+
 
 @router.get("/", response_model=list[RoomOut])  # Handle trailing slash
-def get_rooms_slash(db: Session = Depends(get_db), skip: int = 0, limit: int = 20, current_user: dict = Depends(get_current_user)):
-    return _get_rooms_impl(db, skip, limit)
+def get_rooms_slash(db: Session = Depends(get_db), skip: int = 0, limit: int = 20, current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+    return _get_rooms_impl(db, branch_id, skip, limit)
+
 
 
 # ---------------- DELETE ----------------
 @router.delete("/{room_id}")
-def delete_room(room_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    db_room = db.query(Room).filter(Room.id == room_id).first()
+def delete_room(room_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_permission("rooms:delete")), branch_id: int = Depends(get_branch_id)):
+
+    db_room = db.query(Room).filter(Room.id == room_id, Room.branch_id == branch_id).first()
+
     if db_room is None:
         raise HTTPException(status_code=404, detail="Room not found")
 
@@ -526,10 +585,17 @@ def update_room(
     dining: bool = Form(None),
     breakfast: bool = Form(None),
     images: List[UploadFile] = File(None),
+    existing_images: str = Form(None), # JSON list of image URLs to keep
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(require_permission("rooms:edit")),
+    branch_id: int = Depends(get_branch_id)
 ):
-    db_room = db.query(Room).filter(Room.id == room_id).first()
+
+    q = db.query(Room).filter(Room.id == room_id)
+    if branch_id is not None:
+        q = q.filter(Room.branch_id == branch_id)
+    db_room = q.first()
+
     if not db_room:
         raise HTTPException(status_code=404, detail="Room not found")
 
@@ -577,30 +643,40 @@ def update_room(
     if breakfast is not None:
         db_room.breakfast = breakfast
 
-    # Handle new image uploads if provided
-    if images:
-        # Remove old image if exists
-        if db_room.image_url:
-            old_path = db_room.image_url.lstrip("/")
-            if os.path.exists(old_path):
-                try:
-                    os.remove(old_path)
-                except: pass
-        
-        # Remove old extra images if they exist
-        if db_room.extra_images:
-            try:
-                old_extras = json.loads(db_room.extra_images)
-                for old_p in old_extras:
-                    old_path = old_p.lstrip("/")
-                    if os.path.exists(old_path):
-                        try:
-                            os.remove(old_path)
+    # --- IMAGE HANDLING ---
+    current_image_url = db_room.image_url
+    try:
+        current_extras = json.loads(db_room.extra_images) if db_room.extra_images else []
+    except:
+        current_extras = []
+    
+    all_current_urls = ([current_image_url] if current_image_url else []) + current_extras
+    
+    # 1. Handle selective deletion if existing_images is provided
+    if existing_images is not None:
+        try:
+            keep_urls = json.loads(existing_images)
+            # Identify urls to delete from disk
+            for url in all_current_urls:
+                if url not in keep_urls:
+                    path = url.lstrip("/")
+                    if os.path.exists(path):
+                        try: os.remove(path)
                         except: pass
-            except:
-                pass
+            
+            # Reconstruct current state from keep_urls
+            if keep_urls:
+                current_image_url = keep_urls[0]
+                current_extras = keep_urls[1:]
+            else:
+                current_image_url = None
+                current_extras = []
+        except Exception as e:
+            print(f"Error parsing existing_images: {e}")
 
-        image_urls = []
+    # 2. Handle new uploads
+    if images:
+        new_urls = []
         for img in images:
             if img.filename:
                 ext = img.filename.split(".")[-1]
@@ -608,23 +684,31 @@ def update_room(
                 image_path = os.path.join(UPLOAD_DIR, filename)
                 with open(image_path, "wb") as buffer:
                     shutil.copyfileobj(img.file, buffer)
-                image_urls.append(f"/uploads/rooms/{filename}")
+                new_urls.append(f"/uploads/rooms/{filename}")
         
-        if image_urls:
-            db_room.image_url = image_urls[0]
-            db_room.extra_images = json.dumps(image_urls[1:]) if len(image_urls) > 1 else None
+        if new_urls:
+            if not current_image_url:
+                current_image_url = new_urls.pop(0)
+            current_extras.extend(new_urls)
+
+    # 3. Final Sync to DB
+    db_room.image_url = current_image_url
+    db_room.extra_images = json.dumps(current_extras) if current_extras else None
 
     db.commit()
     db.refresh(db_room)
     return db_room
 
 @router.get("/stats")
-def get_room_stats(db: Session = Depends(get_db)):
-    total = db.query(Room).count()
-    occupied = db.query(Room).filter(Room.status == "Occupied").count()
-    available = db.query(Room).filter(Room.status == "Available").count()
-    maintenance = db.query(Room).filter(Room.status == "Maintenance").count()
-    dirty = db.query(Room).filter(Room.housekeeping_status == "Dirty").count()
+def get_room_stats(db: Session = Depends(get_db), branch_id: int = Depends(get_branch_id)):
+    def bscope(q):
+        return q.filter(Room.branch_id == branch_id) if branch_id is not None else q
+    total = bscope(db.query(Room)).count()
+    occupied = bscope(db.query(Room).filter(Room.status.in_(["Occupied", "Checked-in", "Booked"]))).count()
+    available = bscope(db.query(Room).filter(Room.status == "Available")).count()
+    maintenance = bscope(db.query(Room).filter(Room.status == "Maintenance")).count()
+    dirty = bscope(db.query(Room).filter(Room.housekeeping_status == "Dirty")).count()
+
     
     return {
         "total": total,

@@ -1,13 +1,15 @@
-from app.database import SessionLocal
-from app.models.user import User
-from app.models.employee import Employee
+import os
+import sys
+from sqlalchemy import create_engine, text
+from dotenv import load_dotenv
 
-db = SessionLocal()
-users = db.query(User).all()
-print(f"{'User ID':<8} | {'User Name':<20} | {'Emp ID'}")
-print("-" * 50)
-for u in users:
-    emp = db.query(Employee).filter(Employee.user_id == u.id).first()
-    emp_id = emp.id if emp else "None"
-    print(f"{u.id:<8} | {str(u.name):<20} | {emp_id}")
-db.close()
+sys.path.append(os.path.join(os.getcwd(), "ResortApp"))
+load_dotenv(os.path.join(os.getcwd(), "ResortApp", ".env"))
+
+engine = create_engine(os.getenv("DATABASE_URL"))
+
+with engine.connect() as conn:
+    print("--- All Users ---")
+    res = conn.execute(text("SELECT id, name, email, branch_id, is_superadmin FROM users"))
+    for row in res:
+        print(f"ID: {row.id}, Name: {row.name}, Email: {row.email}, Branch: {row.branch_id}, Super: {row.is_superadmin}")

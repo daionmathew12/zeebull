@@ -38,6 +38,7 @@ class FoodItemUpdate(BaseModel):
 
 class FoodItemOut(BaseModel):
     id: int
+    branch_id: Optional[int] = None
     name: str
     description: str
     price: float

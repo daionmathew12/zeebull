@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import ReactDOM from "react-dom";
 import DashboardLayout from "../layout/DashboardLayout";
+import { usePermissions } from "../hooks/usePermissions";
 import { toast } from "react-hot-toast";
 import API from "../services/api";
 import { formatCurrency, formatIndianCurrencyCompact } from "../utils/currency";
@@ -37,7 +38,14 @@ import {
   FileEdit,
   Calendar,
   Filter,
+  ArrowRightLeft,
+  Ship,
+  CheckCircle2,
+  Image,
+  Briefcase,
+  Boxes,
 } from "lucide-react";
+import { getImageUrl } from "../utils/imageUtils";
 
 import LocationStockView from "./inventory/components/LocationStockView";
 import SummaryCard from "./inventory/components/SummaryCard";
@@ -49,6 +57,7 @@ import ItemFormModal from "./inventory/modals/ItemFormModal";
 import LaundryManagementTab from "./inventory/components/LaundryManagementTab";
 import UnitFormModal from "./inventory/modals/UnitFormModal";
 import ItemHistoryModal from "./inventory/modals/ItemHistoryModal";
+import { useBranch } from "../contexts/BranchContext";
 
 
 
@@ -194,7 +203,7 @@ function LocationStockDetailsModal({ locationData, onClose }) {
                       {locationData.room_usage.total_service_charges.toFixed(2)}
                     </span>
                   </div>
-                  <div className="overflow-x-auto">
+                  <div className="overflow-x-auto scroll-smooth">
                     <table className="min-w-full divide-y divide-gray-200 text-sm">
                       <thead className="bg-gray-100">
                         <tr>
@@ -373,7 +382,7 @@ function LocationStockDetailsModal({ locationData, onClose }) {
                           </span>
                         </td>
                         <td className="px-3 py-2 text-sm text-gray-900 font-medium">
-                          {item.location_stock || 0}
+                          {parseFloat(item.location_stock || 0).toFixed(2)}
                         </td>
                         <td className="px-3 py-2 text-sm text-gray-600">
                           {item.unit}
@@ -531,16 +540,14 @@ function TransactionDetailsModal({
     foodItems?.find((f) => f.id === transaction.item_id);
   const category = categories.find((c) => c.id === item?.category_id);
 
-  // Helper to get transaction type label and color
-  const handleTransactionFilterChange = (newFilters) => {
-    setTransactionFilters(newFilters);
-  };
 
-  const handleLoadMoreTransactions = () => {
-    fetchTransactions(transactionPage + 1, false);
-  };
   const getTypeInfo = () => {
+    const isTransfer = transaction.reference_number?.startsWith("TRF-") || transaction.notes?.toLowerCase().includes("inter-branch transfer");
+
     if (transaction.transaction_type === "in") {
+      if (isTransfer) {
+        return { label: "Stock Received (Transfer)", color: "bg-blue-100 text-blue-800" };
+      }
       return { label: "Purchase (In)", color: "bg-green-100 text-green-800" };
     } else if (transaction.transaction_type === "transfer_in" || transaction.transaction_type === "Stock Received") {
       // Extract source location from notes if available
@@ -568,6 +575,9 @@ function TransactionDetailsModal({
       }
       return { label, color: "bg-purple-100 text-purple-800" };
     } else if (transaction.transaction_type === "out") {
+      if (isTransfer) {
+        return { label: "Transfer Out", color: "bg-purple-100 text-purple-800" };
+      }
       if (transaction.notes?.toLowerCase().includes("waste") || transaction.notes?.toLowerCase().includes("spoilage")) {
         return { label: "Waste/Spoilage", color: "bg-red-100 text-red-800" };
       } else if (transaction.notes?.toLowerCase().includes("kitchen")) {
@@ -758,17 +768,42 @@ function TransactionDetailsModal({
 };
 
 const Inventory = () => {
-  // Helper to replace missing NotificationContext
+
+  const { activeBranchId, activeBranch } = useBranch();
+  const { hasPermission, isAdmin } = usePermissions();
+
   const addNotification = useCallback(({ title, message, type }) => {
+    const content = title ? `${title}: ${message}` : message;
     if (type === 'success') {
-      toast.success(message);
+      toast.success(content);
     } else if (type === 'error') {
-      toast.error(`${title}: ${message}`);
+      toast.error(content);
     } else {
-      toast(message);
+      toast(content);
     }
   }, []);
-  const [activeTab, setActiveTab] = useState("items");
+
+  const inventoryTabs = [
+    { id: "items", label: "Inventory Items", permission: "inventory_items:view", icon: <Package className="w-4 h-4 mr-2" /> },
+    { id: "categories", label: "Categories", permission: "inventory_categories:view", icon: <Briefcase className="w-4 h-4 mr-2" /> },
+    { id: "vendors", label: "Vendors", permission: "inventory_vendors:view", icon: <Building2 className="w-4 h-4 mr-2" /> },
+    { id: "purchases", label: "Purchases", permission: "inventory_purchases:view", icon: <ShoppingCart className="w-4 h-4 mr-2" /> },
+    { id: "transactions", label: "All Transactions", permission: "inventory_transactions:view", icon: <TrendingUp className="w-4 h-4 mr-2" /> },
+    { id: "requisitions", label: "Requisitions", permission: "inventory_requisitions:view", icon: <FileText className="w-4 h-4 mr-2" /> },
+    { id: "issues", label: "Stock Issues", permission: "inventory_issues:view", icon: <ArrowRightLeft className="w-4 h-4 mr-2" /> },
+    { id: "waste", label: "Waste Logs", permission: "inventory_waste:view", icon: <Trash2 className="w-4 h-4 mr-2" /> },
+    { id: "locations", label: "Locations", permission: "inventory_locations:view", icon: <Building2 className="w-4 h-4 mr-2" /> },
+    { id: "assets", label: "Assets", permission: "inventory_assets:view", icon: <Package className="w-4 h-4 mr-2" /> },
+    { id: "laundry", label: "Laundry", permission: "inventory_laundry:view", icon: <WashingMachine className="w-4 h-4 mr-2" /> },
+    { id: "location-stock", label: "Location Stock", permission: "inventory_location_stock:view", icon: <Building2 className="w-4 h-4 mr-2" /> },
+    { id: "recipe", label: "Recipe", permission: "inventory_recipe:view", icon: <FileText className="w-4 h-4 mr-2" /> },
+    { id: "inter-branch-transfer", label: "Inter-branch Transfer", permission: "inventory_transfer:view", icon: <ArrowRightLeft className="w-4 h-4 mr-2" /> }
+  ].filter(tab => hasPermission(tab.permission));
+
+  const [activeTab, setActiveTab] = useState(() => inventoryTabs[0]?.id || "items");
+  const [isSubmittingVendor, setIsSubmittingVendor] = useState(false);
+  const [isSubmittingPurchase, setIsSubmittingPurchase] = useState(false);
+  const [selectedBranchForCreation, setSelectedBranchForCreation] = useState("");
   const [loading, setLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -801,6 +836,19 @@ const Inventory = () => {
     cook_time_minutes: "",
     ingredients: [],
   });
+
+  // Inter-branch Transfer state
+  const [transfers, setTransfers] = useState([]);
+  const [showTransferForm, setShowTransferForm] = useState(false);
+  const [branches, setBranches] = useState([]);
+  const [transferForm, setTransferForm] = useState({
+    item_id: "",
+    quantity: "",
+    source_location_id: "",
+    destination_branch_id: "",
+    notes: ""
+  });
+
   const [transactionFilters, setTransactionFilters] = useState({
     type: "all",
     category: "all",
@@ -1145,6 +1193,41 @@ const Inventory = () => {
     is_active: true,
   });
 
+  const handleTransferSubmit = async (formData) => {
+    try {
+      await API.post("/inventory/transfers", formData);
+      addNotification({ title: "Success", message: "Transfer request created", type: "success" });
+      setShowTransferForm(false);
+      fetchTransfers();
+    } catch (err) {
+      console.error("Transfer error:", err);
+      addNotification({
+        title: "Error",
+        message: "Failed to create transfer: " + (err.response?.data?.detail || err.message),
+        type: "error"
+      });
+    }
+  };
+
+  const handleTransferStatusUpdate = async (transferId, status, destinationLocationId = null) => {
+    try {
+      let url = `/inventory/transfers/${transferId}/status?status=${status}`;
+      if (destinationLocationId) url += `&location_id=${destinationLocationId}`;
+
+      await API.patch(url);
+      addNotification({ title: "Success", message: `Transfer marked as ${status}`, type: "success" });
+      fetchTransfers();
+    } catch (err) {
+      console.error("Transfer status error:", err);
+      addNotification({
+        title: "Error",
+        message: "Failed to update status: " + (err.response?.data?.detail || err.message),
+        type: "error"
+      });
+    }
+  };
+
+
   // Purchase form
   const [purchaseForm, setPurchaseForm] = useState({
     purchase_number: "",
@@ -1198,10 +1281,10 @@ const Inventory = () => {
           purchasesRes,
           wasteRes
         ] = await Promise.all([
-          API.get("/inventory/categories?limit=1000"),
+          API.get("/inventory/categories?limit=1000", { headers: { "X-Branch-ID": "all" } }),
           API.get("/inventory/vendors?limit=1000"),
           API.get("/inventory/locations?limit=10000"),
-          API.get("/inventory/items?limit=1000"),
+          API.get("/inventory/items?limit=1000", { headers: { "X-Branch-ID": "all" } }),
           API.get("/inventory/purchases?limit=1000"),
           API.get("/inventory/waste-logs?limit=1000"),
         ]);
@@ -1231,11 +1314,11 @@ const Inventory = () => {
       const limit = (activeTab === "locations" || activeTab === "transactions") ? 5000 : 1000; // Increased limit for transactions to show full history
 
       if (activeTab === "items") {
-        const res = await API.get(`/inventory/items?limit=${limit}`);
+        const res = await API.get(`/inventory/items?limit=${limit}`, { headers: { "X-Branch-ID": "all" } });
         setItems(res.data || []);
       } else if (activeTab === "categories") {
         // Always fetch categories to ensure fresh data after add/edit
-        const res = await API.get(`/inventory/categories?limit=${limit}`);
+        const res = await API.get(`/inventory/categories?limit=${limit}`, { headers: { "X-Branch-ID": "all" } });
         setCategories(res.data || []);
       } else if (activeTab === "vendors") {
         // Always fetch vendors to ensure fresh data after add/edit
@@ -1337,6 +1420,15 @@ const Inventory = () => {
         } catch (err) {
           console.error("Failed to fetch food items:", err);
         }
+      } else if (activeTab === "inter-branch-transfer") {
+        fetchTransfers();
+        // Fetch branches for source/dest selection
+        try {
+          const branchRes = await API.get("/branches");
+          setBranches(branchRes.data || []);
+        } catch (err) {
+          console.error("Failed to fetch branches:", err);
+        }
       }
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -1345,6 +1437,16 @@ const Inventory = () => {
       setLoading(false);
     }
   }, [activeTab, categories.length, vendors.length, locations.length, selectedLocationStock, fetchAssetMappings]);
+
+  const fetchTransfers = async () => {
+    try {
+      const res = await API.get("/inventory/transfers");
+      setTransfers(res.data || []);
+    } catch (err) {
+      console.error("Failed to fetch transfers:", err);
+    }
+  };
+
 
   // Summary calculations
   const summary = {
@@ -1416,45 +1518,48 @@ const Inventory = () => {
         // Update local state directly
         setItems(prev => prev.map(item => item.id === res.data.id ? res.data : item));
       } else {
-        const res = await API.post("/inventory/items", formData, {
-          headers: { "Content-Type": "multipart/form-data" },
-        });
+        const config = {
+          headers: { "Content-Type": "multipart/form-data" }
+        };
+
+        const res = await API.post("/inventory/items", formData, config);
         addNotification({ title: "Success", message: "Item created successfully!", type: "success" });
         // Add to local state directly (at the top)
         setItems(prev => [res.data, ...prev]);
-      }
 
-      // Reset form
-      setItemForm({
-        name: "",
-        item_code: "",
-        description: "",
-        category_id: "",
-        sub_category: "",
-        hsn_code: "",
-        unit: "pcs",
-        initial_stock: 0,
-        min_stock_level: 0,
-        max_stock_level: "",
-        unit_price: 0,
-        selling_price: "",
-        gst_rate: 0,
-        barcode: "",
-        is_perishable: false,
-        track_serial_number: false,
-        is_sellable_to_guest: false,
-        track_laundry_cycle: false,
-        is_asset_fixed: false,
-        maintenance_schedule_days: "",
-        complimentary_limit: "",
-        ingredient_yield_percentage: "",
-        preferred_vendor_id: "",
-        vendor_item_code: "",
-        lead_time_days: "",
-        is_active: true,
-      });
+        // Reset form
+        setItemForm({
+          name: "",
+          item_code: "",
+          description: "",
+          category_id: "",
+          sub_category: "",
+          hsn_code: "",
+          unit: "pcs",
+          initial_stock: 0,
+          min_stock_level: 0,
+          max_stock_level: "",
+          unit_price: 0,
+          selling_price: "",
+          gst_rate: 0,
+          barcode: "",
+          is_perishable: false,
+          track_serial_number: false,
+          is_sellable_to_guest: false,
+          track_laundry_cycle: false,
+          is_asset_fixed: false,
+          maintenance_schedule_days: "",
+          complimentary_limit: "",
+          ingredient_yield_percentage: "",
+          preferred_vendor_id: "",
+          vendor_item_code: "",
+          lead_time_days: "",
+          is_active: true,
+        });
+      }
       setShowItemForm(false);
       setEditingItem(null);
+      setSelectedBranchForCreation("");
       // Removed re-fetch to rely on local update for speed
     } catch (error) {
       console.error("Error submitting item:", error);
@@ -1487,6 +1592,7 @@ const Inventory = () => {
       category_id: item.category_id,
       image: null,
     });
+    setSelectedBranchForCreation(item.branch_id || "");
     setShowItemForm(true);
   };
 
@@ -1503,6 +1609,7 @@ const Inventory = () => {
         addNotification({ title: "Success", message: "Category created successfully!", type: "success" });
         setCategories(prev => [res.data, ...prev]);
       }
+      setSelectedBranchForCreation("");
 
       setCategoryForm({
         name: "",
@@ -1552,15 +1659,30 @@ const Inventory = () => {
       addNotification({ title: "Error", message: "Failed to delete category: " + (error.response?.data?.detail || error.message), type: "error" });
     }
   };
+  const handleMarkWaste = (item) => {
+    setWasteForm(prev => ({
+      ...prev,
+      item_id: item.id,
+      quantity: 1,
+      unit: item.unit || "pcs",
+      reason_code: "Broken/Damaged",
+      location_id: locations.find(l => l.is_inventory_point)?.id || "",
+    }));
+    setShowWasteForm(true);
+    setActiveTab("waste");
+  };
 
   // Vendor handlers
   const handleVendorSubmit = async (e) => {
     e.preventDefault();
+    if (isSubmittingVendor) return;
+    setIsSubmittingVendor(true);
 
     // Validate account number match if bank transfer is selected
     if (vendorForm.preferred_payment_method === "Bank Transfer") {
       if (vendorForm.account_number !== vendorForm.account_number_confirm) {
         addNotification({ title: "Validation Error", message: "Account numbers do not match! Please verify.", type: "error" });
+        setIsSubmittingVendor(false);
         return;
       }
       if (
@@ -1569,10 +1691,12 @@ const Inventory = () => {
         vendorForm.account_number.length > 18
       ) {
         addNotification({ title: "Validation Error", message: "Account number must be 9-18 digits!", type: "error" });
+        setIsSubmittingVendor(false);
         return;
       }
       if (!vendorForm.ifsc_code || vendorForm.ifsc_code.length !== 11) {
         addNotification({ title: "Validation Error", message: "IFSC code must be exactly 11 characters!", type: "error" });
+        setIsSubmittingVendor(false);
         return;
       }
     }
@@ -1608,10 +1732,23 @@ const Inventory = () => {
         addNotification({ title: "Success", message: "Vendor updated successfully!", type: "success" });
         setVendors(prev => prev.map(v => v.id === res.data.id ? res.data : v));
       } else {
-        const res = await API.post("/inventory/vendors", cleanedData);
+        // Enterprise view branch selection
+        const isEnterpriseView = activeBranchId === 'all';
+        const config = {};
+        if (isEnterpriseView) {
+          if (!selectedBranchForCreation) {
+            addNotification({ title: "Branch Required", message: "Please select a branch to assign this vendor to.", type: "error" });
+            setIsSubmittingVendor(false);
+            return;
+          }
+          config.headers = { "X-Branch-ID": selectedBranchForCreation };
+        }
+
+        const res = await API.post("/inventory/vendors", cleanedData, config);
         addNotification({ title: "Success", message: "Vendor created successfully!", type: "success" });
         setVendors(prev => [res.data, ...prev]);
       }
+      setSelectedBranchForCreation("");
 
       setVendorForm({
         name: "",
@@ -1655,13 +1792,10 @@ const Inventory = () => {
       setShowVendorForm(false);
       // Removed re-fetch to rely on local update
     } catch (error) {
-      console.error("Error submitting vendor:", error);
-      const errorMessage =
-        error.response?.data?.detail ||
-        error.response?.data?.message ||
-        error.message ||
-        "Failed to submit vendor";
-      addNotification({ title: "Error", message: `Failed to submit vendor: ${errorMessage}`, type: "error" });
+      console.error("Error creating/updating vendor:", error);
+      addNotification({ title: "Error", message: error.response?.data?.detail || "Failed to save vendor.", type: "error" });
+    } finally {
+      setIsSubmittingVendor(false);
     }
   };
 
@@ -2184,16 +2318,14 @@ const Inventory = () => {
 
   const handleWasteSubmit = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     try {
       const formData = new FormData();
-
-      // Determine if this is a food item or inventory item
-      const isFoodItem = wasteForm.item_id && wasteForm.item_id.toString().startsWith('food_');
+      const isFoodItem = wasteForm.is_food_item;
 
       if (isFoodItem) {
-        // Extract food item ID (remove 'food_' prefix)
-        const foodItemId = wasteForm.item_id.replace('food_', '');
-        formData.append("food_item_id", foodItemId);
+        formData.append("food_item_id", wasteForm.food_item_id);
         formData.append("is_food_item", "1");
       } else {
         if (wasteForm.item_id) {
@@ -2238,7 +2370,6 @@ const Inventory = () => {
         notes: "",
         photo: null,
       });
-      // Removed fetchData
     } catch (error) {
       console.error("Error creating waste log:", error);
       addNotification({
@@ -2246,6 +2377,8 @@ const Inventory = () => {
         message: "Failed to create waste log: " + (error.response?.data?.detail || error.message),
         type: "error"
       });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -2265,8 +2398,20 @@ const Inventory = () => {
   const handleLocationSubmit = async (e) => {
     e.preventDefault();
     try {
-      await API.post("/inventory/locations", locationForm);
+      // Enterprise view branch selection
+      const isEnterpriseView = activeBranchId === 'all';
+      const config = {};
+      if (isEnterpriseView) {
+        if (!selectedBranchForCreation) {
+          addNotification({ title: "Branch Required", message: "Please select a branch to assign this location to.", type: "error" });
+          return;
+        }
+        config.headers = { "X-Branch-ID": selectedBranchForCreation };
+      }
+
+      await API.post("/inventory/locations", locationForm, config);
       addNotification({ title: "Success", message: "Location created successfully!", type: "success" });
+      setSelectedBranchForCreation("");
       setShowLocationForm(false);
       setLocationForm({
         name: "",
@@ -2517,7 +2662,7 @@ const Inventory = () => {
               <div className="flex flex-col items-start bg-blue-50/50 p-1 rounded">
                 <span className="font-bold text-2xl text-gray-800">{summary.totalItems} SKUs</span>
                 <span className="text-sm font-medium text-blue-600">
-                  Stock: {parseFloat(items.reduce((sum, item) => sum + (parseFloat(item.current_stock) || 0), 0).toFixed(2))} units
+                  Stock: {items.reduce((sum, item) => sum + (parseFloat(item.current_stock) || 0), 0).toFixed(2)} units
                 </span>
               </div>
             }
@@ -2578,38 +2723,20 @@ const Inventory = () => {
 
         {/* Tabs */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100">
-          <div className="flex border-b border-gray-200 overflow-x-auto scrollbar-hide">
-            {[
-              "items",
-              "categories",
-              "vendors",
-              "purchases",
-              "transactions",
-              "requisitions",
-              "issues",
-              "waste",
-              "locations",
-              "assets",
-              "laundry",
-              "location-stock",
-              "recipe",
-            ].map((tab) => (
+          <div className="flex border-b border-gray-200 overflow-x-auto scrollbar-hide scroll-smooth">
+            {inventoryTabs.map((tab) => (
               <button
-                key={tab}
+                key={tab.id}
                 onClick={() => {
-                  setActiveTab(tab);
+                  setActiveTab(tab.id);
                   setSearchTerm("");
                 }}
-                className={`px-6 py-3 font-medium capitalize transition-colors whitespace-nowrap flex-shrink-0 ${activeTab === tab
+                className={`px-6 py-3 font-medium capitalize transition-colors whitespace-nowrap flex-shrink-0 ${activeTab === tab.id
                   ? "text-indigo-600 border-b-2 border-indigo-600"
                   : "text-gray-600 hover:text-gray-900"
                   }`}
               >
-                {tab === "location-stock"
-                  ? "Location Stock"
-                  : tab === "recipe"
-                    ? "Recipe"
-                    : tab}
+                {tab.label}
               </button>
             ))}
           </div>
@@ -2635,7 +2762,7 @@ const Inventory = () => {
                   </button>
                 )}
               </div>
-              {activeTab === "items" && (
+              {activeTab === "items" && hasPermission('inventory_item:create') && (
                 <button
                   onClick={() => setShowItemForm(true)}
                   className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-lg hover:from-indigo-700 hover:to-indigo-800 flex items-center gap-2 shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 font-semibold text-base"
@@ -2644,7 +2771,7 @@ const Inventory = () => {
                   Add New Item
                 </button>
               )}
-              {activeTab === "categories" && (
+              {activeTab === "categories" && hasPermission('inventory_category:create') && (
                 <button
                   onClick={() => setShowCategoryForm(true)}
                   className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"
@@ -2653,7 +2780,7 @@ const Inventory = () => {
                   Add Category
                 </button>
               )}
-              {activeTab === "vendors" && (
+              {activeTab === "vendors" && hasPermission('inventory_vendor:create') && (
                 <button
                   onClick={() => setShowVendorForm(true)}
                   className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"
@@ -2662,7 +2789,7 @@ const Inventory = () => {
                   Add Vendor
                 </button>
               )}
-              {activeTab === "purchases" && (
+              {activeTab === "purchases" && hasPermission('inventory_purchase:create') && (
                 <button
                   onClick={() => setShowPurchaseForm(true)}
                   className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"
@@ -2671,7 +2798,7 @@ const Inventory = () => {
                   New Purchase
                 </button>
               )}
-              {activeTab === "requisitions" && (
+              {activeTab === "requisitions" && hasPermission('inventory_requisition:create') && (
                 <button
                   onClick={() => setShowRequisitionForm(true)}
                   className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"
@@ -2682,23 +2809,27 @@ const Inventory = () => {
               )}
               {activeTab === "issues" && (
                 <>
-                  <button
-                    onClick={() => setShowIssueForm(true)}
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"
-                  >
-                    <Plus className="w-4 h-4" />
-                    New Issue
-                  </button>
-                  <button
-                    onClick={() => setShowAdjustmentForm(true)}
-                    className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 flex items-center gap-2 ml-2"
-                  >
-                    <Filter className="w-4 h-4" />
-                    Adjust Stock
-                  </button>
+                  {hasPermission('inventory_issue:create') && (
+                    <button
+                      onClick={() => setShowIssueForm(true)}
+                      className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"
+                    >
+                      <Plus className="w-4 h-4" />
+                      New Issue
+                    </button>
+                  )}
+                  {hasPermission('inventory_issue:edit') && (
+                    <button
+                      onClick={() => setShowAdjustmentForm(true)}
+                      className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 flex items-center gap-2 ml-2"
+                    >
+                      <Filter className="w-4 h-4" />
+                      Adjust Stock
+                    </button>
+                  )}
                 </>
               )}
-              {activeTab === "waste" && (
+              {activeTab === "waste" && hasPermission('inventory_waste:create') && (
                 <button
                   onClick={() => setShowWasteForm(true)}
                   className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"
@@ -2707,7 +2838,7 @@ const Inventory = () => {
                   Log Waste/Spoilage
                 </button>
               )}
-              {activeTab === "locations" && (
+              {activeTab === "locations" && hasPermission('inventory_location:create') && (
                 <button
                   onClick={() => setShowLocationForm(true)}
                   className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"
@@ -2716,7 +2847,7 @@ const Inventory = () => {
                   New Location
                 </button>
               )}
-              {activeTab === "assets" && (
+              {activeTab === "assets" && hasPermission('inventory_asset:create') && (
                 <button
                   onClick={() => setShowAssetMappingForm(true)}
                   className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"
@@ -2742,6 +2873,8 @@ const Inventory = () => {
                     onDelete={handleDeleteItem}
                     onEdit={handleEditItem}
                     onViewHistory={handleViewHistory}
+                    onMarkWaste={handleMarkWaste}
+                    activeBranchId={activeBranchId}
                   />
                 )}
                 {activeTab === "categories" && (
@@ -2814,10 +2947,12 @@ const Inventory = () => {
                         filteredRequisitions.map((req) => (
                           <div
                             key={req.id}
-                            className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
+                            className={`bg-white border border-gray-200 rounded-lg p-4 shadow-sm transition-shadow ${hasPermission('inventory_requisition:view') ? 'cursor-pointer hover:shadow-md' : ''}`}
                             onClick={() => {
-                              setSelectedRequisition(req);
-                              setShowRequisitionDetails(true);
+                              if (hasPermission('inventory_requisition:view')) {
+                                setSelectedRequisition(req);
+                                setShowRequisitionDetails(true);
+                              }
                             }}
                           >
                             <div className="flex justify-between items-start mb-2">
@@ -2869,22 +3004,33 @@ const Inventory = () => {
                               )}
                             </div>
                             <div className="mt-3" onClick={(e) => e.stopPropagation()}>
-                              <select
-                                value={req.status}
-                                onChange={(e) => handleRequisitionStatusChange(req.id, e.target.value)}
-                                className={`w-full px-3 py-2 text-sm border rounded-lg ${req.status === 'approved' ? 'bg-green-50 text-green-700 border-green-200' :
+                              {hasPermission('inventory_requisition:edit') ? (
+                                <select
+                                  value={req.status}
+                                  onChange={(e) => handleRequisitionStatusChange(req.id, e.target.value)}
+                                  className={`w-full px-3 py-2 text-sm border rounded-lg ${req.status === 'approved' ? 'bg-green-50 text-green-700 border-green-200' :
+                                    req.status === 'issued' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                                      req.status === 'rejected' ? 'bg-red-50 text-red-700 border-red-200' :
+                                        req.status === 'completed' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                                          'bg-yellow-50 text-yellow-700 border-yellow-200'
+                                    }`}
+                                >
+                                  <option value="pending">Pending</option>
+                                  <option value="approved">Approved</option>
+                                  <option value="issued">Issued</option>
+                                  <option value="rejected">Rejected</option>
+                                  <option value="completed">Completed</option>
+                                </select>
+                              ) : (
+                                <div className={`w-full px-3 py-2 text-sm border rounded-lg text-center font-medium ${req.status === 'approved' ? 'bg-green-50 text-green-700 border-green-200' :
                                   req.status === 'issued' ? 'bg-blue-50 text-blue-700 border-blue-200' :
                                     req.status === 'rejected' ? 'bg-red-50 text-red-700 border-red-200' :
                                       req.status === 'completed' ? 'bg-blue-50 text-blue-700 border-blue-200' :
                                         'bg-yellow-50 text-yellow-700 border-yellow-200'
-                                  }`}
-                              >
-                                <option value="pending">Pending</option>
-                                <option value="approved">Approved</option>
-                                <option value="issued">Issued</option>
-                                <option value="rejected">Rejected</option>
-                                <option value="completed">Completed</option>
-                              </select>
+                                  }`}>
+                                  {req.status}
+                                </div>
+                              )}
                             </div>
                           </div>
                         ))
@@ -2979,30 +3125,43 @@ const Inventory = () => {
                                 <td className="px-2 sm:px-4 py-3 text-sm text-gray-600">
                                   {req.details?.length || 0} items
                                 </td>
-                                <td
+                                 <td
                                   className="px-2 sm:px-4 py-3"
                                   onClick={(e) => e.stopPropagation()}
                                 >
-                                  <select
-                                    value={req.status}
-                                    onChange={(e) => handleRequisitionStatusChange(req.id, e.target.value)}
-                                    className={`px-3 py-1 text-sm rounded border ${req.status === "approved"
-                                      ? "bg-green-100 text-green-800 border-green-300"
+                                  {hasPermission('inventory_requisition:edit') ? (
+                                    <select
+                                      value={req.status}
+                                      onChange={(e) => handleRequisitionStatusChange(req.id, e.target.value)}
+                                      className={`px-3 py-1 text-sm rounded border ${req.status === "approved"
+                                        ? "bg-green-100 text-green-800 border-green-300"
+                                        : req.status === "issued"
+                                          ? "bg-blue-100 text-blue-800 border-blue-300"
+                                          : req.status === "rejected"
+                                            ? "bg-red-100 text-red-800 border-red-300"
+                                            : req.status === "completed"
+                                              ? "bg-blue-100 text-blue-800 border-blue-300"
+                                              : "bg-yellow-100 text-yellow-800 border-yellow-300"
+                                        }`}
+                                    >
+                                      <option value="pending">Pending</option>
+                                      <option value="approved">Approved</option>
+                                      <option value="issued">Issued</option>
+                                      <option value="rejected">Rejected</option>
+                                      <option value="completed">Completed</option>
+                                    </select>
+                                  ) : (
+                                    <span className={`px-2 py-1 text-xs rounded-full ${req.status === "approved"
+                                      ? "bg-green-100 text-green-800"
                                       : req.status === "issued"
-                                        ? "bg-blue-100 text-blue-800 border-blue-300"
+                                        ? "bg-blue-100 text-blue-800"
                                         : req.status === "rejected"
-                                          ? "bg-red-100 text-red-800 border-red-300"
-                                          : req.status === "completed"
-                                            ? "bg-blue-100 text-blue-800 border-blue-300"
-                                            : "bg-yellow-100 text-yellow-800 border-yellow-300"
-                                      }`}
-                                  >
-                                    <option value="pending">Pending</option>
-                                    <option value="approved">Approved</option>
-                                    <option value="issued">Issued</option>
-                                    <option value="rejected">Rejected</option>
-                                    <option value="completed">Completed</option>
-                                  </select>
+                                          ? "bg-red-100 text-red-800"
+                                          : "bg-yellow-100 text-yellow-800"
+                                      }`}>
+                                      {req.status}
+                                    </span>
+                                  )}
                                 </td>
                               </tr>
                             ))
@@ -3024,10 +3183,12 @@ const Inventory = () => {
                         filteredIssues.map((issue) => (
                           <div
                             key={issue.id}
-                            className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
+                            className={`bg-white border border-gray-200 rounded-lg p-4 shadow-sm transition-shadow ${hasPermission('inventory_issue:view') ? 'cursor-pointer hover:shadow-md' : ''}`}
                             onClick={() => {
-                              setSelectedIssue(issue);
-                              setShowIssueDetails(true);
+                              if (hasPermission('inventory_issue:view')) {
+                                setSelectedIssue(issue);
+                                setShowIssueDetails(true);
+                              }
                             }}
                           >
                             <div className="flex justify-between items-start mb-2">
@@ -3139,10 +3300,12 @@ const Inventory = () => {
                         filteredWasteLogs.map((log) => (
                           <div
                             key={log.id}
-                            className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
+                            className={`bg-white border border-gray-200 rounded-lg p-4 shadow-sm transition-shadow ${hasPermission('inventory_waste:view') ? 'cursor-pointer hover:shadow-md' : ''}`}
                             onClick={() => {
-                              setSelectedWasteLog(log);
-                              setShowWasteLogDetails(true);
+                              if (hasPermission('inventory_waste:view')) {
+                                setSelectedWasteLog(log);
+                                setShowWasteLogDetails(true);
+                              }
                             }}
                           >
                             <div className="flex justify-between items-start mb-2">
@@ -3266,10 +3429,12 @@ const Inventory = () => {
                         filteredLocations.map((loc) => (
                           <div
                             key={loc.id}
-                            className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
+                            className={`bg-white border border-gray-200 rounded-lg p-4 shadow-sm transition-shadow ${hasPermission('inventory_location:view') ? 'cursor-pointer hover:shadow-md' : ''}`}
                             onClick={() => {
-                              setSelectedLocation(loc);
-                              setShowLocationDetails(true);
+                              if (hasPermission('inventory_location:view')) {
+                                setSelectedLocation(loc);
+                                setShowLocationDetails(true);
+                              }
                             }}
                           >
                             <div className="flex justify-between items-start mb-2">
@@ -3462,14 +3627,16 @@ const Inventory = () => {
                       ) : (
                         <>
                           {filteredAssets.map((mapping) => (
-                            <div
-                              key={mapping.id}
-                              className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
-                              onClick={() => {
+                          <div
+                            key={mapping.id}
+                            className={`bg-white border border-gray-200 rounded-lg p-4 shadow-sm transition-shadow ${hasPermission('inventory_asset:view') ? 'cursor-pointer hover:shadow-md' : ''}`}
+                            onClick={() => {
+                              if (hasPermission('inventory_asset:view')) {
                                 setSelectedAsset(mapping);
                                 setShowAssetDetails(true);
-                              }}
-                            >
+                              }
+                            }}
+                          >
                               <div className="flex justify-between items-start mb-2">
                                 <h3 className="font-semibold text-gray-900">
                                   {mapping.item_name || "N/A"}
@@ -3496,35 +3663,37 @@ const Inventory = () => {
                                   </p>
                                 )}
                               </div>
-                              <div className="flex gap-2 mt-3">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setEditingAssetMapping(mapping);
-                                    setAssetMappingForm({
-                                      location_id: mapping.location_id,
-                                      assets: [{
-                                        item_id: mapping.item_id,
-                                        serial_number: mapping.serial_number,
-                                        quantity: mapping.quantity || 1,
-                                        notes: mapping.notes
-                                      }]
-                                    });
-                                    setShowAssetMappingForm(true);
-                                  }}
-                                  className="flex-1 px-3 py-2 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700"
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleUnassignAsset(mapping.id);
-                                  }}
-                                  className="flex-1 px-3 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700">
-                                  Unassign
-                                </button>
-                              </div>
+                              {hasPermission('inventory_asset:edit') && (
+                                <div className="flex gap-2 mt-3">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setEditingAssetMapping(mapping);
+                                      setAssetMappingForm({
+                                        location_id: mapping.location_id,
+                                        assets: [{
+                                          item_id: mapping.item_id,
+                                          serial_number: mapping.serial_number,
+                                          quantity: mapping.quantity || 1,
+                                          notes: mapping.notes
+                                        }]
+                                      });
+                                      setShowAssetMappingForm(true);
+                                    }}
+                                    className="flex-1 px-3 py-2 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleUnassignAsset(mapping.id);
+                                    }}
+                                    className="flex-1 px-3 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700">
+                                    Unassign
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           ))}
 
@@ -3540,7 +3709,7 @@ const Inventory = () => {
                     </div>
 
                     {/* Desktop Table View */}
-                    <div className="hidden md:block overflow-x-auto max-h-[600px] overflow-y-auto" onScroll={handleAssetScroll}>
+                    <div className="hidden md:block overflow-x-auto max-h-[600px] overflow-y-auto scroll-smooth" onScroll={handleAssetScroll}>
                       <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-gray-50">
                           <tr>
@@ -3593,7 +3762,7 @@ const Inventory = () => {
                                     {mapping.location_name || "-"}
                                   </td>
                                   <td className="px-2 sm:px-4 py-3 text-sm text-gray-600">
-                                    {mapping.quantity || 1}
+                                    {parseFloat(mapping.quantity || 1).toFixed(2)}
                                   </td>
                                   <td className="px-2 sm:px-4 py-3 text-sm text-gray-600 hidden lg:table-cell">
                                     {mapping.serial_number || "-"}
@@ -3607,35 +3776,37 @@ const Inventory = () => {
                                     className="px-2 sm:px-4 py-3"
                                     onClick={(e) => e.stopPropagation()}
                                   >
-                                    <div className="flex gap-2">
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setEditingAssetMapping(mapping);
-                                          setAssetMappingForm({
-                                            location_id: mapping.location_id,
-                                            assets: [{
-                                              item_id: mapping.item_id,
-                                              serial_number: mapping.serial_number,
-                                              quantity: mapping.quantity || 1,
-                                              notes: mapping.notes
-                                            }]
-                                          });
-                                          setShowAssetMappingForm(true);
-                                        }}
-                                        className="px-3 py-1 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700"
-                                      >
-                                        Edit
-                                      </button>
-                                      <button
-                                        onClick={() =>
-                                          handleUnassignAsset(mapping.id)
-                                        }
-                                        className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700"
-                                      >
-                                        Unassign
-                                      </button>
-                                    </div>
+                                    {hasPermission('inventory_asset:edit') && (
+                                      <div className="flex gap-2">
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setEditingAssetMapping(mapping);
+                                            setAssetMappingForm({
+                                              location_id: mapping.location_id,
+                                              assets: [{
+                                                item_id: mapping.item_id,
+                                                serial_number: mapping.serial_number,
+                                                quantity: mapping.quantity || 1,
+                                                notes: mapping.notes
+                                              }]
+                                            });
+                                            setShowAssetMappingForm(true);
+                                          }}
+                                          className="px-3 py-1 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700"
+                                        >
+                                          Edit
+                                        </button>
+                                        <button
+                                          onClick={() =>
+                                            handleUnassignAsset(mapping.id)
+                                          }
+                                          className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700"
+                                        >
+                                          Unassign
+                                        </button>
+                                      </div>
+                                    )}
                                   </td>
                                 </tr>
                               ))}
@@ -3691,24 +3862,26 @@ const Inventory = () => {
                       <h3 className="text-lg font-semibold text-gray-800">
                         Food Item Recipes
                       </h3>
-                      <button
-                        onClick={() => {
-                          setRecipeForm({
-                            food_item_id: "",
-                            name: "",
-                            description: "",
-                            servings: 1,
-                            prep_time_minutes: "",
-                            cook_time_minutes: "",
-                            ingredients: [],
-                          });
-                          setEditingRecipe(null);
-                          setShowRecipeModal(true);
-                        }}
-                        className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
-                      >
-                        + Add Recipe
-                      </button>
+                      {hasPermission('inventory_recipe:create') && (
+                        <button
+                          onClick={() => {
+                            setRecipeForm({
+                              food_item_id: "",
+                              name: "",
+                              description: "",
+                              servings: 1,
+                              prep_time_minutes: "",
+                              cook_time_minutes: "",
+                              ingredients: [],
+                            });
+                            setEditingRecipe(null);
+                            setShowRecipeModal(true);
+                          }}
+                          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                        >
+                          + Add Recipe
+                        </button>
+                      )}
                     </div>
 
                     {recipes.length === 0 ? (
@@ -3759,63 +3932,67 @@ const Inventory = () => {
                                 <td className="px-4 py-3 text-sm font-semibold text-green-600">
                                   ₹{recipe.total_cost?.toFixed(2) || "0.00"}
                                 </td>
-                                <td className="px-4 py-3 text-sm">
-                                  <div className="flex gap-2">
-                                    <button
-                                      onClick={() => {
-                                        setEditingRecipe(recipe);
-                                        setRecipeForm({
-                                          food_item_id: recipe.food_item_id,
-                                          name: recipe.name,
-                                          description: recipe.description || "",
-                                          servings: recipe.servings,
-                                          prep_time_minutes:
-                                            recipe.prep_time_minutes || "",
-                                          cook_time_minutes:
-                                            recipe.cook_time_minutes || "",
-                                          ingredients: recipe.ingredients.map(
-                                            (ing) => ({
-                                              inventory_item_id:
-                                                ing.inventory_item_id,
-                                              quantity: ing.quantity,
-                                              unit: ing.unit,
-                                              notes: ing.notes || "",
-                                            }),
-                                          ),
-                                        });
-                                        setShowRecipeModal(true);
-                                      }}
-                                      className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
-                                    >
-                                      Edit
-                                    </button>
-                                    <button
-                                      onClick={async () => {
-                                        if (
-                                          window.confirm(
-                                            "Are you sure you want to delete this recipe?",
-                                          )
-                                        ) {
-                                          try {
-                                            await API.delete(
-                                              `/recipes/${recipe.id}`,
-                                            );
-                                            fetchData();
-                                          } catch (error) {
-                                            alert(
-                                              "Failed to delete recipe: " +
-                                              (error.response?.data?.detail ||
-                                                error.message),
-                                            );
-                                          }
-                                        }
-                                      }}
-                                      className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600"
-                                    >
-                                      Delete
-                                    </button>
-                                  </div>
-                                </td>
+                                  <td className="px-4 py-3 text-sm">
+                                    <div className="flex gap-2">
+                                      {hasPermission('inventory_recipe:edit') && (
+                                        <button
+                                          onClick={() => {
+                                            setEditingRecipe(recipe);
+                                            setRecipeForm({
+                                              food_item_id: recipe.food_item_id,
+                                              name: recipe.name,
+                                              description: recipe.description || "",
+                                              servings: recipe.servings,
+                                              prep_time_minutes:
+                                                recipe.prep_time_minutes || "",
+                                              cook_time_minutes:
+                                                recipe.cook_time_minutes || "",
+                                              ingredients: recipe.ingredients.map(
+                                                (ing) => ({
+                                                  inventory_item_id:
+                                                    ing.inventory_item_id,
+                                                  quantity: ing.quantity,
+                                                  unit: ing.unit,
+                                                  notes: ing.notes || "",
+                                                }),
+                                              ),
+                                            });
+                                            setShowRecipeModal(true);
+                                          }}
+                                          className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+                                        >
+                                          Edit
+                                        </button>
+                                      )}
+                                      {hasPermission('inventory_recipe:delete') && (
+                                        <button
+                                          onClick={async () => {
+                                            if (
+                                              window.confirm(
+                                                "Are you sure you want to delete this recipe?",
+                                              )
+                                            ) {
+                                              try {
+                                                await API.delete(
+                                                  `/recipes/${recipe.id}`,
+                                                );
+                                                fetchData();
+                                              } catch (error) {
+                                                alert(
+                                                  "Failed to delete recipe: " +
+                                                  (error.response?.data?.detail ||
+                                                    error.message),
+                                                );
+                                              }
+                                            }
+                                          }}
+                                          className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600"
+                                        >
+                                          Delete
+                                        </button>
+                                      )}
+                                    </div>
+                                  </td>
                               </tr>
                             ))}
                           </tbody>
@@ -3824,11 +4001,31 @@ const Inventory = () => {
                     )}
                   </div>
                 )}
+                {activeTab === "inter-branch-transfer" && (
+                  <InterBranchTransferTab
+                    transfers={transfers}
+                    onCreateClick={() => setShowTransferForm(true)}
+                    onStatusUpdate={handleTransferStatusUpdate}
+                    loading={loading}
+                    locations={locations}
+                  />
+                )}
               </>
             )}
           </div>
         </div>
       </div>
+
+
+      <InterBranchTransferModal
+        isOpen={showTransferForm}
+        onClose={() => setShowTransferForm(false)}
+        onSubmit={handleTransferSubmit}
+        items={items}
+        locations={locations}
+        branches={branches}
+        activeBranchId={activeBranchId}
+      />
 
 
 
@@ -3895,6 +4092,11 @@ const Inventory = () => {
             setShowUnitForm={setShowUnitForm}
             onSubmit={handleItemSubmit}
             isSubmitting={isSubmitting}
+            editingItem={editingItem}
+            activeBranchId={activeBranchId}
+            branches={branches}
+            selectedBranch={selectedBranchForCreation}
+            setSelectedBranch={setSelectedBranchForCreation}
             onClose={() => {
               setShowItemForm(false);
               setEditingItem(null);
@@ -3938,6 +4140,10 @@ const Inventory = () => {
             form={categoryForm}
             setForm={setCategoryForm}
             onSubmit={handleCategorySubmit}
+            activeBranchId={activeBranchId}
+            selectedBranchForCreation={selectedBranchForCreation}
+            setSelectedBranchForCreation={setSelectedBranchForCreation}
+            branches={branches}
             onClose={() => {
               setShowCategoryForm(false);
               setCategoryForm({
@@ -3971,6 +4177,11 @@ const Inventory = () => {
             setForm={setVendorForm}
             onSubmit={handleVendorSubmit}
             isEditing={!!editingVendor}
+            isSubmittingVendor={isSubmittingVendor}
+            activeBranchId={activeBranchId}
+            selectedBranchForCreation={selectedBranchForCreation}
+            setSelectedBranchForCreation={setSelectedBranchForCreation}
+            branches={branches}
             onClose={() => {
               setShowVendorForm(false);
               setVendorForm({
@@ -4049,6 +4260,7 @@ const Inventory = () => {
             categories={categories}
             vendors={vendors}
             locations={locations}
+            activeBranch={activeBranch}
             purchases={purchases}
             onSubmit={handlePurchaseSubmit}
             onAddDetail={addPurchaseDetail}
@@ -4209,6 +4421,10 @@ const Inventory = () => {
             setForm={setLocationForm}
             locations={locations}
             onSubmit={handleLocationSubmit}
+            activeBranchId={activeBranchId}
+            selectedBranchForCreation={selectedBranchForCreation}
+            setSelectedBranchForCreation={setSelectedBranchForCreation}
+            branches={branches}
             onClose={() => {
               setShowLocationForm(false);
               setLocationForm({
@@ -4365,21 +4581,41 @@ const Inventory = () => {
             foodItems={foodItems}
             items={items}
             editingRecipe={editingRecipe}
+            addNotification={addNotification}
             onSubmit={async (formData) => {
               try {
+                // Check locally for name duplicate
+                const isDuplicate = recipes.some(r =>
+                  r.name.toLowerCase() === formData.name.toLowerCase() &&
+                  (!editingRecipe || r.id !== editingRecipe.id)
+                );
+
+                if (isDuplicate) {
+                  addNotification({
+                    title: "Duplicate Name",
+                    message: `A recipe with the name '${formData.name}' already exists in this branch.`,
+                    type: "error"
+                  });
+                  return;
+                }
+
                 if (editingRecipe) {
                   await API.put(`/recipes/${editingRecipe.id}`, formData);
+                  addNotification({ title: "Success", message: "Recipe updated successfully!", type: "success" });
                 } else {
                   await API.post("/recipes", formData);
+                  addNotification({ title: "Success", message: "Recipe created successfully!", type: "success" });
                 }
                 setShowRecipeModal(false);
                 setEditingRecipe(null);
                 fetchData();
               } catch (error) {
-                alert(
-                  "Failed to save recipe: " +
-                  (error.response?.data?.detail || error.message),
-                );
+                console.error("Recipe save error:", error);
+                addNotification({
+                  title: "Error",
+                  message: "Failed to save recipe: " + (error.response?.data?.detail || error.message),
+                  type: "error"
+                });
               }
             }}
             onClose={() => {
@@ -4415,6 +4651,7 @@ const SmartTransactionsTab = ({
   isLoadingMore,
   onLoadMore
 }) => {
+  const { hasPermission } = usePermissions();
   // State for specific tab logic
   const [filters, setFilters] = useState({
     type: "all",
@@ -4472,7 +4709,17 @@ const SmartTransactionsTab = ({
   };
 
   const getTransactionTypeInfo = (trans) => {
+    const isTransfer = trans.reference_number?.startsWith("TRF-") || trans.notes?.toLowerCase().includes("inter-branch transfer");
+
     if (trans.transaction_type === "in") {
+      if (isTransfer) {
+        return {
+          icon: <ArrowDownCircle className="w-4 h-4" />,
+          label: "Transfer In",
+          color: "text-blue-600 bg-blue-50",
+          statusColor: "bg-blue-500",
+        };
+      }
       if (
         trans.notes?.toLowerCase().includes("initial stock") ||
         trans.notes?.toLowerCase().includes("opening balance")
@@ -4529,6 +4776,14 @@ const SmartTransactionsTab = ({
         statusColor: "bg-purple-500",
       };
     } else if (trans.transaction_type === "out") {
+      if (isTransfer) {
+        return {
+          icon: <ArrowUpCircle className="w-4 h-4" />,
+          label: "Transfer Out",
+          color: "text-purple-600 bg-purple-50",
+          statusColor: "bg-purple-500",
+        };
+      }
       if (
         trans.notes?.toLowerCase().includes("waste") ||
         trans.notes?.toLowerCase().includes("spoilage")
@@ -4809,7 +5064,7 @@ const SmartTransactionsTab = ({
       {/* Master Grid */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
         <div
-          className="overflow-x-auto max-h-[600px] overflow-y-auto"
+          className="overflow-x-auto max-h-[600px] overflow-y-auto scroll-smooth"
           onScroll={handleScroll}
         >
           <table className="min-w-full divide-y divide-gray-200 relative">
@@ -4915,7 +5170,7 @@ const SmartTransactionsTab = ({
                         <div
                           className={`text-sm font-semibold ${isPositive ? "text-green-600" : "text-red-600"}`}
                         >
-                          {isPositive ? "+" : "-"} {trans.quantity}{" "}
+                          {isPositive ? "+" : "-"} {parseFloat(trans.quantity).toFixed(2)}{" "}
                           {itemDetails.unit}
                         </div>
                       </td>
@@ -4960,14 +5215,16 @@ const SmartTransactionsTab = ({
                       {/* Actions */}
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <button
-                            className="p-1 text-gray-600 hover:text-indigo-600"
-                            title="View Details"
-                            onClick={() => onTransactionClick && onTransactionClick(trans)}
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
-                          {typeInfo.label === "Waste/Spoilage" && (
+                          {hasPermission('inventory_transaction:view') && (
+                            <button
+                              className="p-1 text-gray-600 hover:text-indigo-600"
+                              title="View Details"
+                              onClick={() => onTransactionClick && onTransactionClick(trans)}
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          )}
+                          {typeInfo.label === "Waste/Spoilage" && hasPermission('inventory_waste:view') && (
                             <button
                               className="p-1 text-gray-600 hover:text-indigo-600"
                               title="View Photo"
@@ -4990,7 +5247,7 @@ const SmartTransactionsTab = ({
 };
 
 // Category Form Modal - GST Friendly
-function CategoryFormModal({ form, setForm, onSubmit, onClose }) {
+function CategoryFormModal({ form, setForm, onSubmit, onClose, activeBranchId, selectedBranchForCreation, setSelectedBranchForCreation, branches }) {
   // Indian States list for dropdown
   const indianStates = [
     "Andhra Pradesh",
@@ -5049,6 +5306,7 @@ function CategoryFormModal({ form, setForm, onSubmit, onClose }) {
           </button>
         </div>
         <form onSubmit={onSubmit} className="p-6 space-y-6">
+
           {/* Basic Information */}
           <div className="border-b border-gray-200 pb-4">
             <h3 className="text-lg font-semibold text-gray-800 mb-4">
@@ -5442,7 +5700,7 @@ function CategoryFormModal({ form, setForm, onSubmit, onClose }) {
 };
 
 // Vendor Form Modal - GST Friendly
-function VendorFormModal({ form, setForm, onSubmit, onClose, isEditing }) {
+function VendorFormModal({ form, setForm, onSubmit, onClose, isEditing, isSubmittingVendor, activeBranchId, selectedBranchForCreation, setSelectedBranchForCreation, branches }) {
   // Indian States list
   const indianStates = [
     "Andhra Pradesh",
@@ -5525,6 +5783,26 @@ function VendorFormModal({ form, setForm, onSubmit, onClose, isEditing }) {
           </button>
         </div>
         <form onSubmit={onSubmit} className="p-6 space-y-6">
+          {/* Branch Selection - Only for Enterprise View */}
+          {activeBranchId === "all" && !isEditing && (
+            <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 mb-6">
+              <h3 className="text-md font-bold text-indigo-900 mb-3 flex items-center gap-2">
+                🏢 Assign to Branch <span className="text-red-500">*</span>
+              </h3>
+              <select
+                value={selectedBranchForCreation}
+                onChange={(e) => setSelectedBranchForCreation(e.target.value)}
+                className="w-full px-4 py-2.5 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white font-medium"
+                required
+              >
+                <option value="">-- Select Branch --</option>
+                {branches.map(b => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+              <p className="text-xs text-indigo-500 mt-2">You are in Enterprise View. You must select which branch this vendor belongs to.</p>
+            </div>
+          )}
           {/* 1. The Master Switch - GST Registration Type */}
           <div className="border-b border-gray-200 pb-6">
             <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
@@ -6397,9 +6675,17 @@ function VendorFormModal({ form, setForm, onSubmit, onClose, isEditing }) {
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              disabled={isSubmittingVendor}
+              className={`px-6 py-2 rounded-lg text-white font-semibold transition-all shadow-md hover:shadow-lg flex items-center gap-2 ${isSubmittingVendor ? 'bg-gray-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}`}
             >
-              {isEditing ? "Update Vendor" : "Save Vendor"}
+              {isSubmittingVendor ? (
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+              ) : isEditing ? (
+                <Edit className="w-5 h-5" />
+              ) : (
+                <Plus className="w-5 h-5" />
+              )}
+              {isEditing ? "Update Vendor" : "Create Vendor"}
             </button>
           </div>
         </form>
@@ -6421,13 +6707,15 @@ function PurchaseFormModal({
   onAddDetail,
   onRemoveDetail,
   onClose,
+  activeBranch,
 }) {
   // Auto-generate PO Number
   const generatePONumber = () => {
     const today = new Date();
     const dateStr = today.toISOString().slice(0, 10).replace(/-/g, "");
     const count = purchases.length + 1;
-    return `PO-${dateStr}-${String(count).padStart(4, "0")}`;
+    const branchPrefix = activeBranch?.code ? `${activeBranch.code}-` : "";
+    return `PO-${branchPrefix}${dateStr}-${String(count).padStart(4, "0")}`;
   };
 
   // Initialize PO number if empty
@@ -6557,22 +6845,40 @@ function PurchaseFormModal({
 
   return ReactDOM.createPortal(
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[10000]">
-      <div className="bg-white rounded-xl shadow-xl max-w-6xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b border-gray-200 flex justify-between items-center">
+      <div className="bg-white rounded-xl shadow-xl max-w-[98vw] md:max-w-[1750px] w-full mx-2 max-h-[96vh] overflow-y-auto">
+        <div className="p-6 border-b border-gray-200 flex justify-between items-center sticky top-0 bg-white z-20">
           <h2 className="text-2xl font-bold text-gray-800">
-            New Purchase Order
+            New Purchase Order (Enhanced)
           </h2>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600"
-          >
-            <X className="w-6 h-6" />
-          </button>
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <input
+                type="text"
+                placeholder="Search Item in List..."
+                className="pl-9 pr-4 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 w-64"
+                onChange={(e) => {
+                  const val = e.target.value.toLowerCase();
+                  // We'll use this to filter the global items list passed to this modal if needed, 
+                  // or just let it be a local filter for the dropdowns.
+                  window._itemSearchQuery = val; 
+                  // Trigger a re-render of the item selection components
+                  setForm({...form});
+                }}
+              />
+            </div>
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-600"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          </div>
         </div>
         <form onSubmit={onSubmit} className="p-6 space-y-4">
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-4 gap-4 bg-gray-50 p-4 rounded-xl border border-gray-100 mb-6">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-semibold text-gray-700 mb-1">
                 PO Number *
               </label>
               <input
@@ -6581,20 +6887,18 @@ function PurchaseFormModal({
                 onChange={(e) =>
                   setForm({ ...form, purchase_number: e.target.value })
                 }
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
                 required
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-semibold text-gray-700 mb-1">
                 Vendor *
               </label>
               <select
                 value={form.vendor_id}
-                onChange={(e) =>
-                  setForm({ ...form, vendor_id: e.target.value })
-                }
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                onChange={(e) => handleVendorSelect(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
                 required
               >
                 <option value="">Select Vendor</option>
@@ -6606,7 +6910,7 @@ function PurchaseFormModal({
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-semibold text-gray-700 mb-1">
                 Purchase Date *
               </label>
               <input
@@ -6615,88 +6919,18 @@ function PurchaseFormModal({
                 onChange={(e) =>
                   setForm({ ...form, purchase_date: e.target.value })
                 }
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
                 required
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Expected Delivery
-              </label>
-              <input
-                type="date"
-                value={form.expected_delivery_date}
-                onChange={(e) =>
-                  setForm({ ...form, expected_delivery_date: e.target.value })
-                }
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Invoice Number
-              </label>
-              <input
-                type="text"
-                value={form.invoice_number}
-                onChange={(e) =>
-                  setForm({ ...form, invoice_number: e.target.value })
-                }
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Status
-              </label>
-              <select
-                value={form.status}
-                onChange={(e) => setForm({ ...form, status: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-              >
-                <option value="draft">Draft</option>
-                <option value="confirmed">Confirmed</option>
-                <option value="received">Received</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Payment Method
-              </label>
-              <select
-                value={form.payment_method || "Bank Transfer"}
-                onChange={(e) => setForm({ ...form, payment_method: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-              >
-                <option value="Cash">Cash</option>
-                <option value="Bank Transfer">Bank Transfer</option>
-                <option value="UPI">UPI</option>
-                <option value="Cheque">Cheque</option>
-                <option value="Credit Card">Credit Card</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Payment Status
-              </label>
-              <select
-                value={form.payment_status}
-                onChange={(e) => setForm({ ...form, payment_status: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-              >
-                <option value="pending">Pending</option>
-                <option value="partial">Partial</option>
-                <option value="paid">Paid</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-semibold text-gray-700 mb-1">
                 Destination Location *
               </label>
               <select
                 value={form.destination_location_id || ""}
                 onChange={(e) => setForm({ ...form, destination_location_id: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
                 required
               >
                 <option value="">Select Destination</option>
@@ -6708,202 +6942,87 @@ function PurchaseFormModal({
                     </option>
                   ))}
               </select>
-              <p className="text-xs text-gray-500 mt-1">
-                Where items will be stored when received
-              </p>
             </div>
           </div>
 
           <div className="border-t pt-4">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold text-gray-800">
-                Purchase Items (Smart Entry)
+              <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <ShoppingCart className="w-6 h-6 text-indigo-600" />
+                Purchase Items
               </h3>
               <button
                 type="button"
                 onClick={onAddDetail}
-                className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white font-semibold rounded-lg hover:from-indigo-700 hover:to-indigo-800 flex items-center gap-2 shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200"
+                className="px-6 py-2.5 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 flex items-center gap-2 shadow-lg transition-all"
               >
                 <Plus className="w-5 h-5" />
-                Add Item
+                Add New Row
               </button>
             </div>
 
-            {/* Items Grid */}
-            <div className="overflow-x-auto border-2 border-indigo-200 rounded-lg">
-              <table className="w-full min-w-[1400px]">
-                <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-sm font-bold text-gray-700 uppercase tracking-wider w-16">
-                      <span className="sr-only">Action</span>
-                    </th>
-                    <th className="px-4 py-3 text-left text-sm font-bold text-gray-700 uppercase tracking-wider min-w-[250px]">
-                      Item Name <span className="text-red-500">*</span>
-                    </th>
-                    <th className="px-4 py-3 text-left text-sm font-bold text-gray-700 uppercase tracking-wider min-w-[140px]">
-                      Category
-                    </th>
-                    <th className="px-4 py-3 text-left text-sm font-bold text-gray-700 uppercase tracking-wider w-28">
-                      HSN
-                    </th>
-                    <th className="px-4 py-3 text-left text-sm font-bold text-gray-700 uppercase tracking-wider w-24">
-                      Unit
-                    </th>
-                    <th className="px-4 py-3 text-left text-sm font-bold text-gray-700 uppercase tracking-wider min-w-[140px]">
-                      Serial/Batch
-                    </th>
-                    <th className="px-4 py-3 text-left text-sm font-bold text-gray-700 uppercase tracking-wider min-w-[140px]">
-                      Expiry
-                    </th>
-                    <th className="px-4 py-3 text-left text-sm font-bold text-gray-700 uppercase tracking-wider w-32 min-w-[120px]">
-                      Qty <span className="text-red-500">*</span>
-                    </th>
-                    <th className="px-4 py-3 text-left text-sm font-bold text-gray-700 uppercase tracking-wider w-40 min-w-[160px]">
-                      Unit Price <span className="text-red-500">*</span>
-                    </th>
-                    <th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider w-20 min-w-[80px]">
-                      Tax Inc?
-                    </th>
-                    <th className="px-4 py-3 text-left text-sm font-bold text-gray-700 uppercase tracking-wider w-24 min-w-[100px]">
-                      GST %
-                    </th>
-                    <th className="px-4 py-3 text-right text-sm font-bold text-gray-700 uppercase tracking-wider w-32 min-w-[120px]">
-                      Tax Amt
-                    </th>
-                    <th className="px-4 py-3 text-right text-sm font-bold text-gray-700 uppercase tracking-wider w-40 min-w-[160px]">
-                      Net Total
-                    </th>
+            <div className="overflow-x-auto border border-gray-200 rounded-xl shadow-inner bg-gray-50 p-1">
+              <table className="w-full min-w-[1700px] border-separate border-spacing-y-2">
+                <thead className="sticky top-0 z-10">
+                  <tr className="bg-gray-800 text-white rounded-lg">
+                    <th className="px-4 py-3 text-left text-xs font-bold uppercase rounded-l-lg w-12">#</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold uppercase min-w-[280px]">Item (Searchable)</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold uppercase w-32">Qty</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold uppercase w-44">Price</th>
+                    <th className="px-4 py-3 text-center text-xs font-bold uppercase w-20">Inc?</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold uppercase w-32">GST %</th>
+                    <th className="px-4 py-3 text-right text-xs font-bold uppercase w-36">Total</th>
+                    <th className="px-4 py-3 text-right text-xs font-bold uppercase rounded-r-lg w-16"></th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+                <tbody className="divide-y-0">
                   {form.details.map((detail, index) => {
-                    const itemDetails = getItemDetails(detail.item_id);
-                    const isPerishable =
-                      itemDetails?.category?.is_perishable ||
-                      itemDetails?.item?.is_perishable;
-                    const isFixedAsset =
-                      itemDetails?.category?.is_asset_fixed ||
-                      itemDetails?.item?.is_asset_fixed;
-                    const showSerialBatch = isPerishable || isFixedAsset;
-                    const showExpiryDate = isPerishable;
-                    const { taxAmount, netTotal } = calculateRowTotal(detail);
+                    const { netTotal, taxAmount } = calculateRowTotal(detail);
+                    const searchQuery = window._itemSearchQuery || "";
+                    const filteredItems = items.filter(i => 
+                      !searchQuery || i.name.toLowerCase().includes(searchQuery)
+                    );
 
                     return (
-                      <tr
-                        key={index}
-                        className={`transition-colors duration-150 ${index % 2 === 0 ? "bg-white" : "bg-gray-50"} hover:bg-indigo-50`}
-                      >
-                        <td className="px-4 py-3 align-middle text-center">
-                          <button
-                            type="button"
-                            onClick={() => onRemoveDetail(index)}
-                            className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-100 rounded-lg transition-colors"
-                            title="Remove Item"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                      <tr key={index} className="bg-white shadow-sm hover:shadow-md transition-shadow">
+                        <td className="px-4 py-4 text-center font-bold text-gray-400 border-l-4 border-indigo-500 rounded-l-lg">
+                          {index + 1}
                         </td>
-                        <td className="px-4 py-3 align-middle">
+                        <td className="px-4 py-4">
                           <select
                             value={detail.item_id}
-                            onChange={(e) =>
-                              handleItemSelect(index, e.target.value)
-                            }
-                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow shadow-sm"
+                            onChange={(e) => handleItemSelect(index, e.target.value)}
+                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                             required
                           >
-                            <option value="">Select Item</option>
-                            {items.map((item) => (
+                            <option value="">-- Choose Item --</option>
+                            {filteredItems.map((item) => (
                               <option key={item.id} value={item.id}>
-                                {item.name}
+                                {item.name} ({item.current_stock} {item.unit} available)
                               </option>
                             ))}
                           </select>
                         </td>
-                        <td className="px-4 py-3 align-middle">
-                          <div className="px-3 py-2 text-sm bg-gray-100 text-gray-600 rounded-md border border-gray-200 truncate" title={detail.category}>
-                            {detail.category || "-"}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 align-middle">
-                          <div className="px-3 py-2 text-sm bg-gray-100 text-gray-600 rounded-md border border-gray-200 truncate">
-                            {detail.hsn_code || "-"}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 align-middle">
-                          <div className="px-3 py-2 text-sm bg-gray-100 text-gray-600 rounded-md border border-gray-200 text-center">
-                            {detail.unit || "-"}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 align-middle">
-                          {showSerialBatch ? (
-                            <input
-                              type="text"
-                              value={detail.serial_batch || ""}
-                              onChange={(e) =>
-                                updateDetail(
-                                  index,
-                                  "serial_batch",
-                                  e.target.value,
-                                )
-                              }
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow shadow-sm"
-                              placeholder="S/N"
-                            />
-                          ) : (
-                            <div className="text-center text-gray-400">-</div>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 align-middle">
-                          {showExpiryDate ? (
-                            <input
-                              type="date"
-                              value={detail.expiry_date || ""}
-                              onChange={(e) =>
-                                updateDetail(
-                                  index,
-                                  "expiry_date",
-                                  e.target.value,
-                                )
-                              }
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow shadow-sm"
-                            />
-                          ) : (
-                            <div className="text-center text-gray-400">-</div>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 align-middle">
+                        <td className="px-4 py-4">
                           <input
                             type="number"
                             step="any"
-                            min="0"
                             value={detail.quantity}
-                            onChange={(e) =>
-                              updateDetail(
-                                index,
-                                "quantity",
-                                e.target.value,
-                              )
-                            }
-                            className="w-full px-3 py-2 text-sm font-medium border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow shadow-sm text-right"
+                            onWheel={(e) => e.target.blur()} 
+                            onChange={(e) => updateDetail(index, "quantity", e.target.value)}
+                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                             required
                           />
                         </td>
-                        <td className="px-4 py-3 align-middle">
+                        <td className="px-4 py-4">
                           <div className="relative">
-                            <span className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400 text-xs">₹</span>
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">₹</span>
                             <input
                               type="number"
                               step="any"
-                              min="0"
                               value={detail.unit_price}
-                              onChange={(e) =>
-                                updateDetail(
-                                  index,
-                                  "unit_price",
-                                  e.target.value,
-                                )
-                              }
+                              onWheel={(e) => e.target.blur()} 
+                              onChange={(e) => updateDetail(index, "unit_price", e.target.value)}
                               className="w-full pl-6 pr-3 py-2 text-sm font-medium border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow shadow-sm text-right"
                               required
                             />
@@ -7022,32 +7141,16 @@ function PurchaseDetailsModal({ purchase, onClose, onUpdate }) {
 
     setUpdatingStatus(true);
     try {
-      const token = localStorage.getItem("token");
-      const apiBaseUrl = getApiBaseUrl();
-      const response = await fetch(
-        `${apiBaseUrl}/inventory/purchases/${purchase.id}/status?status=${newStatus}`,
-        {
-          method: "PATCH",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        },
-      );
-
-      if (response.ok) {
-        setCurrentStatus(newStatus);
-        if (onUpdate) {
-          onUpdate({ ...purchase, status: newStatus });
-        }
-        alert("Status updated successfully!");
-      } else {
-        const error = await response.json();
-        alert(`Failed to update status: ${error.detail || "Unknown error"}`);
+      await API.patch(`/inventory/purchases/${purchase.id}/status?status=${newStatus}`);
+      
+      setCurrentStatus(newStatus);
+      if (onUpdate) {
+        onUpdate({ ...purchase, status: newStatus });
       }
+      alert("Status updated successfully!");
     } catch (error) {
       console.error("Error updating status:", error);
-      alert("Failed to update status. Please try again.");
+      alert(`Failed to update status: ${error.response?.data?.detail || "Please try again."}`);
     } finally {
       setUpdatingStatus(false);
       setShowStatusDropdown(false);
@@ -7062,33 +7165,16 @@ function PurchaseDetailsModal({ purchase, onClose, onUpdate }) {
 
     setUpdatingPaymentStatus(true);
     try {
-      const token = localStorage.getItem("token");
-      const apiBaseUrl = getApiBaseUrl();
-      const response = await fetch(
-        `${apiBaseUrl}/inventory/purchases/${purchase.id}`,
-        {
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ payment_status: newPaymentStatus }),
-        },
-      );
+      await API.put(`/inventory/purchases/${purchase.id}`, { payment_status: newPaymentStatus });
 
-      if (response.ok) {
-        setCurrentPaymentStatus(newPaymentStatus);
-        if (onUpdate) {
-          onUpdate({ ...purchase, payment_status: newPaymentStatus });
-        }
-        alert("Payment status updated successfully!");
-      } else {
-        const error = await response.json();
-        alert(`Failed to update payment status: ${error.detail || "Unknown error"}`);
+      setCurrentPaymentStatus(newPaymentStatus);
+      if (onUpdate) {
+        onUpdate({ ...purchase, payment_status: newPaymentStatus });
       }
+      alert("Payment status updated successfully!");
     } catch (error) {
       console.error("Error updating payment status:", error);
-      alert("Failed to update payment status. Please try again.");
+      alert(`Failed to update payment status: ${error.response?.data?.detail || "Please try again."}`);
     } finally {
       setUpdatingPaymentStatus(false);
       setShowPaymentStatusDropdown(false);
@@ -7968,7 +8054,7 @@ function IssueFormModal({
                             <option value="">Select Item</option>
                             {availableItems.map((item) => (
                               <option key={item.id} value={item.id} disabled={getSourceStock(item.id) <= 0}>
-                                {item.name} (Stock: {getSourceStock(item.id)})
+                                {item.name} (Stock: {parseFloat(getSourceStock(item.id)).toFixed(2)})
                               </option>
                             ))}
                           </select>
@@ -7976,7 +8062,7 @@ function IssueFormModal({
                         <td className="px-3 py-2">
                           {(() => {
                             const selectedItem = items.find(i => i.id == detail.item_id);
-                            const maxStock = selectedItem ? selectedItem.current_stock : 0;
+                            const maxStock = selectedItem ? parseFloat(selectedItem.current_stock || 0) : 0;
                             return (
                               <div>
                                 <input
@@ -8262,7 +8348,7 @@ function RequisitionFormModal({
                         <td className="px-3 py-2">
                           <input
                             type="text"
-                            value={item ? item.current_stock || 0 : "N/A"}
+                            value={item ? parseFloat(item.current_stock || 0).toFixed(2) : "N/A"}
                             disabled
                             className="w-full px-2 py-1 text-sm border border-gray-200 rounded bg-gray-50 text-gray-600"
                           />
@@ -8367,6 +8453,7 @@ function WasteLogFormModal({
   locations = [],
   onSubmit,
   onClose,
+  isSubmitting,
 }) {
   const wasteReasons = ["Expired", "Damaged", "Spilled", "Theft", "Taste Test"];
 
@@ -8598,15 +8685,27 @@ function WasteLogFormModal({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+              disabled={isSubmitting}
+              className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              disabled={isSubmitting}
+              className={`px-6 py-2 rounded-lg text-white font-semibold transition-all shadow-md ${isSubmitting
+                ? "bg-gray-400 cursor-not-allowed"
+                : "bg-gradient-to-r from-red-600 to-rose-600 hover:shadow-lg active:scale-95"
+                }`}
             >
-              Report Waste
+              {isSubmitting ? (
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Saving...
+                </div>
+              ) : (
+                "Report Waste"
+              )}
             </button>
           </div>
         </form>
@@ -8616,7 +8715,7 @@ function WasteLogFormModal({
 };
 
 // Location Form Modal
-function LocationFormModal({ form, setForm, locations, onSubmit, onClose }) {
+function LocationFormModal({ form, setForm, locations, onSubmit, onClose, activeBranchId, selectedBranchForCreation, setSelectedBranchForCreation, branches }) {
   const locationTypes = [
     { value: "GUEST_ROOM", label: "Guest Room" },
     { value: "WAREHOUSE", label: "Warehouse" },
@@ -8641,6 +8740,27 @@ function LocationFormModal({ form, setForm, locations, onSubmit, onClose }) {
           </button>
         </div>
         <form onSubmit={onSubmit} className="p-6 space-y-4">
+          {/* Branch Selection - Only for Enterprise View */}
+          {activeBranchId === "all" && (
+            <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 mb-6">
+              <h3 className="text-md font-bold text-indigo-900 mb-3 flex items-center gap-2">
+                🏢 Assign to Branch <span className="text-red-500">*</span>
+              </h3>
+              <select
+                value={selectedBranchForCreation}
+                onChange={(e) => setSelectedBranchForCreation(e.target.value)}
+                className="w-full px-4 py-2.5 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white font-medium"
+                required
+              >
+                <option value="">-- Select Branch --</option>
+                {branches.map(b => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+              <p className="text-xs text-indigo-500 mt-2">You are in Enterprise View. You must select which branch this location belongs to.</p>
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Location Name *
@@ -9014,7 +9134,7 @@ function AssetMappingFormModal({
 
                         return (
                           <option key={item.id} value={item.id} disabled={isDisabled}>
-                            {item.name} {asset.source_location_id ? `(${stock})` : ""}
+                            {item.name} {asset.source_location_id ? `(${parseFloat(stock).toFixed(2)})` : ""}
                           </option>
                         );
                       })}
@@ -9049,7 +9169,7 @@ function AssetMappingFormModal({
 
                   <div className="w-full sm:w-48">
                     <label className="block text-xs font-semibold text-gray-600 mb-1.5">
-                      Serial Number
+                      Serial Number <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="text"
@@ -9059,6 +9179,7 @@ function AssetMappingFormModal({
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm"
                       placeholder="e.g. SN-001"
+                      required
                     />
                   </div>
 
@@ -9626,16 +9747,21 @@ function WasteLogDetailsModal({ wasteLog, items, locations, onClose }) {
               <label className="text-xs font-medium text-gray-500">
                 Photo Proof
               </label>
-              <div className="mt-2">
-                <img
-                  src={`http://localhost:8011${wasteLog.photo_path}`}
-                  alt="Waste proof"
-                  className="max-w-full h-auto rounded-lg border border-gray-200"
-                  onError={(e) => {
-                    e.target.style.display = "none";
-                  }}
-                />
-              </div>
+                <div className="bg-gray-50 rounded-lg p-4 border border-dashed border-gray-300">
+                  <p className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wider">Photo Proof</p>
+                  <div className="relative group cursor-zoom-in" onClick={() => window.open(getImageUrl(wasteLog.photo_path), '_blank')}>
+                    <img
+                      src={getImageUrl(wasteLog.photo_path)}
+                      alt="Waste Proof"
+                      className="w-full h-48 object-cover rounded-lg shadow-sm border border-gray-200 transition-transform hover:scale-[1.02]"
+                    />
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors rounded-lg flex items-center justify-center">
+                      <div className="bg-white/90 px-3 py-1 rounded-full text-xs font-semibold text-gray-800 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 shadow-lg">
+                        <Image className="w-3 h-3" /> Click to view full
+                      </div>
+                    </div>
+                  </div>
+                </div>
             </div>
           )}
           {wasteLog.notes && (
@@ -9948,6 +10074,7 @@ function RecipeFormModal({
   editingRecipe,
   onSubmit,
   onClose,
+  addNotification,
 }) {
   const addIngredient = () => {
     setForm({
@@ -9975,9 +10102,11 @@ function RecipeFormModal({
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!form.food_item_id || !form.name || form.ingredients.length === 0) {
-      alert(
-        "Please fill in all required fields and add at least one ingredient",
-      );
+      addNotification({
+        title: "Validation Error",
+        message: "Please fill in all required fields and add at least one ingredient",
+        type: "error"
+      });
       return;
     }
     onSubmit(form);
@@ -10319,7 +10448,7 @@ function AdjustmentFormModal({
           <div className="bg-blue-50 p-3 rounded-lg flex justify-between items-center">
             <span className="text-sm text-blue-800 font-medium">Current Stock in System:</span>
             <span className="text-lg font-bold text-blue-900">
-              {loadingStock ? "..." : currentStock !== null ? currentStock : "-"}
+              {loadingStock ? "..." : currentStock !== null ? parseFloat(currentStock).toFixed(2) : "-"}
             </span>
           </div>
 
@@ -10367,6 +10496,280 @@ function AdjustmentFormModal({
     document.body
   );
 }
+
+
+function InterBranchTransferTab({ transfers, onCreateClick, onStatusUpdate, loading, locations }) {
+  const { hasPermission } = usePermissions();
+  const [receivingTransfer, setReceivingTransfer] = useState(null);
+  const [receivingLocationId, setReceivingLocationId] = useState("");
+
+  const getStatusBadge = (status) => {
+    const styles = {
+      pending: "bg-yellow-100 text-yellow-800",
+      in_transit: "bg-blue-100 text-blue-800",
+      received: "bg-green-100 text-green-800",
+      cancelled: "bg-red-100 text-red-800",
+    };
+    return (
+      <span className={`px-2 py-1 rounded-full text-xs font-medium ${styles[status]}`}>
+        {status.replace("_", " ")}
+      </span>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h2 className="text-xl font-bold text-gray-800">Inter-branch Stock Transfers</h2>
+          <p className="text-sm text-gray-500">Manage movement of items between resort branches</p>
+        </div>
+        {hasPermission('inventory_transfer:create') && (
+          <button
+            onClick={onCreateClick}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-md transition-all active:scale-95"
+          >
+            <ArrowRightLeft className="w-4 h-4" />
+            New Transfer Request
+          </button>
+        )}
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Transfer #</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Item</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">From Branch</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">To Branch</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="bg-white divide-y divide-gray-200">
+            {transfers.length === 0 ? (
+              <tr>
+                <td colSpan="7" className="px-6 py-10 text-center text-gray-500">No transfers found</td>
+              </tr>
+            ) : (
+              transfers.map((t) => (
+                <tr key={t.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 text-sm font-bold text-indigo-600">{t.transfer_number}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900">{t.item_name}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900">{t.quantity}</td>
+                  <td className="px-6 py-4 text-sm text-gray-600">{t.source_branch_name}</td>
+                  <td className="px-6 py-4 text-sm text-gray-600">{t.destination_branch_name}</td>
+                  <td className="px-6 py-4">{getStatusBadge(t.status)}</td>
+                  <td className="px-6 py-4 space-x-2">
+                    {hasPermission('inventory_transfer:edit') && (
+                      <>
+                        {t.status === "pending" && (
+                          <button
+                            onClick={() => onStatusUpdate(t.id, "in_transit")}
+                            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                            title="Mark as In Transit (Deducts Stock)"
+                          >
+                            <Ship className="w-5 h-5" />
+                          </button>
+                        )}
+                        {t.status === "in_transit" && (
+                          <button
+                            onClick={() => {
+                              setReceivingTransfer(t);
+                              setReceivingLocationId("");
+                            }}
+                            className="p-1.5 text-green-600 hover:bg-green-50 rounded transition-colors"
+                            title="Receive Stock"
+                          >
+                            <CheckCircle2 className="w-5 h-5" />
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Receive Transfer Modal */}
+      {receivingTransfer && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[11000] p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Receive Stock Transfer</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Receiving <span className="font-bold">{receivingTransfer.quantity} {receivingTransfer.item_name}</span> from {receivingTransfer.source_branch_name}.
+              Select a location in your branch to store it.
+            </p>
+
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Destination Location *</label>
+              <select
+                value={receivingLocationId}
+                onChange={(e) => setReceivingLocationId(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="">Select Location</option>
+                {locations
+                  .filter(l => l.branch_id === receivingTransfer.destination_branch_id && l.is_inventory_point)
+                  .map(l => (
+                    <option key={l.id} value={l.id}>{l.name} ({l.room_area})</option>
+                  ))
+                }
+              </select>
+            </div>
+
+            <div className="flex gap-4">
+              <button
+                onClick={() => setReceivingTransfer(null)}
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (receivingLocationId) {
+                    onStatusUpdate(receivingTransfer.id, "received", receivingLocationId);
+                    setReceivingTransfer(null);
+                  }
+                }}
+                disabled={!receivingLocationId}
+                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 transition-colors"
+              >
+                Receive Stock
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InterBranchTransferModal({ isOpen, onClose, onSubmit, items, locations, branches, activeBranchId }) {
+  const [form, setForm] = useState({
+    item_id: "",
+    quantity: "",
+    source_location_id: "",
+    destination_branch_id: "",
+    notes: ""
+  });
+
+  if (!isOpen) return null;
+
+  return ReactDOM.createPortal(
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[10000] backdrop-blur-sm">
+      <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full mx-4 overflow-hidden border border-indigo-100">
+        <div className="p-6 border-b border-gray-200 flex justify-between items-center bg-gradient-to-r from-indigo-50 to-white">
+          <h2 className="text-xl font-bold text-indigo-900 flex items-center gap-2">
+            <ArrowRightLeft className="w-5 h-5" />
+            Stock Transfer Request
+          </h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+        <form onSubmit={(e) => { e.preventDefault(); onSubmit(form); }} className="p-6 space-y-4">
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Item to Transfer *</label>
+              <select
+                required
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                value={form.item_id}
+                onChange={e => setForm({ ...form, item_id: e.target.value })}
+              >
+                <option value="">Select Item</option>
+                {items.map(i => (
+                  <option key={i.id} value={i.id}>
+                    {i.name} ({i.unit}) {activeBranchId === 'all' ? `- ${i.branch_name || 'Main'}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Quantity *</label>
+                <input
+                  type="number"
+                  required
+                  step="any"
+                  placeholder="0.00"
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                  value={form.quantity}
+                  onChange={e => setForm({ ...form, quantity: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Source Location *</label>
+                <select
+                  required
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                  value={form.source_location_id}
+                  onChange={e => setForm({ ...form, source_location_id: e.target.value })}
+                >
+                  <option value="">Select Location</option>
+                  {locations.filter(l => l.is_inventory_point).map(l => (
+                    <option key={l.id} value={l.id}>
+                      {l.name} {activeBranchId === 'all' ? `(${l.branch_name || 'Main'})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Target Branch *</label>
+              <select
+                required
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                value={form.destination_branch_id}
+                onChange={e => setForm({ ...form, destination_branch_id: e.target.value })}
+              >
+                <option value="">Select Branch</option>
+                {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Notes / Reason</label>
+              <textarea
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                value={form.notes}
+                onChange={e => setForm({ ...form, notes: e.target.value })}
+                rows="3"
+                placeholder="Why is this transfer needed?"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-6 border-t mt-6">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-6 py-2.5 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors font-medium"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-6 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-lg hover:shadow-indigo-200 transition-all font-semibold active:scale-95"
+            >
+              Create Request
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 
 
 

@@ -5,7 +5,7 @@ $backendZip = "$baseDir\resortapp_deploy.zip"
 $dashboardZip = "$baseDir\dashboard_deploy.zip"
 $userendZip = "$baseDir\userend_deploy.zip"
 
-$serverIP = "34.30.59.169"
+$serverIP = "34.134.50.147"
 $username = "basilabrahamaby"
 $sshKey = "$env:USERPROFILE\.ssh\gcp_key"
 

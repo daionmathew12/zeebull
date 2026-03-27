@@ -9,7 +9,7 @@ from app.schemas.packages import PackageBookingCreate
 
 # ------------------- Packages -------------------
 
-def create_package(db: Session, title: str, description: str, price: float, image_urls: List[str], booking_type: str = "room_type", room_types: str = None, theme: str = None, default_adults: int = 2, default_children: int = 0, max_stay_days: int = None, food_included: str = None, food_timing: str = None, complimentary: str = None):
+def create_package(db: Session, title: str, description: str, price: float, image_urls: List[str], booking_type: str = "room_type", room_types: str = None, theme: str = None, default_adults: int = 2, default_children: int = 0, max_stay_days: int = None, food_included: str = None, food_timing: str = None, complimentary: str = None, branch_id: int = None):
     try:
         pkg = Package(
             title=title, 
@@ -23,7 +23,8 @@ def create_package(db: Session, title: str, description: str, price: float, imag
             max_stay_days=max_stay_days,
             food_included=food_included,
             food_timing=food_timing,
-            complimentary=complimentary
+            complimentary=complimentary,
+            branch_id=branch_id
         )
         db.add(pkg)
         db.commit()
@@ -65,7 +66,7 @@ def get_package_bookings(db: Session):
         .options(joinedload(PackageBooking.rooms).joinedload(PackageBookingRoom.room))
     ).all()
 
-def get_or_create_guest_user(db: Session, email: str, mobile: str, name: str):
+def get_or_create_guest_user(db: Session, email: str, mobile: str, name: str, branch_id: int = 1):
     """
     Find or create a guest user based on email and mobile number.
     Returns the user_id to link bookings to the same user.
@@ -96,6 +97,9 @@ def get_or_create_guest_user(db: Session, email: str, mobile: str, name: str):
         # Update name if provided and different
         if name and user.name != name:
             user.name = name
+            # If user has no branch_id, set it
+            if user.branch_id is None:
+                user.branch_id = branch_id
             db.commit()
         return user.id
     
@@ -139,7 +143,8 @@ def get_or_create_guest_user(db: Session, email: str, mobile: str, name: str):
             phone=mobile if mobile else None,
             hashed_password=hashed_password,
             role_id=guest_role.id,
-            is_active=True
+            is_active=True,
+            branch_id=branch_id
         )
         db.add(new_user)
         db.commit()
@@ -159,7 +164,12 @@ def get_or_create_guest_user(db: Session, email: str, mobile: str, name: str):
         # Re-raise if we can't find existing user
         raise ValueError(f"Failed to create or find guest user: {str(e)}")
 
-def book_package(db: Session, booking: PackageBookingCreate):
+def book_package(db: Session, booking: PackageBookingCreate, branch_id: int = None):
+    # If branch_id is not provided, try to derive it from the first room
+    if branch_id is None and booking.room_ids:
+        first_room = db.query(Room).filter(Room.id == booking.room_ids[0]).first()
+        if first_room:
+            branch_id = first_room.branch_id
     # Find or create guest user based on email and mobile
     guest_user_id = None
     # Normalize email and mobile - convert empty strings to None, handle None safely
@@ -179,7 +189,8 @@ def book_package(db: Session, booking: PackageBookingCreate):
                 db=db,
                 email=guest_email,
                 mobile=guest_mobile,
-                name=booking.guest_name or "Guest User"
+                name=booking.guest_name or "Guest User",
+                branch_id=branch_id
             )
         except Exception as e:
             # Log error but don't fail the booking if user creation fails
@@ -189,7 +200,7 @@ def book_package(db: Session, booking: PackageBookingCreate):
     # Only check if we have at least email or mobile
     existing_booking = None
     if guest_email or guest_mobile:
-        existing_query = db.query(PackageBooking)
+        existing_query = db.query(PackageBooking).filter(PackageBooking.branch_id == branch_id)
         
         # Add email filter if normalized email exists
         if guest_email:
@@ -234,6 +245,7 @@ def book_package(db: Session, booking: PackageBookingCreate):
             .join(PackageBooking)
             .filter(
                 PackageBookingRoom.room_id == room_id,
+                PackageBooking.branch_id == branch_id,
                 PackageBooking.status.in_(["booked", "checked-in", "checked_in"]),  # Only check for active bookings
                 PackageBooking.check_in < booking.check_out,
                 PackageBooking.check_out > booking.check_in
@@ -248,6 +260,7 @@ def book_package(db: Session, booking: PackageBookingCreate):
             .join(Booking)
             .filter(
                 BookingRoom.room_id == room_id,
+                Booking.branch_id == branch_id,
                 Booking.status.in_(["booked", "checked-in", "checked_in"]),  # Only check for active bookings
                 Booking.check_in < booking.check_out,
                 Booking.check_out > booking.check_in
@@ -292,8 +305,15 @@ def book_package(db: Session, booking: PackageBookingCreate):
         food_preferences=booking.food_preferences,
         special_requests=booking.special_requests,
         total_amount=calc_total_amount, # Set calculated total
+        branch_id=branch_id
     )
     db.add(db_booking)
+    db.commit()
+    db.refresh(db_booking)
+
+    # Generate and save display_id
+    from app.utils.booking_id import format_display_id
+    db_booking.display_id = format_display_id(db_booking.id, branch_id=branch_id, is_package=True)
     db.commit()
     db.refresh(db_booking)
 
@@ -304,7 +324,7 @@ def book_package(db: Session, booking: PackageBookingCreate):
         if room_to_update:
             room_to_update.status = "Booked"
 
-        db_room_link = PackageBookingRoom(package_booking_id=db_booking.id, room_id=room_id)
+        db_room_link = PackageBookingRoom(package_booking_id=db_booking.id, room_id=room_id, branch_id=branch_id)
         db.add(db_room_link)
 
     db.commit()
@@ -343,3 +363,82 @@ def get_packages(db: Session, skip: int = 0, limit: int = 100):
 
 def get_package(db: Session, package_id: int):
     return db.query(Package).options(joinedload(Package.images)).filter(Package.id == package_id).first()
+
+import os
+import shutil
+import uuid
+from datetime import datetime
+from fastapi import UploadFile
+
+UPLOAD_DIR = "uploads/checkin_proofs"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+def check_in_package(db: Session, booking_id: int, id_card_image: UploadFile = None, guest_photo: UploadFile = None, amenityAllocation: str = None):
+    try:
+        booking = db.query(PackageBooking).filter(PackageBooking.id == booking_id).first()
+        if not booking:
+            return False, "Package booking not found"
+        
+        normalized_status = (booking.status or "").strip().lower().replace("_", "-").replace(" ", "-")
+        if normalized_status != "booked":
+            return False, f"Booking is not in 'booked' state. Current status: {booking.status}"
+
+        # CRITICAL: Check if any of the rooms are ALREADY occupied (Checked-in) by another booking
+        if booking.rooms:
+            from sqlalchemy import or_, func
+            room_ids = [br.room_id for br in booking.rooms]
+            occupied_rooms = db.query(Room).filter(
+                Room.id.in_(room_ids),
+                or_(
+                    func.lower(Room.status) == 'checked-in',
+                    func.lower(Room.status) == 'occupied'
+                )
+            ).all()
+            
+            if occupied_rooms:
+                occupied_numbers = ", ".join([str(r.number) for r in occupied_rooms])
+                return False, f"Cannot check-in. The following room(s) are already Checked-in/Occupied: {occupied_numbers}. Please check-out the previous guest first."
+
+        # 1. Process images
+        if id_card_image and id_card_image.filename:
+            id_card_filename = f"pkg_id_{booking_id}_{uuid.uuid4().hex}.jpg"
+            id_card_path = os.path.join(UPLOAD_DIR, id_card_filename)
+            with open(id_card_path, "wb") as buffer:
+                shutil.copyfileobj(id_card_image.file, buffer)
+            booking.id_card_image_url = id_card_filename
+
+        if guest_photo and guest_photo.filename:
+            guest_photo_filename = f"pkg_guest_{booking_id}_{uuid.uuid4().hex}.jpg"
+            guest_photo_path = os.path.join(UPLOAD_DIR, guest_photo_filename)
+            with open(guest_photo_path, "wb") as buffer:
+                shutil.copyfileobj(guest_photo.file, buffer)
+            booking.guest_photo_url = guest_photo_filename
+            
+        # 2. Update booking status
+        booking.status = "checked-in"
+        booking.checked_in_at = datetime.utcnow()
+        
+        # 3. Update room status
+        if booking.rooms:
+            room_ids = [br.room_id for br in booking.rooms]
+            db.query(Room).filter(Room.id.in_(room_ids)).update({"status": "Checked-in"}, synchronize_session=False)
+
+        db.commit()
+        db.refresh(booking)
+        
+        # Reload the booking with options
+        from sqlalchemy.orm import joinedload
+        booking_with_rooms = (
+            db.query(PackageBooking)
+            .options(joinedload(PackageBooking.rooms).joinedload(PackageBookingRoom.room))
+            .filter(PackageBooking.id == booking_id)
+            .first()
+        )
+        
+        return True, booking_with_rooms
+    except Exception as e:
+        db.rollback()
+        import traceback
+        error_detail = f"Failed to check-in package: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)
+        return False, str(e)

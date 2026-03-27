@@ -1,19 +1,24 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+import os
+# Absolute project root path (ResortApp/)
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_UPLOAD_ROOT = os.path.join(_BASE_DIR, "uploads")
 from sqlalchemy.orm import Session
 from app.curd import expenses as expense_crud
 from app.utils.auth import get_db, get_current_user
+from app.utils.branch_scope import get_branch_id
+
 from app.schemas.expenses import ExpenseOut
 from app.models.user import User
 from app.models.employee import Employee
 from app.utils.api_optimization import optimize_limit, MAX_LIMIT_LOW_NETWORK
-import os
 import shutil
 from fastapi.responses import FileResponse
 import uuid
 
 router = APIRouter(prefix="/expenses", tags=["Expenses"])
 
-UPLOAD_DIR = "uploads/expenses"
+UPLOAD_DIR = os.path.join(_UPLOAD_ROOT, "expenses")
 
 
 @router.post("", response_model=ExpenseOut)
@@ -35,7 +40,9 @@ async def create_expense(
     itc_eligible: bool = Form(True),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    branch_id: int = Depends(get_branch_id)
 ):
+
     # Ensure upload directory exists
     os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -81,8 +88,9 @@ async def create_expense(
         rcm_liability_date=rcm_liability_dt if rcm_applicable else None,
         itc_eligible=itc_eligible if rcm_applicable else True
     )
+    
+    created = expense_crud.create_expense(db, data=expense_data, branch_id=branch_id, image_path=image_path)
 
-    created = expense_crud.create_expense(db, data=expense_data, image_path=image_path)
     
     # Set self-invoice number if RCM is applicable
     if rcm_applicable and self_invoice_number:
@@ -98,6 +106,7 @@ async def create_expense(
             is_interstate = False
             if vendor_id:
                 vendor = db.query(Vendor).filter(Vendor.id == vendor_id).first()
+
                 if vendor:
                     vendor_name = (vendor.legal_name or vendor.name) if vendor else "Unknown"
                     # Check if inter-state (compare vendor state with resort state)
@@ -117,8 +126,10 @@ async def create_expense(
                 vendor_name=vendor_name,
                 self_invoice_number=self_invoice_number,
                 itc_eligible=itc_eligible,
-                created_by=current_user.id
+                created_by=current_user.id,
+                branch_id=branch_id
             )
+
         except Exception as e:
             # Log error but don't fail expense creation
             import traceback
@@ -135,27 +146,38 @@ async def create_expense(
             amount=float(amount),
             category=category,
             description=description or "",
-            created_by=current_user.id
+            created_by=current_user.id,
+            branch_id=branch_id
         )
+
     except Exception as je_error:
         print(f"Warning: Failed to create expense journal entry: {je_error}")
 
     # Add employee name in the response
-    employee = db.query(Employee).filter(Employee.id == employee_id).first()
+    employee = db.query(Employee).filter(Employee.id == employee_id, Employee.branch_id == branch_id).first()
+
     return {
         **created.__dict__,
         "employee_name": employee.name if employee else "N/A"
     }
 
 @router.get("", response_model=list[ExpenseOut])
-def get_expenses(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20):
+def get_expenses(
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user), 
+    branch_id: int = Depends(get_branch_id),
+    skip: int = 0, 
+    limit: int = 20
+):
+
     # Cap limit to prevent performance issues
     # Optimized for low network
     limit = optimize_limit(limit, MAX_LIMIT_LOW_NETWORK)
     if limit < 1:
         limit = 20
     
-    expenses = expense_crud.get_all_expenses(db, skip=skip, limit=limit)
+    expenses = expense_crud.get_all_expenses(db, branch_id=branch_id, skip=skip, limit=limit)
+
     result = []
     for exp in expenses:
         emp = db.query(Employee).filter(Employee.id == exp.employee_id).first()
@@ -177,8 +199,10 @@ def delete_expense(
     expense_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    branch_id: int = Depends(get_branch_id)
 ):
-    expense = expense_crud.get_expense_by_id(db, expense_id)
+    expense = expense_crud.get_expense_by_id(db, expense_id, branch_id=branch_id)
+
     if not expense:
         raise HTTPException(status_code=404, detail="Expense not found")
     
@@ -192,7 +216,8 @@ def delete_expense(
                 # Log error but continue with expense deletion
                 print(f"Error deleting image file {image_path}: {e}")
     
-    expense_crud.delete_expense(db, expense_id)
+    expense_crud.delete_expense(db, expense_id, branch_id=branch_id)
+
     return {"message": "Expense deleted successfully"}
 
 @router.put("/{expense_id}/status/{status}")
@@ -200,9 +225,11 @@ def update_expense_status(
     expense_id: int,
     status: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
-    expense = expense_crud.get_expense_by_id(db, expense_id)
+    expense = expense_crud.get_expense_by_id(db, expense_id, branch_id=branch_id)
+
     if not expense:
         raise HTTPException(status_code=404, detail="Expense not found")
     
@@ -223,13 +250,14 @@ DEFAULT_BUDGETS = {
     "Other": 50000
 }
 
-def _get_budgets_from_db(db: Session) -> dict:
-    """Read budget values from system_settings table, fall back to defaults."""
+def _get_budgets_from_db(db: Session, branch_id: int) -> dict:
+    """Read budget values from system_settings table for a branch, fall back to defaults."""
     from app.models.settings import SystemSetting
     budgets = dict(DEFAULT_BUDGETS)  # start with defaults
     for category in DEFAULT_BUDGETS:
         key = f"budget_{category.replace(' ', '_').replace('&', 'and')}"
-        setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+        setting = db.query(SystemSetting).filter(SystemSetting.key == key, SystemSetting.branch_id == branch_id).first()
+
         if setting and setting.value:
             try:
                 budgets[category] = float(setting.value)
@@ -241,10 +269,12 @@ def _get_budgets_from_db(db: Session) -> dict:
 @router.get("/budgets")
 def get_budgets(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
-    """Get current budget settings for all expense categories."""
-    budgets = _get_budgets_from_db(db)
+    """Get current budget settings for all expense categories in a branch."""
+    budgets = _get_budgets_from_db(db, branch_id=branch_id)
+
     return {"budgets": [{"category": k, "amount": v} for k, v in budgets.items()]}
 
 
@@ -252,8 +282,10 @@ def get_budgets(
 def save_budgets(
     payload: dict,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
+
     """
     Save budget amounts for expense categories.
     Payload: { "budgets": { "Utilities": 60000, "Salary": 350000, ... } }
@@ -262,25 +294,30 @@ def save_budgets(
     budgets = payload.get("budgets", {})
     for category, amount in budgets.items():
         key = f"budget_{category.replace(' ', '_').replace('&', 'and')}"
-        setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+        setting = db.query(SystemSetting).filter(SystemSetting.key == key, SystemSetting.branch_id == branch_id).first()
+
         if setting:
             setting.value = str(amount)
         else:
             setting = SystemSetting(
                 key=key,
                 value=str(amount),
-                description=f"Monthly budget for {category}"
+                description=f"Monthly budget for {category}",
+                branch_id=branch_id
             )
             db.add(setting)
     db.commit()
+
     return {"message": "Budget settings saved successfully"}
 
 
 @router.get("/budget-analysis")
 def get_budget_analysis(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
+
     """
     Get budget vs actual spending analysis by category for current month.
     Budget amounts are read from system_settings (set via /expenses/budgets).
@@ -294,16 +331,18 @@ def get_budget_analysis(
     current_year = today.year
 
     # Load budgets from DB (with defaults fallback)
-    category_budgets = _get_budgets_from_db(db)
+    category_budgets = _get_budgets_from_db(db, branch_id=branch_id)
 
     # Get actual spending by category for current month
     actual_spending = db.query(
         Expense.category,
         func.sum(Expense.amount).label('total')
     ).filter(
+        Expense.branch_id == branch_id,
         extract('month', Expense.date) == current_month,
         extract('year', Expense.date) == current_year,
     ).group_by(Expense.category).all()
+
 
     actual_by_category = {item.category: float(item.total) for item in actual_spending}
 

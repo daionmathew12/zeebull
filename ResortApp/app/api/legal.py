@@ -1,8 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+import os
+# Absolute project root path (ResortApp/)
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_UPLOAD_ROOT = os.path.join(_BASE_DIR, "uploads")
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import shutil
-import os
 from datetime import datetime
 from app.database import get_db
 from app.utils.auth import get_current_user
@@ -12,7 +15,7 @@ from pydantic import BaseModel
 router = APIRouter()
 
 # Ensure upload directory exists
-UPLOAD_DIR = "uploads/legal"
+UPLOAD_DIR = os.path.join(_UPLOAD_ROOT, "legal")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 class LegalDocumentResponse(BaseModel):

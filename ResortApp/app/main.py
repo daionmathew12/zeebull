@@ -1,4 +1,4 @@
-# app/main.py - Trigger Reload
+# app/main.py - Trigger Reload 3
 from fastapi import FastAPI, Request, HTTPException, Depends
 print(">>> STARTING WITH NEW MAIN.PY - DEBUG VERSION 2 <<<") # Confirm file load
 # Force Reload Fix 14 (Trigger Reload for Bill Filter Fix)
@@ -44,11 +44,9 @@ from app.api import (
     service_request,
     account,
     gst_reports,
+    branch,
     notification,
-    notification,
-    notification,
-    # activity,
-    frontend, # Added frontend module
+    activity_logs,
 )
 from app.api.settings import router as settings_router
 from app.api import reports_module
@@ -192,9 +190,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Temporarily disabled - requires PyJWT installation
-# from app.core.middleware import ActivityLoggingMiddleware
-# app.add_middleware(ActivityLoggingMiddleware)
+# Activity Logging Middleware
+from app.core.middleware import ActivityLoggingMiddleware
+app.add_middleware(ActivityLoggingMiddleware)
 
 
 # Performance monitoring and caching middleware
@@ -231,9 +229,14 @@ class PerformanceMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(PerformanceMiddleware)
 
-# Static file directories
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Static file directories - use absolute paths so they work regardless of working directory
+_MAIN_DIR = os.path.dirname(os.path.abspath(__file__))
+_UPLOADS_DIR = os.path.join(_MAIN_DIR, "uploads")
+_STATIC_DIR = os.path.join(_MAIN_DIR, "static")
+os.makedirs(_UPLOADS_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=_UPLOADS_DIR), name="uploads")
+if os.path.exists(_STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
 # Mount landing page static files
 landing_page_path = Path("../landingpage")
@@ -300,6 +303,7 @@ app.include_router(report.router, prefix="/api", tags=["Report"])
 app.include_router(reports.router, prefix="/api", tags=["Reports"])
 app.include_router(role.router, prefix="/api", tags=["Role"])
 app.include_router(service.router, prefix="/api", tags=["Service"])
+app.include_router(branch.router, prefix="/api", tags=["Branches"])
 app.include_router(service_request.router, prefix="/api", tags=["Service Requests"])
 app.include_router(account.router, prefix="/api", tags=["Accounts"])
 app.include_router(gst_reports.router, prefix="/api", tags=["GST Reports"])
@@ -308,7 +312,7 @@ app.include_router(attendance.router, prefix="/api", tags=["Attendance"])
 
 # Notification system re-enabled
 app.include_router(notification.router, prefix="/api", tags=["Notifications"])
-# app.include_router(activity.router, prefix="/api/activity", tags=["Activity Logs"])
+app.include_router(activity_logs.router, prefix="/api", tags=["Activity Logs"])
 
 # Include comprehensive reports router if it was imported successfully
 if comprehensive_reports is not None:

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from app.utils.auth import get_db, get_current_user
+from app.utils.branch_scope import get_branch_id
 from app.models.user import User
 from app.models.recipe import Recipe, RecipeIngredient
 from app.models.food_item import FoodItem
@@ -25,14 +26,26 @@ def test_recipe_router():
 def create_recipe(
     recipe: RecipeCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """Create a new recipe for a food item"""
     try:
+        # Check if a recipe with the same name already exists in this branch
+        existing_recipe = db.query(Recipe).filter(
+            Recipe.name == recipe.name,
+            Recipe.branch_id == branch_id
+        ).first()
+        if existing_recipe:
+            raise HTTPException(
+                status_code=400,
+                detail=f"A recipe with the name '{recipe.name}' already exists in this branch."
+            )
+
         # Verify food item exists
-        food_item = db.query(FoodItem).filter(FoodItem.id == recipe.food_item_id).first()
+        food_item = db.query(FoodItem).filter(FoodItem.id == recipe.food_item_id, FoodItem.branch_id == branch_id).first()
         if not food_item:
-            raise HTTPException(status_code=404, detail="Food item not found")
+            raise HTTPException(status_code=404, detail="Food item not found in this branch")
         
         # Create recipe
         db_recipe = Recipe(
@@ -41,7 +54,8 @@ def create_recipe(
             description=recipe.description,
             servings=recipe.servings,
             prep_time_minutes=recipe.prep_time_minutes,
-            cook_time_minutes=recipe.cook_time_minutes
+            cook_time_minutes=recipe.cook_time_minutes,
+            branch_id=branch_id
         )
         db.add(db_recipe)
         db.flush()  # Get recipe ID
@@ -75,7 +89,7 @@ def create_recipe(
         db_recipe = db.query(Recipe).options(
             joinedload(Recipe.food_item),
             joinedload(Recipe.ingredients).joinedload(RecipeIngredient.inventory_item)
-        ).filter(Recipe.id == db_recipe.id).first()
+        ).filter(Recipe.id == db_recipe.id, Recipe.branch_id == branch_id).first()
         
         return _serialize_recipe(db_recipe, total_cost)
         
@@ -94,11 +108,12 @@ def create_recipe(
 def get_recipes(
     food_item_id: Optional[int] = Query(None, description="Filter by food item ID"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """Get all recipes, optionally filtered by food item"""
     try:
-        query = db.query(Recipe).options(
+        query = db.query(Recipe).filter(Recipe.branch_id == branch_id).options(
             joinedload(Recipe.food_item),
             joinedload(Recipe.ingredients).joinedload(RecipeIngredient.inventory_item)
         )
@@ -132,14 +147,15 @@ def get_recipes(
 def get_recipe(
     recipe_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """Get a specific recipe by ID"""
     try:
         recipe = db.query(Recipe).options(
             joinedload(Recipe.food_item),
             joinedload(Recipe.ingredients).joinedload(RecipeIngredient.inventory_item)
-        ).filter(Recipe.id == recipe_id).first()
+        ).filter(Recipe.id == recipe_id, Recipe.branch_id == branch_id).first()
         
         if not recipe:
             raise HTTPException(status_code=404, detail="Recipe not found")
@@ -167,16 +183,28 @@ def update_recipe(
     recipe_id: int,
     recipe_update: RecipeUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """Update a recipe"""
     try:
-        db_recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+        db_recipe = db.query(Recipe).filter(Recipe.id == recipe_id, Recipe.branch_id == branch_id).first()
         if not db_recipe:
             raise HTTPException(status_code=404, detail="Recipe not found")
         
         # Update basic fields
         if recipe_update.name is not None:
+            # Check if another recipe with the same name exists in this branch
+            existing_recipe = db.query(Recipe).filter(
+                Recipe.name == recipe_update.name,
+                Recipe.branch_id == branch_id,
+                Recipe.id != recipe_id
+            ).first()
+            if existing_recipe:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"A recipe with the name '{recipe_update.name}' already exists in this branch."
+                )
             db_recipe.name = recipe_update.name
         if recipe_update.description is not None:
             db_recipe.description = recipe_update.description
@@ -226,7 +254,7 @@ def update_recipe(
         db_recipe = db.query(Recipe).options(
             joinedload(Recipe.food_item),
             joinedload(Recipe.ingredients).joinedload(RecipeIngredient.inventory_item)
-        ).filter(Recipe.id == recipe_id).first()
+        ).filter(Recipe.id == recipe_id, Recipe.branch_id == branch_id).first()
         
         return _serialize_recipe(db_recipe, total_cost)
         
@@ -244,11 +272,12 @@ def update_recipe(
 def delete_recipe(
     recipe_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """Delete a recipe"""
     try:
-        recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+        recipe = db.query(Recipe).filter(Recipe.id == recipe_id, Recipe.branch_id == branch_id).first()
         if not recipe:
             raise HTTPException(status_code=404, detail="Recipe not found")
         

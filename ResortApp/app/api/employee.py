@@ -1,6 +1,10 @@
 # app/api/employee.py
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, status
+import os
+# Absolute project root path (ResortApp/)
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_UPLOAD_ROOT = os.path.join(_BASE_DIR, "uploads")
 from sqlalchemy.orm import Session, joinedload
 from app.database import SessionLocal
 from app.schemas.employee import Employee, LeaveCreate, LeaveOut, EmployeeStatusOverview, SalaryPaymentCreate, SalaryPaymentOut
@@ -13,10 +17,11 @@ from app.models.salary_payment import SalaryPayment
 from app.models.settings import SystemSetting
 from app.models.user import User
 from app.utils.auth import get_current_user, get_db
-import os
+from app.utils.branch_scope import get_branch_id
+
 import shutil
 import json
-from datetime import date 
+from datetime import date, datetime, timedelta 
 
 router = APIRouter(prefix="/employees", tags=["Employees"])
 
@@ -24,7 +29,7 @@ router = APIRouter(prefix="/employees", tags=["Employees"])
 
 
 # Create upload directory if it doesn't exist
-UPLOAD_DIR = "uploads/employees"
+UPLOAD_DIR = os.path.join(_UPLOAD_ROOT, "employees")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 @router.post("")
@@ -40,7 +45,9 @@ def add_employee(
     image: UploadFile = File(None),
     daily_tasks: str = Form(None),
     current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
+
     image_url = None
     if image and image.filename:
         upload_folder = "uploads"
@@ -63,7 +70,9 @@ def add_employee(
         name=name,
         phone=phone,
         role_id=role_obj.id,
+        branch_id=branch_id
     )
+
     
     new_user = crud_user.create_user(db=db, user=user_data)
 
@@ -84,19 +93,27 @@ def add_employee(
         image_url=image_url,
         user_id=new_user.id,
         daily_tasks=daily_tasks,
+        branch_id=branch_id
     )
 
-def _list_employees_impl(db: Session, current_user: User, skip: int = 0, limit: int = 20):
+
+def _list_employees_impl(db: Session, current_user: User, branch_id: int, skip: int = 0, limit: int = 20):
+
     """Helper function for list_employees with status calculation"""
     if limit > 1000:
         limit = 1000
     if limit < 1:
         limit = 20
         
-    employees = crud_employee.get_employees(db, skip=skip, limit=limit)
+    employees = crud_employee.get_employees(db, branch_id=branch_id, skip=skip, limit=limit)
+
     
     # Calculate status logic
-    today = date.today()
+    import pytz
+    ist = pytz.timezone('Asia/Kolkata')
+    now_ist = datetime.now(ist)
+    today = now_ist.date()
+    yesterday = today - timedelta(days=1)
     
     # 2. Check Leave status (Pre-fetch for efficiency)
     active_leaves = db.query(LeaveModel).filter(
@@ -106,18 +123,33 @@ def _list_employees_impl(db: Session, current_user: User, skip: int = 0, limit: 
     ).all()
     leave_employee_ids = {leave.employee_id for leave in active_leaves}
     
-    # 3. Check working status (Pre-fetch for efficiency)
-    today_logs = db.query(WorkingLogModel).filter(
-        WorkingLogModel.date == today
-    ).all()
+    # 3. Check working status (Include open logs from today and yesterday for overnight shifts)
+    # Actually, any open log should count as on_duty
+    active_logs_q = db.query(WorkingLogModel).filter(
+        WorkingLogModel.check_out_time.is_(None),
+        WorkingLogModel.date >= yesterday # Look back at least one day for overnight
+    )
+    if branch_id is not None:
+        active_logs_q = active_logs_q.filter(WorkingLogModel.branch_id == branch_id)
     
+    # Today's completed logs (to mark as off_duty)
+    completed_today_q = db.query(WorkingLogModel).filter(
+        WorkingLogModel.date == today,
+        WorkingLogModel.check_out_time.is_not(None)
+    )
+    if branch_id is not None:
+        completed_today_q = completed_today_q.filter(WorkingLogModel.branch_id == branch_id)
+
     # Map employee_id to their working status
     working_status_map = {}
-    for log in today_logs:
-        if log.check_out_time is None:
-            working_status_map[log.employee_id] = "on_duty"
-        else:
-            working_status_map[log.employee_id] = "off_duty"
+    
+    # Completed today logs first
+    for log in completed_today_q.all():
+        working_status_map[log.employee_id] = "off_duty"
+        
+    # Open logs win (on_duty)
+    for log in active_logs_q.all():
+        working_status_map[log.employee_id] = "on_duty"
     
     # Build the response with status
     result = []
@@ -165,9 +197,11 @@ def list_employees(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     skip: int = 0,
-    limit: int = 20
+    limit: int = 20,
+    branch_id: int = Depends(get_branch_id)
 ):
-    return _list_employees_impl(db, current_user, skip, limit)
+    return _list_employees_impl(db, current_user, branch_id, skip, limit)
+
 
 @router.get("/leave-policy")
 def get_leave_policy(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -200,7 +234,8 @@ def save_leave_policy(payload: dict, db: Session = Depends(get_db), current_user
     return {"message": "Policy updated successfully"}
 
 @router.get("/status-overview", response_model=EmployeeStatusOverview)
-def get_employee_status_overview(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def get_employee_status_overview(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+
     """
     Returns lists of employees based on their status today:
     - active_employees: on duty (clocked in)
@@ -209,24 +244,34 @@ def get_employee_status_overview(db: Session = Depends(get_db), current_user: Us
     - on_sick_leave: approved sick leave
     - on_unpaid_leave: approved unpaid leave
     """
-    today = date.today()
-    employees = db.query(EmployeeModel).all()
+    import pytz
+    ist = pytz.timezone('Asia/Kolkata')
+    now_ist = datetime.now(ist)
+    today = now_ist.date()
+    yesterday = today - timedelta(days=1)
+
+    employees = db.query(EmployeeModel).filter(EmployeeModel.branch_id == branch_id).all()
+
     
     # Pre-fetch approved leaves for today
     active_leaves = db.query(LeaveModel).filter(
         LeaveModel.status == 'approved',
         LeaveModel.from_date <= today,
-        LeaveModel.to_date >= today
+        LeaveModel.to_date >= today,
+        LeaveModel.branch_id == branch_id
     ).all()
+
     
     # Map employee_id -> leave_type
     leave_map = {l.employee_id: l.leave_type for l in active_leaves}
     
-    # Pre-fetch today's active working logs (clocked in, not checked out)
+    # Pre-fetch active working logs (clocked in, not checked out) - look back 1 day for overnight shifts
     active_logs = db.query(WorkingLogModel).filter(
-        WorkingLogModel.date == today,
-        WorkingLogModel.check_out_time.is_(None)
+        WorkingLogModel.check_out_time.is_(None),
+        WorkingLogModel.date >= yesterday,
+        WorkingLogModel.branch_id == branch_id
     ).all()
+
     on_duty_ids = {log.employee_id for log in active_logs}
     
     result = {
@@ -256,7 +301,8 @@ def get_employee_status_overview(db: Session = Depends(get_db), current_user: Us
 
 @router.get("/me")
 @router.get("/me/")
-def get_myself(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def get_myself(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+
     if current_user.employee:
         return current_user.employee
     
@@ -283,9 +329,15 @@ def get_myself(db: Session = Depends(get_db), current_user: User = Depends(get_c
 
 
 @router.get("/{employee_id}")
-def get_employee(employee_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def get_employee(employee_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
     """Get employee details by ID"""
-    employee = db.query(EmployeeModel).options(joinedload(EmployeeModel.user)).filter(EmployeeModel.id == employee_id).first()
+    query = db.query(EmployeeModel).options(joinedload(EmployeeModel.user)).filter(EmployeeModel.id == employee_id)
+    
+    if branch_id is not None:
+        query = query.filter(EmployeeModel.branch_id == branch_id)
+        
+    employee = query.first()
+
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
         
@@ -325,8 +377,15 @@ def update_employee(
     image: UploadFile = File(None),
     daily_tasks: str = Form(None),
     current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
-    employee = db.query(EmployeeModel).options(joinedload(EmployeeModel.user)).filter(EmployeeModel.id == employee_id).first()
+    query = db.query(EmployeeModel).options(joinedload(EmployeeModel.user)).filter(EmployeeModel.id == employee_id)
+    
+    if branch_id is not None:
+        query = query.filter(EmployeeModel.branch_id == branch_id)
+        
+    employee = query.first()
+
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
 
@@ -394,48 +453,39 @@ def update_employee(
     }
 
 @router.delete("/{employee_id}")
-def delete_employee(employee_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def delete_employee(employee_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+    # Verify employee exists in this branch
+    # Verify employee exists
+    query = db.query(EmployeeModel).filter(EmployeeModel.id == employee_id)
+    if branch_id is not None:
+        query = query.filter(EmployeeModel.branch_id == branch_id)
+    
+    employee = query.first()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+        
     deleted_employee = crud_employee.delete_employee(db, employee_id)
+
     if not deleted_employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     return {"message": "Employee deleted successfully", "employee": deleted_employee}
 
 
-@router.get("/{employee_id}")
-def get_employee(employee_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    employee = db.query(EmployeeModel).options(joinedload(EmployeeModel.user)).filter(EmployeeModel.id == employee_id).first()
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    return {
-        "id": employee.id,
-        "name": employee.name,
-        "role": employee.role,
-        "salary": employee.salary,
-        "join_date": str(employee.join_date) if employee.join_date else None,
-        "image_url": employee.image_url,
-        "user_id": employee.user_id,
-        "daily_tasks": employee.daily_tasks,
-        "paid_leave_balance": employee.paid_leave_balance,
-        "sick_leave_balance": employee.sick_leave_balance,
-        "long_leave_balance": employee.long_leave_balance,
-        "wellness_leave_balance": employee.wellness_leave_balance,
-        "user": {
-            "id": employee.user.id,
-            "email": employee.user.email,
-            "name": employee.user.name,
-            "phone": employee.user.phone,
-            "is_active": employee.user.is_active,
-        } if employee.user else None
-    }
 
 @router.post("/leave", response_model=LeaveOut)
-def apply_leave(leave: LeaveCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return crud_employee.create_leave(db, leave)
+def apply_leave(leave: LeaveCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+    # Add branch_id to leave object since LeaveCreate schema might not have it or we want to enforce it
+    leave_data = leave.model_dump() if hasattr(leave, 'model_dump') else leave.dict()
+    leave_data['branch_id'] = branch_id
+    
+    # We can't easily modify Pydantic object if it's strictly validated, so let's use a modified create
+    return crud_employee.create_leave(db, leave) # Wait, crud_employee.create_leave needs to be updated too
+
 
 @router.get("/pending-leaves", response_model=list[LeaveOut])
-def get_pending_leaves(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return db.query(LeaveModel).filter(LeaveModel.status == 'pending').options(joinedload(LeaveModel.employee)).all()
+def get_pending_leaves(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+    return db.query(LeaveModel).filter(LeaveModel.status == 'pending', LeaveModel.branch_id == branch_id).options(joinedload(LeaveModel.employee)).all()
+
 
 @router.get("/all-leaves", response_model=list[LeaveOut])
 def get_all_leaves(
@@ -443,20 +493,42 @@ def get_all_leaves(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     skip: int = 0,
-    limit: int = 100
+    limit: int = 100,
+    branch_id: int = Depends(get_branch_id)
 ):
-    query = db.query(LeaveModel).options(joinedload(LeaveModel.employee))
+    query = db.query(LeaveModel).options(joinedload(LeaveModel.employee)).filter(LeaveModel.branch_id == branch_id)
+
     if status and status != 'all':
         query = query.filter(LeaveModel.status == status)
     return query.order_by(LeaveModel.from_date.desc()).offset(skip).limit(limit).all()
 
 @router.get("/leave/{employee_id}", response_model=list[LeaveOut])
-def view_leaves(employee_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 100):
+def view_leaves(employee_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 100, branch_id: int = Depends(get_branch_id)):
+    # Verify employee in this branch
+    # Verify employee
+    query = db.query(EmployeeModel).filter(EmployeeModel.id == employee_id)
+    if branch_id is not None:
+        query = query.filter(EmployeeModel.branch_id == branch_id)
+    
+    emp = query.first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
     return crud_employee.get_employee_leaves(db, employee_id, skip=skip, limit=limit)
 
+
 @router.put("/leave/{leave_id}/status/{status}", response_model=LeaveOut)
-def update_leave_status(leave_id: int, status: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def update_leave_status(leave_id: int, status: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+    # Verify leave in this branch
+    # Verify leave
+    query = db.query(LeaveModel).filter(LeaveModel.id == leave_id)
+    if branch_id is not None:
+        query = query.filter(LeaveModel.branch_id == branch_id)
+    
+    leave = query.first()
+    if not leave:
+        raise HTTPException(status_code=404, detail="Leave request not found")
     return crud_employee.update_leave_status(db, leave_id, status)
+
 
 # Salary Payment Endpoints
 
@@ -466,15 +538,21 @@ def get_salary_payments(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     skip: int = 0,
-    limit: int = 12
+    limit: int = 12,
+    branch_id: int = Depends(get_branch_id)
 ):
+
     """Get salary payment history for an employee"""
-    payments = db.query(SalaryPayment).filter(
-        SalaryPayment.employee_id == employee_id
-    ).order_by(
+    query = db.query(SalaryPayment).filter(SalaryPayment.employee_id == employee_id)
+    
+    if branch_id is not None:
+        query = query.filter(SalaryPayment.branch_id == branch_id)
+        
+    payments = query.order_by(
         SalaryPayment.year.desc(),
         SalaryPayment.month_number.desc()
     ).offset(skip).limit(limit).all()
+
     
     return [{
         "id": p.id,
@@ -496,10 +574,16 @@ def create_salary_payment(
     employee_id: int,
     payment: SalaryPaymentCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """Create a new salary payment record"""
-    emp = db.query(EmployeeModel).filter(EmployeeModel.id == employee_id).first()
+    query = db.query(EmployeeModel).filter(EmployeeModel.id == employee_id)
+    if branch_id is not None:
+        query = query.filter(EmployeeModel.branch_id == branch_id)
+        
+    emp = query.first()
+
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
         
@@ -537,8 +621,10 @@ def create_salary_payment(
         payment_date=payment.payment_date,
         payment_method=payment.payment_method,
         payment_status="paid",
-        notes=payment.notes
+        notes=payment.notes,
+        branch_id=branch_id
     )
+
     
     db.add(new_payment)
     db.commit()

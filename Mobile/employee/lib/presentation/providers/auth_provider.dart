@@ -114,6 +114,10 @@ class AuthProvider extends ChangeNotifier {
     return UserRole.unknown;
   }
 
+  Future<void> refreshProfile() async {
+    await _fetchEmployeeProfile();
+  }
+
   Future<void> _fetchEmployeeProfile() async {
     try {
       final response = await _apiService.dio.get(ApiConstants.profile);
@@ -128,12 +132,16 @@ class AuthProvider extends ChangeNotifier {
               
               if (empData['daily_tasks'] != null) {
                 try {
+                  print("[DEBUG-AUTH] Raw daily_tasks: ${empData['daily_tasks']}");
                   List<dynamic> parsed = jsonDecode(empData['daily_tasks']);
                   _dailyTasks = parsed.map((e) => e.toString()).toList();
-                } catch (_) {
+                  print("[DEBUG-AUTH] Parsed dailyTasks: $_dailyTasks");
+                } catch (e) {
+                  print("[DEBUG-AUTH] Parse error: $e, using raw string");
                   _dailyTasks = [empData['daily_tasks'].toString()];
                 }
               } else {
+                print("[DEBUG-AUTH] daily_tasks is null in API response");
                 _dailyTasks = [];
               }
               

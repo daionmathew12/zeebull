@@ -5,7 +5,7 @@ import os
 import multiprocessing
 
 # Server socket
-bind = "0.0.0.0:8011"
+bind = "0.0.0.0:8013"
 backlog = 2048
 
 # Worker processes
@@ -31,8 +31,8 @@ proc_name = "orchid_management"
 # Server mechanics
 daemon = False
 pidfile = None  # Let systemd manage the PID
-user = "www-data"
-group = "www-data"
+# user = "www-data"
+# group = "www-data"
 tmp_upload_dir = None
 
 # SSL (if using HTTPS directly through Gunicorn)
@@ -47,8 +47,8 @@ limit_request_fields = 100
 limit_request_field_size = 8190
 
 # Application
-pythonpath = "/var/www/resort"
-chdir = "/var/www/resort/orchid_production/ResortApp"
+pythonpath = "/var/www/zeebull/ResortApp"
+chdir = "/var/www/zeebull/ResortApp"
 
 # Performance
 worker_tmp_dir = "/dev/shm"

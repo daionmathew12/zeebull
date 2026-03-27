@@ -1,4 +1,4 @@
-﻿from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import func
 from decimal import Decimal
 from datetime import datetime
@@ -24,6 +24,7 @@ def create_category(db: Session, data: InventoryCategoryCreate):
 
 
 def get_all_categories(db: Session, skip: int = 0, limit: int = 100, active_only: bool = True):
+    from sqlalchemy.orm import joinedload
     query = db.query(InventoryCategory)
     if active_only:
         query = query.filter(InventoryCategory.is_active == True)
@@ -31,7 +32,8 @@ def get_all_categories(db: Session, skip: int = 0, limit: int = 100, active_only
 
 
 def get_category_by_id(db: Session, category_id: int):
-    return db.query(InventoryCategory).filter(InventoryCategory.id == category_id).first()
+    query = db.query(InventoryCategory).filter(InventoryCategory.id == category_id)
+    return query.first()
 
 
 def update_category(db: Session, category_id: int, data: InventoryCategoryUpdate):
@@ -72,7 +74,8 @@ def get_all_items(db: Session, skip: int = 0, limit: int = 100, category_id: Opt
 
 
 def get_item_by_id(db: Session, item_id: int):
-    return db.query(InventoryItem).filter(InventoryItem.id == item_id).first()
+    query = db.query(InventoryItem).filter(InventoryItem.id == item_id)
+    return query.first()
 
 
 def update_item(db: Session, item_id: int, data: InventoryItemUpdate):
@@ -166,23 +169,29 @@ def update_item_stock(db: Session, item_id: int, quantity_change: float, transac
 
 
 # Vendor CRUD
-def create_vendor(db: Session, data: VendorCreate):
-    vendor = Vendor(**data.model_dump())
+def create_vendor(db: Session, data: VendorCreate, branch_id: int):
+    vendor = Vendor(**data.model_dump(), branch_id=branch_id)
     db.add(vendor)
     db.commit()
     db.refresh(vendor)
     return vendor
 
 
-def get_all_vendors(db: Session, skip: int = 0, limit: int = 100, active_only: bool = False):
-    query = db.query(Vendor)
+def get_all_vendors(db: Session, branch_id: Optional[int] = None, skip: int = 0, limit: int = 100, active_only: bool = False):
+    from sqlalchemy.orm import joinedload
+    query = db.query(Vendor).options(joinedload(Vendor.branch))
+    if branch_id:
+        query = query.filter(Vendor.branch_id == branch_id)
     if active_only:
         query = query.filter(Vendor.is_active == True)
     return query.offset(skip).limit(limit).all()
 
 
-def get_vendor_by_id(db: Session, vendor_id: int):
-    return db.query(Vendor).filter(Vendor.id == vendor_id).first()
+def get_vendor_by_id(db: Session, vendor_id: int, branch_id: Optional[int] = None):
+    query = db.query(Vendor).filter(Vendor.id == vendor_id)
+    if branch_id:
+        query = query.filter(Vendor.branch_id == branch_id)
+    return query.first()
 
 def get_vendors_by_ids(db: Session, vendor_ids: List[int]):
     """Batch load vendors by IDs to avoid N+1 queries"""
@@ -192,8 +201,8 @@ def get_vendors_by_ids(db: Session, vendor_ids: List[int]):
 
 
 # Purchase Master CRUD
-def generate_purchase_number(db: Session):
-    """Generate unique purchase number based on latest sequence"""
+def generate_purchase_number(db: Session, branch_id: int):
+    """Generate unique purchase number based on latest sequence for a branch"""
     today_str = datetime.now().strftime('%Y%m%d')
     prefix = f"PO-{today_str}-"
     
@@ -201,15 +210,28 @@ def generate_purchase_number(db: Session):
         PurchaseMaster.purchase_number.like(f"{prefix}%")
     ).order_by(PurchaseMaster.id.desc()).first()
 
+    start_seq = 1
     if last_entry and last_entry.purchase_number:
         try:
             parts = last_entry.purchase_number.split('-')
-            last_seq = int(parts[-1])
-            return f"{prefix}{last_seq + 1:04d}"
+            start_seq = int(parts[-1]) + 1
         except (ValueError, IndexError):
             pass
+
+    # Safety Check Loop
+    loop_count = 0
+    while True:
+        loop_count += 1
+        candidate = f"{prefix}{start_seq:04d}"
+        exists = db.query(PurchaseMaster).filter(PurchaseMaster.purchase_number == candidate).count()
+        if exists == 0:
+            return candidate
             
-    return f"{prefix}0001"
+        start_seq += 1
+        if loop_count > 100:
+             return candidate # Failsafe
+
+
 
 
 def calculate_gst(amount: Decimal, gst_rate: Decimal, is_interstate: bool = False):
@@ -223,11 +245,26 @@ def calculate_gst(amount: Decimal, gst_rate: Decimal, is_interstate: bool = Fals
         return half_gst, half_gst, Decimal("0.00")
 
 
-def create_purchase_master(db: Session, data: PurchaseMasterCreate, created_by: int = None):
+def create_purchase_master(db: Session, data: PurchaseMasterCreate, branch_id: int, created_by: int = None):
+
     """Create purchase master with details and calculate totals"""
+    from app.models.inventory import Location
+    
+    # Derivation logic for Enterprise View (branch_id=None or 'all')
+    dest_loc_id = data.destination_location_id
+    if not branch_id or branch_id == "all":
+        if dest_loc_id:
+            loc = db.query(Location).filter(Location.id == dest_loc_id).first()
+            if loc:
+                branch_id = loc.branch_id
+        # Fallback to 2 (trails) if still not found
+        if not branch_id or branch_id == "all":
+            branch_id = 2
+
     # Generate purchase number if not provided
     if not data.purchase_number:
-        data.purchase_number = generate_purchase_number(db)
+        data.purchase_number = generate_purchase_number(db, branch_id)
+
     
     # Get vendor to check if interstate (different state)
     vendor = get_vendor_by_id(db, data.vendor_id)
@@ -242,7 +279,8 @@ def create_purchase_master(db: Session, data: PurchaseMasterCreate, created_by: 
     
     # Create purchase master
     master_data = data.dict(exclude={"details"})
-    purchase_master = PurchaseMaster(**master_data, created_by=created_by)
+    purchase_master = PurchaseMaster(**master_data, created_by=created_by, branch_id=branch_id)
+
     db.add(purchase_master)
     db.flush()  # Get the ID
     
@@ -303,30 +341,39 @@ def create_purchase_master(db: Session, data: PurchaseMasterCreate, created_by: 
     return purchase_master
 
 
-def get_all_purchases(db: Session, skip: int = 0, limit: int = 100, status: Optional[str] = None):
+def get_all_purchases(db: Session, branch_id: int, skip: int = 0, limit: int = 100, status: Optional[str] = None):
     """Optimized with eager loading"""
     query = db.query(PurchaseMaster).options(
         joinedload(PurchaseMaster.vendor),
         selectinload(PurchaseMaster.details).joinedload(PurchaseDetail.item)
     )
+    if branch_id is not None:
+        query = query.filter(PurchaseMaster.branch_id == branch_id)
     if status:
         query = query.filter(PurchaseMaster.status == status)
     return query.order_by(PurchaseMaster.created_at.desc()).offset(skip).limit(limit).all()
 
 
-def get_purchase_by_id(db: Session, purchase_id: int):
-    return db.query(PurchaseMaster).filter(PurchaseMaster.id == purchase_id).first()
+def get_purchase_by_id(db: Session, purchase_id: int, branch_id: Optional[int] = None):
+    query = db.query(PurchaseMaster).filter(PurchaseMaster.id == purchase_id)
+    if branch_id:
+        query = query.filter(PurchaseMaster.branch_id == branch_id)
+    return query.first()
 
 
 
-def get_item_stocks(db: Session, item_id: int):
-    """Fetch all location stocks for a specific item"""
+def get_item_stocks(db: Session, item_id: int, branch_id: Optional[int] = None):
+    """Fetch all location stocks for a specific item, optionally filtered by branch"""
     from app.models.inventory import LocationStock, Location
     
-    stocks = db.query(LocationStock).join(Location).filter(
+    query = db.query(LocationStock).join(Location).filter(
         LocationStock.item_id == item_id,
         LocationStock.quantity > 0
-    ).all()
+    )
+    if branch_id:
+        query = query.filter(LocationStock.branch_id == branch_id)
+    
+    stocks = query.all()
     
     result = []
     for s in stocks:
@@ -337,6 +384,47 @@ def get_item_stocks(db: Session, item_id: int):
             "quantity": float(s.quantity)
         })
     return result
+
+
+def update_location_stock(db: Session, location_id: int, item_id: int, quantity: float):
+    """Helper to update stock at a specific location and synchronize global item stock"""
+    from app.models.inventory import LocationStock, Location, InventoryItem
+    from datetime import datetime
+    
+    # 1. Update Location-Specific Stock
+    stock = db.query(LocationStock).filter(
+        LocationStock.location_id == location_id,
+        LocationStock.item_id == item_id
+    ).first()
+    
+    if stock:
+        stock.quantity += quantity
+        stock.last_updated = datetime.utcnow()
+    else:
+        # Get branch_id from location
+        loc = db.query(Location).filter(Location.id == location_id).first()
+        branch_id = loc.branch_id if loc else 1
+        
+        stock = LocationStock(
+            location_id=location_id,
+            item_id=item_id,
+            quantity=quantity,
+            branch_id=branch_id,
+            last_updated=datetime.utcnow()
+        )
+        db.add(stock)
+    
+    # 2. Synchronize Global Item Stock
+    # In this system, InventoryItem.current_stock acts as a cache of total stock.
+    # We update it to maintain consistency.
+    item = db.query(InventoryItem).filter(InventoryItem.id == item_id).first()
+    if item:
+        if item.current_stock is None: 
+            item.current_stock = 0.0
+        item.current_stock += quantity
+        
+    return stock
+
 
 
 def update_purchase_master(db: Session, purchase_id: int, data: PurchaseMasterUpdate):
@@ -457,7 +545,8 @@ def update_purchase_status(db: Session, purchase_id: int, status: str, current_u
             if purchase.destination_location_id:
                 loc_stock = db.query(LocationStock).filter(
                     LocationStock.location_id == purchase.destination_location_id,
-                    LocationStock.item_id == detail.item_id
+                    LocationStock.item_id == detail.item_id,
+                    LocationStock.branch_id == purchase.branch_id
                 ).first()
                 
                 qty = float(detail.quantity or 0)
@@ -469,7 +558,8 @@ def update_purchase_status(db: Session, purchase_id: int, status: str, current_u
                         location_id=purchase.destination_location_id,
                         item_id=detail.item_id,
                         quantity=qty,
-                        last_updated=datetime.utcnow()
+                        last_updated=datetime.utcnow(),
+                        branch_id=purchase.branch_id
                     )
                     db.add(loc_stock)
             
@@ -485,8 +575,10 @@ def update_purchase_status(db: Session, purchase_id: int, status: str, current_u
                 purchase_master_id=purchase.id,
                 notes=f"Purchase received: {purchase.purchase_number}",
                 created_by=current_user_id or purchase.created_by,
-                destination_location_id=purchase.destination_location_id
+                destination_location_id=purchase.destination_location_id,
+                branch_id=purchase.branch_id
             )
+
             db.add(transaction)
 
         # Trigger Journal Entry Creation
@@ -520,8 +612,10 @@ def update_purchase_status(db: Session, purchase_id: int, status: str, current_u
                     igst_amount=float(purchase.igst or 0),
                     vendor_name=vendor_name,
                     is_interstate=is_interstate,
+                    branch_id=purchase.branch_id,
                     created_by=current_user_id or purchase.created_by
                 )
+
         except Exception as e:
             import traceback
             print(f"Warning: Could not create journal entry for purchase {purchase.id}: {str(e)}\n{traceback.format_exc()}")
@@ -562,8 +656,10 @@ def update_purchase_status(db: Session, purchase_id: int, status: str, current_u
                 purchase_master_id=purchase.id,
                 notes=f"Purchase cancelled/reversed: {purchase.purchase_number}",
                 created_by=current_user_id or purchase.created_by,
-                source_location_id=purchase.destination_location_id
+                source_location_id=purchase.destination_location_id,
+                branch_id=purchase.branch_id
             )
+
             db.add(transaction)
     
     # Update status and save
@@ -574,21 +670,37 @@ def update_purchase_status(db: Session, purchase_id: int, status: str, current_u
 
 
 # Stock Requisition CRUD
-def generate_requisition_number(db: Session):
+def generate_requisition_number(db: Session, branch_id: int):
     from datetime import datetime
     today = datetime.utcnow()
     date_str = today.strftime("%Y%m%d")
-    count = db.query(StockRequisition).filter(
+    start_count = db.query(StockRequisition).filter(
         StockRequisition.requisition_number.like(f"REQ-{date_str}-%")
     ).count() + 1
-    return f"REQ-{date_str}-{str(count).zfill(3)}"  # e.g., REQ-101
+    
+    # Safety Check Loop
+    loop_count = 0
+    while True:
+        loop_count += 1
+        candidate = f"REQ-{date_str}-{str(start_count).zfill(3)}"
+        exists = db.query(StockRequisition).filter(StockRequisition.requisition_number == candidate).count()
+        if exists == 0:
+            return candidate
+            
+        start_count += 1
+        if loop_count > 100:
+             return candidate # Failsafe
 
 
-def create_stock_requisition(db: Session, data: dict, created_by: int):
+
+
+def create_stock_requisition(db: Session, data: dict, branch_id: int, created_by: int):
+
     from app.models.inventory import StockRequisition, StockRequisitionDetail
     from datetime import datetime
     
-    requisition_number = generate_requisition_number(db)
+    requisition_number = generate_requisition_number(db, branch_id)
+
     requisition = StockRequisition(
         requisition_number=requisition_number,
         requested_by=created_by,
@@ -597,7 +709,9 @@ def create_stock_requisition(db: Session, data: dict, created_by: int):
         priority=data.get("priority", "normal"),
         status="pending",
         notes=data.get("notes"),
+        branch_id=branch_id,
     )
+
     db.add(requisition)
     db.flush()
     
@@ -617,12 +731,14 @@ def create_stock_requisition(db: Session, data: dict, created_by: int):
     return requisition
 
 
-def get_all_requisitions(db: Session, skip: int = 0, limit: int = 100, status: Optional[str] = None):
+def get_all_requisitions(db: Session, branch_id: int, skip: int = 0, limit: int = 100, status: Optional[str] = None):
     """Optimized with eager loading"""
     from app.models.inventory import StockRequisition
     query = db.query(StockRequisition).options(
-        selectinload(StockRequisition.details).joinedload(StockRequisitionDetail.item)
+        joinedload(StockRequisition.details).joinedload(StockRequisitionDetail.item)
     )
+    if branch_id is not None:
+        query = query.filter(StockRequisition.branch_id == branch_id)
     if status:
         query = query.filter(StockRequisition.status == status)
     return query.order_by(StockRequisition.created_at.desc()).offset(skip).limit(limit).all()
@@ -651,8 +767,7 @@ def update_requisition_status(db: Session, requisition_id: int, status: str, app
     return requisition
 
 
-# Stock Issue CRUD
-def generate_issue_number(db: Session):
+def generate_issue_number(db: Session, branch_id: int):
     from datetime import datetime
     from app.models.inventory import StockIssue
     
@@ -674,8 +789,7 @@ def generate_issue_number(db: Session):
         except:
              pass
              
-    # Fallback to count if parsing failed or no previous (but maybe count logic is useful if sequence broken? 
-    # Actually, using count alone is what caused the bug. Trusting sequence from DB max is better)
+    # Fallback to count if parsing failed or no previous
     if start_suffix == 1 and not last_issue:
          count = db.query(StockIssue).filter(
             StockIssue.issue_number.like(f"ISS-{date_str}-%")
@@ -695,11 +809,12 @@ def generate_issue_number(db: Session):
             
         start_suffix += 1
         if loop_count > 1000:
-             print(f"WARNING: generate_issue_number looped 1000 times. Returning risky candidate: {candidate}")
              return candidate
 
 
-def create_stock_issue(db: Session, data: dict, issued_by: int):
+
+def create_stock_issue(db: Session, data: dict, branch_id: int, issued_by: int):
+
     from app.models.inventory import StockIssue, StockIssueDetail, InventoryTransaction, InventoryItem, Location, LocationStock
     from datetime import datetime
     from sqlalchemy.exc import IntegrityError
@@ -707,7 +822,8 @@ def create_stock_issue(db: Session, data: dict, issued_by: int):
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            issue_number = generate_issue_number(db)
+            issue_number = generate_issue_number(db, branch_id)
+
             
             # Parse issue_date if provided as string
             issue_date = data.get("issue_date")
@@ -728,8 +844,10 @@ def create_stock_issue(db: Session, data: dict, issued_by: int):
                 issue_date=issue_date,
                 notes=data.get("notes"),
                 booking_id=data.get("booking_id"),
-                guest_id=data.get("guest_id")
+                guest_id=data.get("guest_id"),
+                branch_id=branch_id
             )
+
             db.add(issue)
             db.flush()
             
@@ -752,7 +870,8 @@ def create_stock_issue(db: Session, data: dict, issued_by: int):
                     available_locations = db.query(LocationStock).join(Location).filter(
                         LocationStock.item_id == detail_data["item_id"],
                         LocationStock.quantity >= issued_qty,
-                        Location.location_type != "GUEST_ROOM"
+                        Location.location_type != "GUEST_ROOM",
+                        Location.branch_id == branch_id
                     ).order_by(LocationStock.quantity.desc()).all()
                     
                     if available_locations:
@@ -766,7 +885,8 @@ def create_stock_issue(db: Session, data: dict, issued_by: int):
                     else:
                         # Fallback: try to find ANY warehouse/store
                         warehouse = db.query(Location).filter(
-                            Location.location_type.in_(["WAREHOUSE", "CENTRAL_WAREHOUSE", "BRANCH_STORE", "DEPARTMENT", "LAUNDRY"])
+                            Location.location_type.in_(["WAREHOUSE", "CENTRAL_WAREHOUSE", "BRANCH_STORE", "DEPARTMENT", "LAUNDRY"]),
+                            Location.branch_id == branch_id
                         ).first()
                         if warehouse:
                             source_loc_id = warehouse.id
@@ -865,7 +985,8 @@ def create_stock_issue(db: Session, data: dict, issued_by: int):
                     notes=transaction_notes,
                     created_by=issued_by,
                     source_location_id=source_loc_id,
-                    destination_location_id=dest_location_id
+                    destination_location_id=dest_location_id,
+                    branch_id=branch_id
                 )
                 db.add(transaction_out)
                 
@@ -882,9 +1003,11 @@ def create_stock_issue(db: Session, data: dict, issued_by: int):
                         created_by=issued_by,
                         department=dest_location_name,  # Track which location received it
                         source_location_id=source_loc_id,
-                        destination_location_id=dest_location_id
+                        destination_location_id=dest_location_id,
+                        branch_id=branch_id
                     )
                     db.add(transaction_in)
+
                 
                 # Create Journal Entry for Consumption (COGS)
                 # ONLY if this is actual consumption (no destination location)
@@ -898,8 +1021,10 @@ def create_stock_issue(db: Session, data: dict, issued_by: int):
                             consumption_id=issue.id,
                             cogs_amount=float(cost),
                             inventory_item_name=item.name,
+                            branch_id=issue.branch_id,
                             created_by=issued_by
                         )
+
                     except Exception as e:
                         print(f"[WARNING] Could not create consumption journal entry: {e}")
                 
@@ -926,7 +1051,8 @@ def create_stock_issue(db: Session, data: dict, issued_by: int):
                              location_id=dest_loc_id,
                              item_id=detail_data["item_id"],
                              quantity=i_qty,
-                             last_updated=datetime.utcnow()
+                             last_updated=datetime.utcnow(),
+                             branch_id=branch_id
                          )
                          db.add(new_stock)
 
@@ -948,7 +1074,8 @@ def create_stock_issue(db: Session, data: dict, issued_by: int):
                              location_id=source_loc_id,
                              item_id=detail_data["item_id"],
                              quantity= -i_qty if i_qty > 0 else 0, # Initialize negative if we believe we owe it
-                             last_updated=datetime.utcnow()
+                             last_updated=datetime.utcnow(),
+                             branch_id=branch_id
                          )
                          db.add(new_source_stock)
             
@@ -970,14 +1097,17 @@ def create_stock_issue(db: Session, data: dict, issued_by: int):
             raise e
 
 
-def get_all_issues(db: Session, skip: int = 0, limit: int = 100):
+def get_all_issues(db: Session, branch_id: Optional[int] = None, skip: int = 0, limit: int = 100):
     """Optimized with eager loading"""
     from app.models.inventory import StockIssue
-    return db.query(StockIssue).options(
+    query = db.query(StockIssue).options(
         joinedload(StockIssue.source_location),
         joinedload(StockIssue.destination_location),
         selectinload(StockIssue.details).joinedload(StockIssueDetail.item)
-    ).order_by(StockIssue.created_at.desc()).offset(skip).limit(limit).all()
+    )
+    if branch_id is not None:
+        query = query.filter(StockIssue.branch_id == branch_id)
+    return query.order_by(StockIssue.created_at.desc()).offset(skip).limit(limit).all()
 
 
 def get_issue_by_id(db: Session, issue_id: int):
@@ -986,7 +1116,7 @@ def get_issue_by_id(db: Session, issue_id: int):
 
 
 # Waste Log CRUD
-def generate_waste_log_number(db: Session):
+def generate_waste_log_number(db: Session, branch_id: int):
     from datetime import datetime
     from app.models.inventory import WasteLog
     today = datetime.utcnow()
@@ -1009,11 +1139,10 @@ def generate_waste_log_number(db: Session):
              start_suffix = count
     
     # Safety Check Loop
-    # Safety Check Loop
     loop_count = 0
     while True:
         loop_count += 1
-        candidate = f"WASTE-{date_str}-{str(start_suffix).zfill(3)}"
+        candidate = f"WASTE-B{branch_id}-{date_str}-{str(start_suffix).zfill(3)}"
         
         exists = db.query(WasteLog).filter(WasteLog.log_number == candidate).count()
         if exists == 0:
@@ -1026,11 +1155,23 @@ def generate_waste_log_number(db: Session):
              return candidate
 
 
-def create_waste_log(db: Session, data: dict, reported_by: int):
-    from app.models.inventory import WasteLog, InventoryTransaction, InventoryItem
+def create_waste_log(db: Session, data: dict, reported_by: int, branch_id: Optional[int] = 1):
+
+    from app.models.inventory import WasteLog, InventoryTransaction, InventoryItem, Location
     from app.models.food_item import FoodItem
     from datetime import datetime
     
+    # Derivation logic for Enterprise View (branch_id=None or 'all')
+    loc_id = data.get("location_id")
+    if not branch_id or branch_id == "all":
+        if loc_id:
+            loc = db.query(Location).filter(Location.id == loc_id).first()
+            if loc:
+                branch_id = loc.branch_id
+        # Fallback to 2 (trails) if still not found, to ensure DB constraint is met
+        if not branch_id or branch_id == "all":
+            branch_id = 2
+
     is_food = data.get("is_food_item", False)
     
     if is_food:
@@ -1042,7 +1183,7 @@ def create_waste_log(db: Session, data: dict, reported_by: int):
         if not food_item:
             raise ValueError("Food item not found")
         
-        log_number = generate_waste_log_number(db)
+        log_number = generate_waste_log_number(db, branch_id)
         waste_log = WasteLog(
             log_number=log_number,
             food_item_id=food_item_id,
@@ -1056,7 +1197,9 @@ def create_waste_log(db: Session, data: dict, reported_by: int):
             notes=data.get("notes"),
             reported_by=reported_by,
             waste_date=data.get("waste_date", datetime.utcnow()),
+            branch_id=branch_id
         )
+
         db.add(waste_log)
         
     else:
@@ -1072,7 +1215,7 @@ def create_waste_log(db: Session, data: dict, reported_by: int):
             print(f"[WARNING] Reporting waste for {item.name} with insufficient global stock. Available: {item.current_stock}, Requested: {data['quantity']}")
             # We allow it to proceed for assets/issued items
         
-        log_number = generate_waste_log_number(db)
+        log_number = generate_waste_log_number(db, branch_id)
         waste_log = WasteLog(
             log_number=log_number,
             item_id=item_id,
@@ -1088,6 +1231,7 @@ def create_waste_log(db: Session, data: dict, reported_by: int):
             notes=data.get("notes"),
             reported_by=reported_by,
             waste_date=data.get("waste_date", datetime.utcnow()),
+            branch_id=branch_id
         )
         db.add(waste_log)
         
@@ -1140,7 +1284,8 @@ def create_waste_log(db: Session, data: dict, reported_by: int):
             reference_number=log_number,
             notes=f"WASTE: {data['reason_code']} - {data.get('notes', '')}", # Add prefix for visibility
             created_by=reported_by,
-            source_location_id=data.get("location_id")
+            source_location_id=data.get("location_id"),
+            branch_id=branch_id
         )
         if transaction.total_amount and transaction.total_amount > 0:
             try:
@@ -1150,9 +1295,11 @@ def create_waste_log(db: Session, data: dict, reported_by: int):
                     consumption_id=waste_log.id,
                     cogs_amount=float(transaction.total_amount),
                     inventory_item_name=item.name,
+                    branch_id=waste_log.branch_id,
                     created_by=reported_by,
                     reference_type="waste"
                 )
+
             except Exception as e:
                 print(f"Failed to create accounting entry for waste: {e}")
         
@@ -1163,14 +1310,21 @@ def create_waste_log(db: Session, data: dict, reported_by: int):
     return waste_log
 
 
-def get_all_waste_logs(db: Session, skip: int = 0, limit: int = 100):
+def get_all_waste_logs(db: Session, skip: int = 0, limit: int = 100, branch_id: Optional[int] = None):
     from app.models.inventory import WasteLog
-    return db.query(WasteLog).order_by(WasteLog.created_at.desc()).offset(skip).limit(limit).all()
+    query = db.query(WasteLog)
+    if branch_id is not None:
+        query = query.filter(WasteLog.branch_id == branch_id)
+    return query.order_by(WasteLog.created_at.desc()).offset(skip).limit(limit).all()
 
 
-def get_waste_log_by_id(db: Session, waste_log_id: int):
+
+def get_waste_log_by_id(db: Session, waste_log_id: int, branch_id: Optional[int] = None):
     from app.models.inventory import WasteLog
-    return db.query(WasteLog).filter(WasteLog.id == waste_log_id).first()
+    query = db.query(WasteLog).filter(WasteLog.id == waste_log_id)
+    if branch_id:
+        query = query.filter(WasteLog.branch_id == branch_id)
+    return query.first()
 
 
 # Location CRUD
@@ -1198,7 +1352,7 @@ def generate_location_code(db: Session, location_type: str, room_area: str):
     if numbers:
         base_suffix = numbers[0]
         code = f"LOC-{prefix}-{base_suffix}"
-        # Check existence
+        # Check existence within branch if possible, otherwise global code
         if not db.query(Location).filter(Location.location_code == code).first():
             return code
         # If exists with number, append 'A', 'B' etc? Or just fallback to count.
@@ -1213,11 +1367,12 @@ def generate_location_code(db: Session, location_type: str, room_area: str):
         count += 1
 
 
-def create_location(db: Session, data: dict):
+def create_location(db: Session, data: dict, branch_id: Optional[int] = 1):
     from app.models.inventory import Location
     location_code = generate_location_code(db, data.get("location_type", ""), data.get("room_area", ""))
     location = Location(
         location_code=location_code,
+        branch_id=branch_id,
         **data
     )
     db.add(location)
@@ -1226,11 +1381,16 @@ def create_location(db: Session, data: dict):
     return location
 
 
-def get_all_locations(db: Session, skip: int = 0, limit: int = 10000):  # Increased limit to show all rooms
+def get_all_locations(db: Session, skip: int = 0, limit: int = 10000, branch_id: Optional[int] = None):  # Increased limit to show all rooms
     from app.models.inventory import Location
+    from sqlalchemy.orm import joinedload
     # Skip auto-sync here - it's handled in the API endpoint to avoid transaction conflicts
     # Just return locations directly
-    return db.query(Location).filter(Location.is_active == True).offset(skip).limit(limit).all()
+    query = db.query(Location).options(joinedload(Location.branch)).filter(Location.is_active == True)
+    if branch_id:
+        query = query.filter(Location.branch_id == branch_id)
+    return query.offset(skip).limit(limit).all()
+
 
 
 def get_location_by_id(db: Session, location_id: int):
@@ -1251,10 +1411,21 @@ def update_location(db: Session, location_id: int, data: dict):
 
 
 # Asset Mapping CRUD
-def create_asset_mapping(db: Session, data: dict, assigned_by: Optional[int] = None):
-    from app.models.inventory import AssetMapping, InventoryItem, LocationStock
+def create_asset_mapping(db: Session, data: dict, branch_id: int, assigned_by: Optional[int] = None):
+    from app.models.inventory import AssetMapping, InventoryItem, LocationStock, Location
     from datetime import datetime
     
+    # Derivation logic for Enterprise View (branch_id=None or 'all')
+    dest_loc_id = data.get("location_id")
+    if not branch_id or branch_id == "all":
+        if dest_loc_id:
+            loc = db.query(Location).filter(Location.id == dest_loc_id).first()
+            if loc:
+                branch_id = loc.branch_id
+        # Fallback to 2 (trails) if still not found
+        if not branch_id or branch_id == "all":
+            branch_id = 2
+
     item_id = data["item_id"]
     quantity = data.get("quantity", 1.0)
     
@@ -1269,9 +1440,10 @@ def create_asset_mapping(db: Session, data: dict, assigned_by: Optional[int] = N
     # 2. Create Mapping
     mapping = AssetMapping(
         item_id=item_id,
-        location_id=data["location_id"],
+        location_id=dest_loc_id,
         serial_number=data.get("serial_number"),
         notes=data.get("notes"),
+        branch_id=branch_id,
         assigned_by=assigned_by,
         quantity=quantity
     )
@@ -1290,7 +1462,8 @@ def create_asset_mapping(db: Session, data: dict, assigned_by: Optional[int] = N
     
     if not source_loc_id:
         warehouse = db.query(Location).filter(
-            Location.location_type.in_(["WAREHOUSE", "CENTRAL_WAREHOUSE"])
+            Location.location_type.in_(["WAREHOUSE", "CENTRAL_WAREHOUSE"]),
+            Location.branch_id == branch_id
         ).first()
         
         if not warehouse:
@@ -1320,7 +1493,8 @@ def create_asset_mapping(db: Session, data: dict, assigned_by: Optional[int] = N
             location_id=source_loc_id,
             item_id=item_id,
             quantity=-quantity,
-            last_updated=datetime.utcnow()
+            last_updated=datetime.utcnow(),
+            branch_id=branch_id
         )
         db.add(new_source_stock)
              
@@ -1330,7 +1504,7 @@ def create_asset_mapping(db: Session, data: dict, assigned_by: Optional[int] = N
     
     # Generate Issue Number
     from app.curd.inventory import generate_issue_number
-    issue_number = generate_issue_number(db)
+    issue_number = generate_issue_number(db, branch_id)
     
     # Fetch Dest Location Name
     dest_loc = db.query(Location).filter(Location.id == data["location_id"]).first()
@@ -1342,7 +1516,8 @@ def create_asset_mapping(db: Session, data: dict, assigned_by: Optional[int] = N
         source_location_id=source_loc_id,
         destination_location_id=data["location_id"],
         issue_date=datetime.utcnow(),
-        notes=f"Auto-generated from Asset Assignment to {dest_name}"
+        notes=f"Auto-generated from Asset Assignment to {dest_name}",
+        branch_id=branch_id
     )
     db.add(stock_issue)
     db.flush() # Get ID
@@ -1369,7 +1544,8 @@ def create_asset_mapping(db: Session, data: dict, assigned_by: Optional[int] = N
         notes=f"Asset Assigned to {dest_name}",
         created_by=assigned_by,
         source_location_id=source_loc_id,
-        destination_location_id=data["location_id"]
+        destination_location_id=data["location_id"],
+        branch_id=branch_id
     )
     db.add(transaction)
     
@@ -1385,7 +1561,8 @@ def create_asset_mapping(db: Session, data: dict, assigned_by: Optional[int] = N
         notes=f"Asset Received from Central Warehouse",
         created_by=assigned_by,
         source_location_id=source_loc_id,
-        destination_location_id=data["location_id"]
+        destination_location_id=data["location_id"],
+        branch_id=branch_id
     )
     db.add(transaction_in)
     
@@ -1403,7 +1580,8 @@ def create_asset_mapping(db: Session, data: dict, assigned_by: Optional[int] = N
             location_id=data["location_id"],
             item_id=item_id,
             quantity=quantity,
-            last_updated=datetime.utcnow()
+            last_updated=datetime.utcnow(),
+            branch_id=branch_id
         )
         db.add(new_stock)
     
@@ -1412,9 +1590,12 @@ def create_asset_mapping(db: Session, data: dict, assigned_by: Optional[int] = N
     return mapping
 
 
-def get_all_asset_mappings(db: Session, skip: int = 0, limit: int = 100, location_id: Optional[int] = None):
+def get_all_asset_mappings(db: Session, skip: int = 0, limit: int = 100, location_id: Optional[int] = None, branch_id: Optional[int] = None):
     from app.models.inventory import AssetMapping
     query = db.query(AssetMapping).filter(AssetMapping.is_active == True)
+    if branch_id:
+        query = query.filter(AssetMapping.branch_id == branch_id)
+
     if location_id:
         query = query.filter(AssetMapping.location_id == location_id)
     return query.order_by(AssetMapping.assigned_date.desc()).offset(skip).limit(limit).all()
@@ -1437,7 +1618,8 @@ def update_asset_mapping(db: Session, mapping_id: int, data: dict):
     if "is_active" in data and data["is_active"] is False and mapping.is_active:
         # Transfer stock BACK to Warehouse (Location -> Warehouse)
         warehouse = db.query(Location).filter(
-            Location.location_type.in_(["WAREHOUSE", "CENTRAL_WAREHOUSE"])
+            Location.location_type.in_(["WAREHOUSE", "CENTRAL_WAREHOUSE"]),
+            Location.branch_id == mapping.branch_id
         ).first()
         
         if warehouse:
@@ -1481,17 +1663,56 @@ def update_asset_mapping(db: Session, mapping_id: int, data: dict):
     return mapping
 
 
-def unassign_asset(db: Session, mapping_id: int, destination_location_id: int = None):
-    from app.models.inventory import AssetMapping, Location, LocationStock
+def unassign_asset(db: Session, mapping_id: int, destination_location_id: int = None, unassigned_by: int = None):
+    from app.models.inventory import AssetMapping, Location, LocationStock, InventoryTransaction, StockIssue, StockIssueDetail, InventoryItem
     from datetime import datetime
     
-    mapping = get_asset_mapping_by_id(db, mapping_id)
-    if not mapping:
-        return None
+    # Handle Virtual Mapping vs Real Mapping
+    is_virtual = False
+    if mapping_id < 0:
+        # Virtual unassignment using LocationStock ID
+        stock_id = abs(mapping_id)
+        stock = db.query(LocationStock).filter(LocationStock.id == stock_id).first()
+        if not stock:
+            return None
+            
+        # Calculate how many are already mapped to avoid unassigning mapped ones
+        from sqlalchemy import func
+        mapped_total = db.query(func.sum(func.coalesce(AssetMapping.quantity, 1))).filter(
+            AssetMapping.location_id == stock.location_id,
+            AssetMapping.item_id == stock.item_id,
+            AssetMapping.is_active == True
+        ).scalar() or 0
         
+        remaining = max(0, stock.quantity - mapped_total)
+        if remaining <= 0:
+            return None
+
+        # Create a synthetic mapping object
+        from types import SimpleNamespace
+        mapping = SimpleNamespace(
+            id=mapping_id,
+            item_id=stock.item_id,
+            location_id=stock.location_id,
+            quantity=remaining,
+            branch_id=stock.branch_id,
+            is_active=True,
+            location=stock.location,
+            unassigned_date=None
+        )
+        is_virtual = True
+    else:
+        mapping = get_asset_mapping_by_id(db, mapping_id)
+        if not mapping:
+            return None
+
     if mapping.is_active:
-        mapping.is_active = False
-        mapping.unassigned_date = datetime.utcnow()
+        if not is_virtual:
+            mapping.is_active = False
+            mapping.unassigned_date = datetime.utcnow()
+        
+        # Get Item details for transaction
+        item = db.query(InventoryItem).filter(InventoryItem.id == mapping.item_id).first()
         
         # Return stock to Warehouse/Available
         # 1. Deduct from Location
@@ -1499,6 +1720,8 @@ def unassign_asset(db: Session, mapping_id: int, destination_location_id: int = 
             LocationStock.location_id == mapping.location_id,
             LocationStock.item_id == mapping.item_id
         ).first()
+        
+        source_loc_id = mapping.location_id
         
         if loc_stock:
             loc_stock.quantity = max(0, loc_stock.quantity - mapping.quantity)
@@ -1513,7 +1736,8 @@ def unassign_asset(db: Session, mapping_id: int, destination_location_id: int = 
         if not warehouse:
             # Fallback to default logic
             warehouse = db.query(Location).filter(
-                Location.location_type.in_(["WAREHOUSE", "CENTRAL_WAREHOUSE"])
+                Location.location_type.in_(["WAREHOUSE", "CENTRAL_WAREHOUSE"]),
+                Location.branch_id == mapping.branch_id
             ).first()
         
         if not warehouse:
@@ -1521,7 +1745,12 @@ def unassign_asset(db: Session, mapping_id: int, destination_location_id: int = 
                 Location.location_type.ilike("%warehouse%")
             ).first()
             
+        dest_loc_id = None
+        dest_name = "Unknown Warehouse"
+        
         if warehouse:
+            dest_loc_id = warehouse.id
+            dest_name = warehouse.name
             wh_stock = db.query(LocationStock).filter(
                 LocationStock.location_id == warehouse.id,
                 LocationStock.item_id == mapping.item_id
@@ -1535,20 +1764,83 @@ def unassign_asset(db: Session, mapping_id: int, destination_location_id: int = 
                     location_id=warehouse.id,
                     item_id=mapping.item_id,
                     quantity=mapping.quantity,
-                    last_updated=datetime.utcnow()
+                    last_updated=datetime.utcnow(),
+                    branch_id=mapping.branch_id
                 )
                 db.add(wh_stock)
         else:
              print("Warning: No warehouse found to return unassigned asset stock to.")
 
+        # 3. Create Traceability Records (Inventory Transaction History)
+        if item and dest_loc_id:
+            # Generate Issue Number
+            from app.curd.inventory import generate_issue_number
+            issue_number = generate_issue_number(db, mapping.branch_id)
+            
+            # 3.1 Create Stock Issue (Transfer Record)
+            stock_issue = StockIssue(
+                issue_number=issue_number,
+                issued_by=unassigned_by,
+                source_location_id=source_loc_id,
+                destination_location_id=dest_loc_id,
+                issue_date=datetime.utcnow(),
+                notes=f"Asset Unassigned from {mapping.location.name if mapping.location else 'Unknown'} to {dest_name}",
+                branch_id=mapping.branch_id
+            )
+            db.add(stock_issue)
+            db.flush()
+            
+            issue_detail = StockIssueDetail(
+                issue_id=stock_issue.id,
+                item_id=mapping.item_id,
+                issued_quantity=mapping.quantity,
+                unit=item.unit,
+                unit_price=item.unit_price,
+                cost=(item.unit_price or 0) * mapping.quantity,
+                notes=f"Asset Unassignment - Mapping ID: {mapping.id}"
+            )
+            db.add(issue_detail)
+            
+            # 3.2 Create Transaction Records
+            # Transfer out from original location (Room)
+            transaction_out = InventoryTransaction(
+                item_id=mapping.item_id,
+                transaction_type="transfer_out",
+                quantity=mapping.quantity,
+                unit_price=item.unit_price,
+                total_amount=(item.unit_price or 0) * mapping.quantity,
+                reference_number=issue_number,
+                notes=f"Unassigned moved transaction from {mapping.location.name if mapping.location else 'Room'}",
+                created_by=unassigned_by,
+                source_location_id=source_loc_id,
+                destination_location_id=dest_loc_id,
+                branch_id=mapping.branch_id
+            )
+            db.add(transaction_out)
+            
+            # Transfer in to warehouse
+            transaction_in = InventoryTransaction(
+                item_id=mapping.item_id,
+                transaction_type="transfer_in",
+                quantity=mapping.quantity,
+                unit_price=item.unit_price,
+                total_amount=(item.unit_price or 0) * mapping.quantity,
+                reference_number=issue_number,
+                notes=f"Unassigned moved transaction to {dest_name}",
+                created_by=unassigned_by,
+                source_location_id=source_loc_id,
+                destination_location_id=dest_loc_id,
+                branch_id=mapping.branch_id
+            )
+            db.add(transaction_in)
+
         # Note: Global stock (item.current_stock) should NOT change because the item 
         # is just moving from Room -> Warehouse. It is still owned.
         # But if the previous logic was incrementing global stock, it was wrong because 
         # unassigning doesn't mean "New Purchase", it means "Return to Shelf".
-        # So we do NOTHING to item.current_stock.
-            
     db.commit()
-    db.refresh(mapping)
+    if not is_virtual:
+        db.refresh(mapping)
     return mapping
 
 
@@ -1562,7 +1854,7 @@ def generate_asset_tag_id(db: Session, item_id: int):
     return f"AST-{item_prefix}-{str(count).zfill(3)}"
 
 
-def create_asset_registry(db: Session, data: dict, created_by: int = None):
+def create_asset_registry(db: Session, data: dict, branch_id: int, created_by: int = None):
     from app.models.inventory import AssetRegistry, LocationStock, Location, InventoryTransaction, PurchaseMaster
     
     # 1. Determine Source Location (Automatic Detection)
@@ -1587,9 +1879,13 @@ def create_asset_registry(db: Session, data: dict, created_by: int = None):
     # Strategy C: Default to Central Warehouse if nothing else found
     if not source_loc_id:
         # Find warehouse dynamically instead of hardcoding ID 1
-        warehouse = db.query(Location).filter(
+        warehouse_query = db.query(Location).filter(
             Location.location_type.in_(["WAREHOUSE", "CENTRAL_WAREHOUSE"])
-        ).first()
+        )
+        if branch_id:
+             warehouse_query = warehouse_query.filter(Location.branch_id == branch_id)
+             
+        warehouse = warehouse_query.first()
         
         if not warehouse:
             warehouse = db.query(Location).filter(
@@ -1620,7 +1916,8 @@ def create_asset_registry(db: Session, data: dict, created_by: int = None):
             new_stock = LocationStock(
                 location_id=source_loc_id,
                 item_id=data["item_id"],
-                quantity=-1
+                quantity=-1,
+                branch_id=branch_id
             )
             db.add(new_stock)
             
@@ -1637,7 +1934,8 @@ def create_asset_registry(db: Session, data: dict, created_by: int = None):
         last_maintenance_date=data.get("last_maintenance_date"),
         next_maintenance_due_date=data.get("next_maintenance_due_date"),
         purchase_master_id=data.get("purchase_master_id"),
-        notes=data.get("notes")
+        notes=data.get("notes"),
+        branch_id=branch_id
     )
     db.add(asset)
     
@@ -1662,7 +1960,8 @@ def create_asset_registry(db: Session, data: dict, created_by: int = None):
         notes=f"Asset Assigned: {source_name} -> {dest_name}",
         created_by=created_by,
         source_location_id=source_loc_id,
-        destination_location_id=data["current_location_id"]
+        destination_location_id=data["current_location_id"],
+        branch_id=branch_id
     )
     # Fetch item for price
     item_obj = get_item_by_id(db, data["item_id"])
@@ -1677,9 +1976,11 @@ def create_asset_registry(db: Session, data: dict, created_by: int = None):
     return asset
 
 
-def get_all_asset_registry(db: Session, skip: int = 0, limit: int = 100, location_id: Optional[int] = None, status: Optional[str] = None):
+def get_all_asset_registry(db: Session, branch_id: Optional[int] = None, skip: int = 0, limit: int = 100, location_id: Optional[int] = None, status: Optional[str] = None):
     from app.models.inventory import AssetRegistry
     query = db.query(AssetRegistry)
+    if branch_id is not None:
+        query = query.filter(AssetRegistry.branch_id == branch_id)
     if location_id:
         query = query.filter(AssetRegistry.current_location_id == location_id)
     if status:
@@ -1687,9 +1988,12 @@ def get_all_asset_registry(db: Session, skip: int = 0, limit: int = 100, locatio
     return query.order_by(AssetRegistry.created_at.desc()).offset(skip).limit(limit).all()
 
 
-def get_asset_registry_by_id(db: Session, asset_id: int):
+def get_asset_registry_by_id(db: Session, asset_id: int, branch_id: Optional[int] = None):
     from app.models.inventory import AssetRegistry
-    return db.query(AssetRegistry).filter(AssetRegistry.id == asset_id).first()
+    query = db.query(AssetRegistry).filter(AssetRegistry.id == asset_id)
+    if branch_id is not None:
+        query = query.filter(AssetRegistry.branch_id == branch_id)
+    return query.first()
 
 
 def update_asset_registry(db: Session, asset_id: int, data: dict):
@@ -1751,13 +2055,17 @@ def update_stock_requisition_status(db: Session, requisition_id: int, status: st
 
 # Stock Issue CRUD
 
-def get_all_stock_issues(db: Session, skip: int = 0, limit: int = 100):
-    return db.query(StockIssue).options(
+def get_all_stock_issues(db: Session, skip: int = 0, limit: int = 100, branch_id: Optional[int] = None):
+    query = db.query(StockIssue).options(
         joinedload(StockIssue.details).joinedload(StockIssueDetail.item),
         joinedload(StockIssue.source_location),
         joinedload(StockIssue.destination_location),
         joinedload(StockIssue.issuer)
-    ).order_by(StockIssue.created_at.desc()).offset(skip).limit(limit).all()
+    )
+    if branch_id:
+        query = query.filter(StockIssue.branch_id == branch_id)
+    return query.order_by(StockIssue.created_at.desc()).offset(skip).limit(limit).all()
+
 
 
 def process_food_order_usage(db: Session, order_id: int):
@@ -1798,16 +2106,21 @@ def process_food_order_usage(db: Session, order_id: int):
     
     from app.models.inventory import Location, LocationStock
     
-    kitchen_loc = db.query(Location).filter(
-        Location.name.ilike("%Main Kitchen%"),
+    kitchen_query = db.query(Location).filter(
         Location.is_active == True
+    )
+    
+    if order.branch_id:
+        kitchen_query = kitchen_query.filter(Location.branch_id == order.branch_id)
+
+    kitchen_loc = kitchen_query.filter(
+        Location.name.ilike("%Main Kitchen%")
     ).first()
     
     if not kitchen_loc:
-        # Fallback to any kitchen
-        kitchen_loc = db.query(Location).filter(
-            Location.name.ilike("%Kitchen%"),
-            Location.is_active == True
+        # Fallback to any kitchen in this branch
+        kitchen_loc = kitchen_query.filter(
+            Location.name.ilike("%Kitchen%")
         ).first()
 
     # Deduct stock and create transactions
@@ -1836,7 +2149,8 @@ def process_food_order_usage(db: Session, order_id: int):
                      location_id=kitchen_loc.id,
                      item_id=item_id,
                      quantity=-quantity,
-                     last_updated=datetime.utcnow()
+                     last_updated=datetime.utcnow(),
+                     branch_id=order.branch_id
                  )
                  db.add(new_stock)
 
@@ -1851,7 +2165,8 @@ def process_food_order_usage(db: Session, order_id: int):
             department=item.category.parent_department if item.category else "Restaurant",
             notes=f"Food Order #{order_id} Consumption from {kitchen_loc.name if kitchen_loc else 'Global Stock'}",
             created_by=None,
-            source_location_id=kitchen_loc.id if kitchen_loc else None
+            source_location_id=kitchen_loc.id if kitchen_loc else None,
+            branch_id=order.branch_id
         )
         db.add(transaction)
     
@@ -1921,9 +2236,110 @@ def get_location_stock(db: Session, location_id: int):
 
 
 def get_all_recipes(db: Session, skip: int = 0, limit: int = 100):
-   """Get all recipes"""
-   from app.models.recipe import Recipe, RecipeIngredient
-   return db.query(Recipe).options(
-       joinedload(Recipe.food_item),
-       selectinload(Recipe.ingredients).joinedload(RecipeIngredient.inventory_item)
-   ).offset(skip).limit(limit).all()
+    """Get all recipes"""
+    from app.models.recipe import Recipe, RecipeIngredient
+    query = db.query(Recipe).options(
+        joinedload(Recipe.food_item),
+        selectinload(Recipe.ingredients).joinedload(RecipeIngredient.inventory_item)
+    )
+    return query.offset(skip).limit(limit).all()
+
+
+# Inter-branch Transfer CRUD
+def generate_transfer_number(db: Session, branch_id: int):
+    # Branch specific numbering
+    from app.models.inventory import InterBranchTransfer
+    count = db.query(InterBranchTransfer).filter(InterBranchTransfer.source_branch_id == branch_id).count() + 1
+    return f"TRF-{branch_id}-{datetime.utcnow().strftime('%y%m')}-{count:04d}"
+
+
+def create_inter_branch_transfer(db: Session, data: dict, source_branch_id: int, created_by: int):
+    from app.models.inventory import InterBranchTransfer
+    
+    transfer_number = generate_transfer_number(db, source_branch_id)
+    transfer = InterBranchTransfer(
+        **data,
+        transfer_number=transfer_number,
+        source_branch_id=source_branch_id,
+        created_by=created_by,
+        status="pending"
+    )
+    db.add(transfer)
+    db.commit()
+    db.refresh(transfer)
+    return transfer
+
+
+def get_all_inter_branch_transfers(db: Session, branch_id: Optional[int] = None, skip: int = 0, limit: int = 100):
+    from app.models.inventory import InterBranchTransfer
+    from sqlalchemy import or_
+    query = db.query(InterBranchTransfer).options(
+        joinedload(InterBranchTransfer.item),
+        joinedload(InterBranchTransfer.source_branch),
+        joinedload(InterBranchTransfer.destination_branch),
+        joinedload(InterBranchTransfer.source_location),
+        joinedload(InterBranchTransfer.destination_location)
+    )
+    
+    if branch_id is not None:
+        query = query.filter(or_(
+            InterBranchTransfer.source_branch_id == branch_id,
+            InterBranchTransfer.destination_branch_id == branch_id
+        ))
+        
+    return query.order_by(InterBranchTransfer.created_at.desc()).offset(skip).limit(limit).all()
+
+
+def get_transfer_by_id(db: Session, transfer_id: int):
+    from app.models.inventory import InterBranchTransfer
+    return db.query(InterBranchTransfer).filter(InterBranchTransfer.id == transfer_id).first()
+
+
+def update_transfer_status(db: Session, transfer_id: int, status: str, location_id: int = None):
+    from app.models.inventory import InterBranchTransfer, InventoryTransaction
+    transfer = db.query(InterBranchTransfer).filter(InterBranchTransfer.id == transfer_id).first()
+    if not transfer:
+        return None
+    
+    old_status = transfer.status
+    transfer.status = status
+    
+    if status == "in_transit" and old_status == "pending":
+        # Deduct from source branch / location
+        update_location_stock(db, transfer.source_location_id, transfer.item_id, -transfer.quantity)
+        
+        # Create transaction record for source branch
+        trans = InventoryTransaction(
+            item_id=transfer.item_id,
+            transaction_type="out",
+            quantity=transfer.quantity,
+            reference_number=transfer.transfer_number,
+            notes=f"Inter-branch transfer to branch {transfer.destination_branch_id}",
+            source_location_id=transfer.source_location_id,
+            branch_id=transfer.source_branch_id
+        )
+        db.add(trans)
+        
+    elif status == "received" and old_status == "in_transit":
+        if not location_id:
+            raise ValueError("Destination location_id is required for receipt")
+        
+        transfer.destination_location_id = location_id
+        # Add to destination branch / location
+        update_location_stock(db, location_id, transfer.item_id, transfer.quantity)
+        
+        # Create transaction record for destination branch
+        trans = InventoryTransaction(
+            item_id=transfer.item_id,
+            transaction_type="in",
+            quantity=transfer.quantity,
+            reference_number=transfer.transfer_number,
+            notes=f"Inter-branch transfer from branch {transfer.source_branch_id}",
+            destination_location_id=location_id,
+            branch_id=transfer.destination_branch_id
+        )
+        db.add(trans)
+        
+    db.commit()
+    db.refresh(transfer)
+    return transfer

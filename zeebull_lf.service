@@ -1,0 +1,15 @@
+[Unit]
+Description=Zeebull Resort Management API
+After=network.target
+
+[Service]
+User=basilabrahamaby
+Group=www-data
+WorkingDirectory=/var/www/zeebull/ResortApp
+Environment="PATH=/var/www/zeebull/ResortApp/venv/bin"
+EnvironmentFile=/var/www/zeebull/ResortApp/.env
+ExecStart=/var/www/zeebull/ResortApp/venv/bin/gunicorn main:app --workers 3 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8013
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

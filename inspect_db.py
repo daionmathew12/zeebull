@@ -1,19 +1,23 @@
-from app.database import SessionLocal
-from sqlalchemy import text
+import os
+import sys
+from sqlalchemy import create_engine, inspect
 
-def inspect_emps():
-    db = SessionLocal()
-    try:
-        res = db.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name = 'employees';"))
-        cols = [row[0] for row in res.fetchall()]
-        print(f"Employees columns: {cols}")
-        
-        # Also check users
-        res = db.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name = 'users';"))
-        cols = [row[0] for row in res.fetchall()]
-        print(f"Users columns: {cols}")
-    finally:
-        db.close()
+# Add the project directory to sys.path
+sys.path.append(os.path.join(os.getcwd(), "ResortApp"))
 
-if __name__ == "__main__":
-    inspect_emps()
+# Load environment variables (mimicking app behavior)
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.getcwd(), "ResortApp", ".env"))
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    print("DATABASE_URL not found in .env")
+    sys.exit(1)
+
+engine = create_engine(DATABASE_URL)
+inspector = inspect(engine)
+
+columns = inspector.get_columns('system_settings')
+print("Columns in system_settings:")
+for column in columns:
+    print(f"- {column['name']}")

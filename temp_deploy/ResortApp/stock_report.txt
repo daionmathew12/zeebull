@@ -1,0 +1,32 @@
+Item Name                      | ID    | Current Stock   | Unit
+----------------------------------------------------------------------
+Mineral Water 1L               | 20    | 48.0            | pcs
+
+--- Transactions for Mineral Water 1L ---
+  Type: in              | Qty: 50.0       | Change: 50.0       | Date: 2025-12-12 15:46:58.134729
+  Type: transfer_out    | Qty: 4.0        | Change: -4.0       | Date: 2025-12-12 15:51:12.041600
+  Type: transfer_in     | Qty: 4.0        | Change: 4.0        | Date: 2025-12-12 15:51:12.041601
+  Type: out             | Qty: 2.0        | Change: -2.0       | Date: 2025-12-12 15:52:07.483023
+  > Transaction Sum (Calculated): 48.0
+  > Current Stock (In DB):        48.0
+  > Purchase found: ID 20, Status: received, Dest Loc: 15, Qty: 50.0
+  > Location Stocks:
+    - Loc ID 19: 4.0
+    - Loc ID 15: 44.0
+    - Sum of Location Stocks: 48.0
+----------------------------------------------------------------------
+Coca Cola 750ml                | 19    | 49.0            | pcs
+
+--- Transactions for Coca Cola 750ml ---
+  Type: in              | Qty: 50.0       | Change: 50.0       | Date: 2025-12-12 15:46:58.151062
+  Type: transfer_out    | Qty: 2.0        | Change: -2.0       | Date: 2025-12-12 15:51:12.041596
+  Type: transfer_in     | Qty: 2.0        | Change: 2.0        | Date: 2025-12-12 15:51:12.041599
+  Type: out             | Qty: 1.0        | Change: -1.0       | Date: 2025-12-12 15:52:07.483018
+  > Transaction Sum (Calculated): 49.0
+  > Current Stock (In DB):        49.0
+  > Purchase found: ID 20, Status: received, Dest Loc: 15, Qty: 50.0
+  > Location Stocks:
+    - Loc ID 19: 2.0
+    - Loc ID 15: 47.0
+    - Sum of Location Stocks: 49.0
+----------------------------------------------------------------------

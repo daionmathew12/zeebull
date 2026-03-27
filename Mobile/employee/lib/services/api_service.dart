@@ -22,6 +22,12 @@ class ApiService {
         if (token != null) {
           options.headers['Authorization'] = 'Bearer $token';
         }
+
+        final branchId = await _storage.read(key: 'branch_id');
+        if (branchId != null) {
+          options.headers['X-Branch-ID'] = branchId;
+        }
+
         return handler.next(options);
       },
       onError: (error, handler) {

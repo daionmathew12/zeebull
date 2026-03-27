@@ -96,6 +96,7 @@ const Services = () => {
   const [usedQuantities, setUsedQuantities] = useState({}); // Track used quantities for each assignment
   const [returnLocationId, setReturnLocationId] = useState(null); // Location to return items to
   const [returnLocations, setReturnLocations] = useState({}); // Per-item return location {assignmentId: locationId}
+  const [damageQuantities, setDamageQuantities] = useState({}); // Track damaged items for waste reporting
   const [locations, setLocations] = useState([]); // Available locations for returns
   const [returnedItems, setReturnedItems] = useState([]);
   const [showServiceReport, setShowServiceReport] = useState(false);
@@ -1022,12 +1023,14 @@ const Services = () => {
           }
 
           // Calculate used. Backend handles it if missing, but better to send.
-          const quantityUsed = Math.max(0, quantityAssigned - numQty);
+          const damageQty = parseFloat(damageQuantities[keyId] || 0);
+          const quantityUsed = Math.max(0, quantityAssigned - numQty - damageQty);
 
           // Construct payload item
           const retItem = {
             quantity_returned: numQty,
             quantity_used: quantityUsed,
+            quantity_damaged: damageQty,
             notes: "Inline return",
             return_location_id: (returnLocations[keyId] && returnLocations[keyId] !== "") ? parseInt(returnLocations[keyId]) : null
           };
@@ -1092,6 +1095,7 @@ const Services = () => {
           inventory_item_id: a.assignment_id ? undefined : parseInt(a.id), // Fallback to item_id if assignment_id missing
           quantity_returned: parseFloat(currentReturn),
           quantity_used: parseFloat(usedQty),
+          quantity_damaged: parseFloat(damageQuantities[a.id] || 0),
           notes: `Return inventory on service completion`,
           return_location_id: (returnLocations[a.id] && returnLocations[a.id] !== "") ? parseInt(returnLocations[a.id]) : null
         };
@@ -1150,6 +1154,7 @@ const Services = () => {
       setCompletingRequestId(null);
       setInventoryAssignments([]);
       setReturnQuantities({});
+      setDamageQuantities({});
       setUsedQuantities({});
       setReturnLocations({});
       setReturnLocationId(null);
@@ -3551,9 +3556,10 @@ const Services = () => {
                             <td className="py-5 px-6 text-center">
                               <select
                                 value={s.status}
+                                disabled={s.status === 'completed'}
                                 onChange={(e) => handleStatusChange(s.id, e.target.value)}
-                                className={`text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg border-none ring-1 transition-all appearance-none cursor-pointer ${s.status === 'completed' ? 'bg-emerald-50 text-emerald-600 ring-emerald-100' :
-                                  s.status === 'in_progress' ? 'bg-indigo-50 text-indigo-600 ring-indigo-100' : 'bg-amber-50 text-amber-600 ring-amber-100'
+                                className={`text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg border-none ring-1 transition-all appearance-none ${s.status === 'completed' ? 'bg-emerald-50 text-emerald-600 ring-emerald-100 cursor-not-allowed opacity-80' :
+                                  s.status === 'in_progress' ? 'bg-indigo-50 text-indigo-600 ring-indigo-100 cursor-pointer' : 'bg-amber-50 text-amber-600 ring-amber-100 cursor-pointer'
                                   }`}
                               >
                                 <option value="pending">Wait</option>
@@ -3600,9 +3606,6 @@ const Services = () => {
                                     </button>
                                   )}
                                 </div>
-                                <button onClick={() => handleDeleteAssignedService(s.id)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-white rounded-xl transition-all shadow-sm" title="Delete Mission">
-                                  <Archive size={14} />
-                                </button>
                               </div>
                             </td>
                           </tr>
@@ -3753,16 +3756,9 @@ const Services = () => {
                                 </div>
                               </td>
                               <td className="py-5 px-6">
-                                <select
-                                  value={request.employee_id || ""}
-                                  onChange={(e) => handleAssignEmployeeToRequest(request.id, e.target.value)}
-                                  className={`w-full bg-transparent border-none text-[11px] font-black uppercase tracking-widest cursor-pointer hover:underline transition-all ${!request.employee_id ? 'text-amber-500' : 'text-slate-700'}`}
-                                >
-                                  <option value="">AWAIT ASSIGNMENT</option>
-                                  {employees.map((emp) => (
-                                    <option key={emp.id} value={emp.id}>{emp.name.toUpperCase()}</option>
-                                  ))}
-                                </select>
+                                <div className={`text-[11px] font-black uppercase tracking-widest ${!request.employee_id ? 'text-amber-500' : 'text-slate-700'}`}>
+                                  {request.employee_name ? request.employee_name.toUpperCase() : 'AWAIT ASSIGNMENT'}
+                                </div>
                               </td>
                               <td className="py-5 px-6 text-center">
                                 <div className="flex justify-center">
@@ -3776,81 +3772,22 @@ const Services = () => {
                               </td>
                               <td className="py-5 px-6 text-right">
                                 <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                                  {isCheckoutRequest ? (
-                                    <>
-                                      <button
-                                        onClick={() => setSelectedActivity({
-                                          type: 'Request',
-                                          name: request.request_type,
-                                          room: request.room_number ? `Unit ${request.room_number}` : `ID: ${request.room_id}`,
-                                          employee: request.employee_name || '-',
-                                          date: request.created_at,
-                                          status: request.status,
-                                          id: request.id,
-                                          original: request
-                                        })}
-                                        className="p-2 bg-white text-slate-400 hover:text-indigo-600 rounded-xl shadow-sm border border-slate-100 transition-all"
-                                        title="View Details"
-                                      >
-                                        <LayoutDashboard size={14} />
-                                      </button>
-                                      <button
-                                        onClick={() => !request.employee_id ? handleQuickAssignFromRequest(request) : handleViewCheckoutInventory(checkoutRequestId)}
-                                        className="p-2 bg-indigo-600 text-white rounded-xl shadow-lg shadow-indigo-100 hover:scale-110 active:scale-95 transition-all"
-                                        title="Initiate Verification"
-                                      >
-                                        <Zap size={14} />
-                                      </button>
-                                    </>
-                                  ) : (
-                                    <>
-                                      {(request.status || "").toLowerCase() === "pending" && (
-                                        <button
-                                          onClick={!request.employee_id ? () => handleQuickAssignFromRequest(request) : () => handleUpdateRequestStatus(request.id, 'in_progress')}
-                                          className="p-2 bg-emerald-500 text-white rounded-xl shadow-lg shadow-emerald-100 hover:scale-110 transition-all"
-                                          title="Dispatch"
-                                        >
-                                          <CheckCircle size={14} />
-                                        </button>
-                                      )}
-                                      <button
-                                        onClick={() => setSelectedActivity({
-                                          type: 'Request',
-                                          name: request.request_type,
-                                          room: request.room_number ? `Unit ${request.room_number}` : `ID: ${request.room_id}`,
-                                          employee: request.employee_name || '-',
-                                          date: request.created_at,
-                                          status: request.status,
-                                          id: request.id,
-                                          original: request
-                                        })}
-                                        className="p-2 bg-white text-slate-400 hover:text-indigo-600 rounded-xl shadow-sm border border-slate-100 transition-all"
-                                        title="View Details"
-                                      >
-                                        <LayoutDashboard size={14} />
-                                      </button>
-                                      {['pending', 'in_progress', 'scheduled'].includes((request.status || "").toLowerCase()) && (
-                                        <button
-                                          onClick={() => {
-                                            if (window.confirm("Abort Protocol: Are you sure you want to cancel this service request?")) {
-                                              handleUpdateRequestStatus(request.id, "cancelled");
-                                            }
-                                          }}
-                                          className="p-2 bg-white text-slate-400 hover:text-orange-500 rounded-xl shadow-sm border border-slate-100 transition-all"
-                                          title="Cancel Protocol"
-                                        >
-                                          <X size={14} />
-                                        </button>
-                                      )}
-                                      <button
-                                        onClick={() => handleDeleteRequest(request.id)}
-                                        className="p-2 bg-white text-slate-400 hover:text-red-500 rounded-xl shadow-sm border border-slate-100 transition-all"
-                                        title="Archive"
-                                      >
-                                        <Archive size={14} />
-                                      </button>
-                                    </>
-                                  )}
+                                  <button
+                                    onClick={() => setSelectedActivity({
+                                      type: 'Request',
+                                      name: request.request_type,
+                                      room: request.room_number ? `Unit ${request.room_number}` : `ID: ${request.room_id}`,
+                                      employee: request.employee_name || '-',
+                                      date: request.created_at,
+                                      status: request.status,
+                                      id: request.id,
+                                      original: request
+                                    })}
+                                    className="p-2 bg-white text-slate-400 hover:text-indigo-600 rounded-xl shadow-sm border border-slate-100 transition-all"
+                                    title="View Details"
+                                  >
+                                    <LayoutDashboard size={14} />
+                                  </button>
                                 </div>
                               </td>
                             </tr>
@@ -4311,7 +4248,7 @@ const Services = () => {
                     const maxReturnable = Math.max(0, assignedQty - alreadyReturned);
                     const currentReturnVal = returnQuantities[assignment.id];
                     const currentReturn = currentReturnVal !== undefined && currentReturnVal !== '' ? parseFloat(currentReturnVal) : 0;
-                    const damageQtyVal = assignment.damage_qty_input || 0;
+                    const damageQtyVal = parseFloat(damageQuantities[assignment.id] || 0);
                     const calculatedUsedRaw = Math.max(0, assignedQty - alreadyReturned - currentReturn - damageQtyVal);
                     const isPcs = (assignment.item?.unit || 'pcs').toLowerCase() === 'pcs';
                     const calculatedUsed = isPcs ? Math.round(calculatedUsedRaw) : Number(calculatedUsedRaw.toFixed(3));
@@ -4390,6 +4327,43 @@ const Services = () => {
                             />
                             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Mark as used/consumed</p>
                           </div>
+                        </div>
+
+                        {/* Damage Input Section */}
+                        <div className="mt-6 pt-6 border-t border-slate-50 flex items-center gap-6">
+                            <div className="flex-1 space-y-2">
+                                <label className="text-[10px] font-black text-rose-500 uppercase tracking-widest flex items-center gap-1.5">
+                                    <AlertTriangle size={10} /> Damage Node
+                                </label>
+                                <div className="flex items-center gap-3">
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        max={maxReturnable - currentReturn}
+                                        step={isPcs ? "1" : "0.01"}
+                                        value={damageQuantities[assignment.id] || 0}
+                                        onChange={(e) => {
+                                            let val = parseFloat(e.target.value);
+                                            if (isNaN(val)) val = 0;
+                                            if (isPcs) val = Math.floor(val);
+                                            // Max damage is what's left after clean returns
+                                            const maxDamage = Math.max(0, maxReturnable - currentReturn);
+                                            val = Math.max(0, Math.min(val, maxDamage));
+                                            setDamageQuantities({ ...damageQuantities, [assignment.id]: val });
+                                        }}
+                                        className="w-full bg-rose-50 border-none ring-1 ring-rose-100 focus:ring-2 focus:ring-rose-500 p-3 rounded-xl text-sm font-black text-rose-700 transition-all"
+                                    />
+                                    <div className="flex flex-col">
+                                        <span className="text-[10px] font-black text-rose-900 leading-none">RECORD WASTE</span>
+                                        <span className="text-[8px] font-bold text-rose-400 uppercase tracking-widest mt-1">LOGS AUTOMATICALLY</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex-1">
+                                <p className="text-[10px] text-slate-400 font-medium leading-relaxed italic">
+                                    Items marked here will be removed from stock and recorded in the system's damage/waste logs for this room.
+                                </p>
+                            </div>
                         </div>
 
                         <div style={{ marginTop: '24px', padding: '16px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '16px' }}>
@@ -5108,7 +5082,7 @@ const Services = () => {
                                     <span>Total: {assignedQty} {item.item?.unit || item.unit}</span>
                                   </div>
 
-                                  <div className="grid grid-cols-2 gap-2 mt-2">
+                                  <div className="grid grid-cols-3 gap-2 mt-2">
                                     <div>
                                       <label className="block text-[9px] text-slate-500 uppercase font-bold mb-0.5">Return Qty</label>
                                       <input
@@ -5126,6 +5100,22 @@ const Services = () => {
                                       />
                                     </div>
                                     <div>
+                                      <label className="block text-[9px] text-rose-500 uppercase font-bold mb-0.5">Damage Qty</label>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        max={assignedQty - (returnQuantities[item.id] || 0)}
+                                        step="0.01"
+                                        className="w-full border border-rose-200 bg-rose-50/30 rounded px-2 py-1 text-xs font-bold text-rose-700"
+                                        placeholder="0"
+                                        value={damageQuantities[item.id] || ''}
+                                        onChange={(e) => {
+                                          const val = Math.min(parseFloat(e.target.value) || 0, assignedQty - (returnQuantities[item.id] || 0));
+                                          setDamageQuantities(prev => ({ ...prev, [item.id]: val }));
+                                        }}
+                                      />
+                                    </div>
+                                    <div>
                                       <label className="block text-[9px] text-slate-500 uppercase font-bold mb-0.5">Return To</label>
                                       <select
                                         className="w-full border border-slate-300 rounded px-1 py-1 text-[10px]"
@@ -5139,8 +5129,13 @@ const Services = () => {
                                       </select>
                                     </div>
                                   </div>
-                                  <div className="text-right mt-1 text-[10px] text-slate-500">
-                                    {assignedQty - (returnQuantities[item.id] || 0)} consumed
+                                  <div className="flex justify-between mt-1 text-[10px]">
+                                    <span className="text-rose-500 font-bold">
+                                      {damageQuantities[item.id] > 0 ? `${damageQuantities[item.id]} damaged` : ''}
+                                    </span>
+                                    <span className="text-slate-500">
+                                      {Math.max(0, assignedQty - (returnQuantities[item.id] || 0) - (damageQuantities[item.id] || 0))} consumed
+                                    </span>
                                   </div>
                                 </div>
                               )

@@ -178,3 +178,127 @@ textarea:focus {
     height: 4px;
   }
 }
+
+/* ── Branch footer clearance ── */
+/* Give every page bottom space so the sticky branch bar doesn't cover content */
+body {
+  padding-bottom: 52px; /* height of sticky branch footer */
+}
+
+/* ── Section-level mobile fixes ── */
+@media (max-width: 640px) {
+  /* Packages carousel — stack cards on mobile */
+  [id="packages"] .taj-section-header {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  /* Rooms grid: single column */
+  [id="rooms-section"] .grid {
+    grid-template-columns: 1fr !important;
+  }
+  /* Section horizontal padding */
+  section, [id="packages"], [id="rooms-section"] {
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+  }
+  /* Taj two-col header → single col */
+  .taj-section-header {
+    flex-direction: column !important;
+    gap: 1rem !important;
+  }
+  .taj-section-header__right {
+    text-align: left !important;
+  }
+  /* Modals full-width */
+  .modal-content, 
+  [role="dialog"] {
+    width: 100% !important;
+    max-width: 100vw !important;
+    margin: 0 !important;
+    border-radius: 1.25rem 1.25rem 0 0 !important;
+  }
+  /* Gallery grid single col */
+  .gallery-grid {
+    grid-template-columns: 1fr !important;
+  }
+  /* Fix nav mobile overlap */
+  header nav {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+  }
+  /* Chat button: keep above sticky footer */
+  .chat-fab {
+    bottom: 4.5rem !important;
+  }
+  /* Back-to-top: keep above sticky footer */
+  .back-to-top-btn {
+    bottom: 4.5rem !important;
+  }
+}
+
+/* ── Sticky branch footer scrollbar: hide on mobile ── */
+/* The footer uses overflowX: auto; hide the scrollbar itself */
+@media (max-width: 640px) {
+  .branch-footer-strip::-webkit-scrollbar {
+    display: none;
+  }
+  /* ── Stacking FABs on mobile ── */
+  /* Branch footer height is ~52px (3.25rem). We stack above it. */
+  .branch-footer-strip {
+    height: 52px !important;
+  }
+
+  .whatsapp-fab {
+    bottom: 4.5rem !important; /* Above branch bar */
+    right: 1rem !important;
+  }
+
+  .back-to-top-btn {
+    bottom: 8.5rem !important; /* Above WhatsApp */
+    right: 1rem !important;
+    width: 38px !important;
+    height: 38px !important;
+  }
+
+  .chat-fab {
+    bottom: 11.5rem !important; /* Above Back-to-top */
+    right: 1rem !important;
+    left: auto !important;
+  }
+
+  /* Hero adjustments for extra small screens */
+  h1 {
+    line-height: 1.1 !important;
+  }
+  
+  .btn-gold {
+    width: 100% !important;
+    justify-content: center !important;
+    padding: 0.8rem 1rem !important;
+  }
+}
+
+@media (min-width: 641px) and (max-width: 1024px) {
+  :root {
+    --visible-cards: 2;
+  }
+  .whatsapp-fab {
+    bottom: 5.5rem !important;
+    right: 1.5rem !important;
+  }
+  .back-to-top-btn {
+    bottom: 9.5rem !important;
+    right: 1.5rem !important; 
+  }
+  .chat-fab {
+    bottom: 13.5rem !important;
+    right: 1.5rem !important;
+    left: auto !important;
+  }
+}
+
+@media (min-width: 1025px) {
+  :root {
+    --visible-cards: 3;
+  }
+}

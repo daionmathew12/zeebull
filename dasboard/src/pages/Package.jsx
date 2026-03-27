@@ -6,10 +6,11 @@ import { motion } from "framer-motion";
 import { getMediaBaseUrl } from "../utils/env";
 import {
   Save, ArrowRight, ArrowLeft, Trash2, X, Edit, Image as ImageIcon,
-  Plus as PlusIcon, Calendar, DollarSign, Package as PackageIcon
+  Plus as PlusIcon, Calendar, DollarSign, Package as PackageIcon, Loader2
 } from 'lucide-react';
 import imageCompression from 'browser-image-compression';
 import { getImageUrl } from "../utils/imageUtils";
+import { usePermissions } from "../hooks/usePermissions";
 
 // Utility moved to utils/imageUtils.js
 
@@ -33,6 +34,7 @@ const Card = ({ children, title, className = "" }) => (
 import foodService from "../services/foodService";
 
 const Packages = ({ noLayout = false }) => {
+  const { hasPermission } = usePermissions();
   const [view, setView] = useState('list');
   const [packages, setPackages] = useState([]);
   const [allRooms, setAllRooms] = useState([]);
@@ -59,6 +61,7 @@ const Packages = ({ noLayout = false }) => {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [imagePreviews, setImagePreviews] = useState([]);
   const [selectedPackageImages, setSelectedPackageImages] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -119,7 +122,7 @@ const Packages = ({ noLayout = false }) => {
           if (!file.type.startsWith('image/')) return file;
 
           const options = {
-            maxSizeMB: 1,
+            maxSizeMB: 15,
             maxWidthOrHeight: 1920,
             useWebWorker: true
           };
@@ -146,12 +149,21 @@ const Packages = ({ noLayout = false }) => {
     }
   };
 
-  const handleRemoveImage = (index) => {
-    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
-    setImagePreviews(prev => prev.filter((_, i) => i !== index));
+  const handleRemoveImage = (index, isExisting = false) => {
+    if (isExisting) {
+      setFormData(prev => ({
+        ...prev,
+        images: prev.images.filter((_, i) => i !== index)
+      }));
+    } else {
+      setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+      setImagePreviews(prev => prev.filter((_, i) => i !== index));
+    }
   };
 
   const handleWizardSubmit = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     try {
       const data = new FormData();
       data.append("title", formData.title);
@@ -183,6 +195,12 @@ const Packages = ({ noLayout = false }) => {
       }
       if (formData.complimentary) data.append("complimentary", formData.complimentary);
 
+      // Add information about existing images being kept
+      if (view === 'edit' && formData.images) {
+        const remainingUrls = formData.images.map(img => img.image_url);
+        data.append("existing_images", JSON.stringify(remainingUrls));
+      }
+
       selectedFiles.forEach(img => data.append("images", img));
 
       if (view === 'edit' && formData.id) {
@@ -201,6 +219,8 @@ const Packages = ({ noLayout = false }) => {
     } catch (err) {
       console.error(err);
       toast.error(err.response?.data?.detail || "Failed to save package");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -441,6 +461,9 @@ const Packages = ({ noLayout = false }) => {
             {view === 'edit' && formData.images && formData.images.map((img, idx) => (
               <div key={`existing-${idx}`} className="relative w-24 h-24 group">
                 <img src={getImageUrl(img.image_url)} alt="Existing" className="w-full h-full object-cover rounded-lg border border-gray-200" />
+                <button onClick={() => handleRemoveImage(idx, true)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs shadow-md hover:bg-red-600 transition-colors">
+                  <Trash2 className="w-3 h-3" />
+                </button>
               </div>
             ))}
             {imagePreviews.map((src, index) => (
@@ -635,9 +658,11 @@ const Packages = ({ noLayout = false }) => {
       <div>
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-3xl font-bold text-gray-800">Package Management v2</h1>
-          <button onClick={() => { setView('create'); setFormData({ title: '', description: '', price: 0, booking_type: 'room_type', selected_room_types: [], theme: '', default_adults: 2, default_children: 0, max_stay_days: null, food_included: [], images: [] }); setSelectedFiles([]); setImagePreviews([]); }} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2 shadow-sm">
-            <PlusIcon className="w-5 h-5" /> Create Package
-          </button>
+          {hasPermission('packages:create') && (
+            <button onClick={() => { setView('create'); setStep(1); setFormData({ title: '', description: '', price: 0, booking_type: 'room_type', selected_room_types: [], theme: '', default_adults: 2, default_children: 0, max_stay_days: null, food_included: [], images: [] }); setSelectedFiles([]); setImagePreviews([]); }} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2 shadow-sm">
+              <PlusIcon className="w-5 h-5" /> Create Package
+            </button>
+          )}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           <KpiCard title="Total Packages" value={packages.length} color="bg-gradient-to-r from-blue-500 to-blue-700" icon={<PackageIcon />} />
@@ -668,27 +693,31 @@ const Packages = ({ noLayout = false }) => {
                     <p className="text-green-600 font-bold text-2xl">₹{pkg.price.toLocaleString()}</p>
                     <div className="flex gap-2">
                       <button onClick={() => setSelectedPackageDetail(pkg)} className="text-indigo-500 hover:text-indigo-700 font-semibold px-2 py-1 rounded hover:bg-indigo-50 transition-colors">View</button>
-                      <button onClick={() => {
-                        let timing = {};
-                        try { timing = pkg.food_timing ? JSON.parse(pkg.food_timing) : {}; } catch (e) { console.error("Error parsing timing", e); }
+                      {hasPermission('packages:edit') && (
+                        <button onClick={() => {
+                          let timing = {};
+                          try { timing = pkg.food_timing ? JSON.parse(pkg.food_timing) : {}; } catch (e) { console.error("Error parsing timing", e); }
 
-                        setView('edit');
-                        setFormData({
-                          ...pkg,
-                          selected_room_types: pkg.room_types ? pkg.room_types.split(',') : [],
-                          food_included: pkg.food_included ? pkg.food_included.split(',') : [],
-                          food_timing: timing,
-                          theme: pkg.theme || '',
-                          default_adults: pkg.default_adults || 2,
-                          default_children: pkg.default_children || 0,
-                          default_children: pkg.default_children || 0,
-                          max_stay_days: pkg.max_stay_days || null,
-                          complimentary: pkg.complimentary || ''
-                        });
-                        setSelectedFiles([]);
-                        setImagePreviews([]);
-                      }} className="text-blue-500 hover:text-blue-700 font-semibold">Edit</button>
-                      <button onClick={() => { if (window.confirm('Delete this package?')) api.delete(`/packages/${pkg.id}`).then(fetchData); }} className="text-red-500 hover:text-red-700 font-semibold">Delete</button>
+                          setView('edit');
+                          setStep(1);
+                          setFormData({
+                            ...pkg,
+                            selected_room_types: pkg.room_types ? pkg.room_types.split(',') : [],
+                            food_included: pkg.food_included ? pkg.food_included.split(',') : [],
+                            food_timing: timing,
+                            theme: pkg.theme || '',
+                            default_adults: pkg.default_adults || 2,
+                            default_children: pkg.default_children || 0,
+                            max_stay_days: pkg.max_stay_days || null,
+                            complimentary: pkg.complimentary || ''
+                          });
+                          setSelectedFiles([]);
+                          setImagePreviews([]);
+                        }} className="text-blue-500 hover:text-blue-700 font-semibold">Edit</button>
+                      )}
+                      {hasPermission('packages:delete') && (
+                        <button onClick={() => { if (window.confirm('Delete this package?')) api.delete(`/packages/${pkg.id}`).then(fetchData); }} className="text-red-500 hover:text-red-700 font-semibold">Delete</button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -697,7 +726,7 @@ const Packages = ({ noLayout = false }) => {
           </div>
         </Card>
         <Card title="All Package Bookings" className="mt-8">
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto scroll-smooth">
             <table className="min-w-full table-auto">
               <thead className="bg-gray-100">
                 <tr>
@@ -763,8 +792,22 @@ const Packages = ({ noLayout = false }) => {
                     Next <ArrowRight className="w-4 h-4" />
                   </button>
                 ) : (
-                  <button onClick={handleWizardSubmit} className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium flex items-center gap-2">
-                    <Save className="w-4 h-4" /> {view === 'create' ? 'Create' : 'Update'} Package
+                  <button 
+                    onClick={handleWizardSubmit} 
+                    disabled={isSubmitting}
+                    className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        {view === 'create' ? 'Creating...' : 'Updating...'}
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4" /> 
+                        {view === 'create' ? 'Create' : 'Update'} Package
+                      </>
+                    )}
                   </button>
                 )}
               </div>

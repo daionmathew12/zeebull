@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
 
@@ -14,3 +15,7 @@ class ActivityLog(Base):
     user_id = Column(Integer, nullable=True) # If authenticated
     details = Column(Text, nullable=True)    # JSON string or text details
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=True, index=True, server_default="1")
+    
+    branch = relationship("Branch")
+

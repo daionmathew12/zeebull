@@ -1,0 +1,25 @@
+=== Checking Active Rooms Logic ===
+
+--- Room 103 ---
+Room Status: Available
+Recent Bookings:
+  Booking ID: 10 | Status: checked_out | Guest: new test | CheckOut: 2026-02-10
+    -> Checkout Found: ID 15 | Amount: 4480.0
+  Booking ID: 8 | Status: checked_out | Guest: TEast3 | CheckOut: 2026-02-07
+    -> Checkout Found: ID 6 | Amount: 35295.5
+Recent Package Bookings:
+
+--- Room 001 ---
+Room Status: Available
+Recent Bookings:
+  Booking ID: 11 | Status: checked_out | Guest: price | CheckOut: 2026-02-11
+    -> Checkout Found: ID 14 | Amount: 131672.50559999997
+  Booking ID: 6 | Status: cancelled | Guest: harry | CheckOut: 2026-02-07
+    -> No Checkout Record found for this booking
+  Booking ID: 5 | Status: checked_out | Guest: harry | CheckOut: 2026-02-05
+    -> Checkout Found: ID 4 | Amount: 110214.92
+  Booking ID: 4 | Status: checked_out | Guest: harry | CheckOut: 2026-02-05
+    -> No Checkout Record found for this booking
+Recent Package Bookings:
+  Pkg Booking ID: 1 | Status: checked-in | CheckOut: 2026-02-10
+    -> No Checkout Record found for this package booking

@@ -10,6 +10,8 @@ class HeaderBanner(Base):
     subtitle = Column(Text)  # Changed from String(255) to Text to allow longer descriptions
     image_url = Column(String(255))
     is_active = Column(Boolean, default=True)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=True)
+    branch = relationship("app.models.branch.Branch")
 
 
 # Check Availability Form
@@ -23,6 +25,8 @@ class CheckAvailability(Base):
     check_out = Column(Date)
     guests = Column(Integer)
     is_active = Column(Boolean, default=True)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=True)
+    branch = relationship("app.models.branch.Branch")
 
 
 # Gallery
@@ -32,6 +36,8 @@ class Gallery(Base):
     image_url = Column(String(255))
     caption = Column(String(255))
     is_active = Column(Boolean, default=True)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=True)
+    branch = relationship("app.models.branch.Branch")
 
 
 # Reviews
@@ -42,6 +48,8 @@ class Review(Base):
     comment = Column(Text)
     rating = Column(Integer)
     is_active = Column(Boolean, default=True)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=True)
+    branch = relationship("app.models.branch.Branch")
 
 
 # Resort Info & Social Media
@@ -55,6 +63,8 @@ class ResortInfo(Base):
     twitter = Column(String(255))
     linkedin = Column(String(255))
     is_active = Column(Boolean, default=True)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=True)
+    branch = relationship("app.models.branch.Branch")
 
 
 # Signature Experiences
@@ -64,7 +74,10 @@ class SignatureExperience(Base):
     title = Column(String(255))
     description = Column(Text)
     image_url = Column(String(255))
+    extra_images = Column(Text, nullable=True) # JSON string of extra image URLs
     is_active = Column(Boolean, default=True)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=True)
+    branch = relationship("app.models.branch.Branch")
 
 
 # Plan Your Wedding
@@ -74,7 +87,10 @@ class PlanWedding(Base):
     title = Column(String(255))
     description = Column(Text)
     image_url = Column(String(255))
+    extra_images = Column(Text, nullable=True) # JSON string of extra image URLs
     is_active = Column(Boolean, default=True)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=True)
+    branch = relationship("app.models.branch.Branch")
 
 
 # Nearby Attractions
@@ -84,8 +100,11 @@ class NearbyAttraction(Base):
     title = Column(String(255))
     description = Column(Text)
     image_url = Column(String(255))
+    extra_images = Column(Text, nullable=True) # JSON string of extra image URLs
     is_active = Column(Boolean, default=True)
     map_link = Column(String(512), nullable=True)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=True)
+    branch = relationship("app.models.branch.Branch")
 
 
 # Nearby Attraction Banners
@@ -95,5 +114,8 @@ class NearbyAttractionBanner(Base):
     title = Column(String(255))
     subtitle = Column(Text)
     image_url = Column(String(255))
+    extra_images = Column(Text, nullable=True) # JSON string of extra image URLs
     is_active = Column(Boolean, default=True)
     map_link = Column(String(512), nullable=True)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=True)
+    branch = relationship("app.models.branch.Branch")

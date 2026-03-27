@@ -148,10 +148,10 @@ const DailyTaskReport = () => {
                             <div className="bg-gray-50 p-4 border-b border-gray-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
                                 <div className="flex items-center gap-4">
                                     <div className="w-12 h-12 rounded-full overflow-hidden bg-white border border-gray-200 shadow-sm flex items-center justify-center text-gray-400 font-bold text-lg">
-                                        {report.employee.image_url ? (
+                                        {report.employee.image_url && typeof report.employee.image_url === 'string' ? (
                                             <img src={report.employee.image_url.startsWith('http') ? report.employee.image_url : `http://localhost:8000/${report.employee.image_url.replace(/^\//, '')}`} alt="avatar" className="w-full h-full object-cover" />
                                         ) : (
-                                            report.employee.name.charAt(0).toUpperCase()
+                                            (report.employee.name || 'E').charAt(0).toUpperCase()
                                         )}
                                     </div>
                                     <div>
@@ -209,7 +209,7 @@ const DailyTaskReport = () => {
                                                             <XSquare className="text-gray-300 mt-0.5 shrink-0" size={16} />
                                                         )}
                                                         <span className={isDone ? 'text-gray-500 line-through' : 'text-gray-700 font-medium'}>
-                                                            {task}
+                                                            {typeof task === 'string' ? task : JSON.stringify(task)}
                                                         </span>
                                                     </li>
                                                 );
@@ -230,7 +230,7 @@ const DailyTaskReport = () => {
                                                 <li key={tIdx} className="flex items-start gap-2.5 text-sm p-2 bg-white rounded-lg border border-indigo-100 shadow-sm">
                                                     <CheckSquare className="text-indigo-600 mt-0.5 shrink-0" size={16} />
                                                     <span className={'text-indigo-900 font-medium'}>
-                                                        {task}
+                                                        {typeof task === 'string' ? task : JSON.stringify(task)}
                                                     </span>
                                                 </li>
                                             ))}

@@ -1,0 +1,15 @@
+[Unit]
+Description=Inventory Resort API
+After=network.target
+
+[Service]
+User=basilabrahamaby
+Group=basilabrahamaby
+WorkingDirectory=/home/basilabrahamaby/orchid-repo/ResortApp
+ExecStart=/home/basilabrahamaby/orchid-repo/ResortApp/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8011
+Restart=always
+Environment=PYTHONPATH=.
+EnvironmentFile=/home/basilabrahamaby/orchid-repo/ResortApp/.env
+
+[Install]
+WantedBy=multi-user.target

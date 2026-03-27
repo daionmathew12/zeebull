@@ -48,6 +48,20 @@ def update_booking(db: Session, booking_id: int, booking_in: BookingUpdate):
     for field, value in booking_in.model_dump(exclude_unset=True).items():
         setattr(booking, field, value)
 
+    # Future-proof: Synchronize room status if booking status changed
+    new_status = booking.status.lower().replace("_", "-")
+    if new_status != old_status.lower().replace("_", "-") if old_status else None:
+        room_ids = [br.room_id for br in booking.booking_rooms]
+        if room_ids:
+            if new_status in ["cancelled", "no-show", "failed"]:
+                db.query(Room).filter(Room.id.in_(room_ids)).update({"status": "Available"}, synchronize_session=False)
+            elif new_status == "checked-in":
+                db.query(Room).filter(Room.id.in_(room_ids)).update({"status": "Checked-in"}, synchronize_session=False)
+            elif new_status == "checked-out":
+                db.query(Room).filter(Room.id.in_(room_ids)).update({"status": "Available"}, synchronize_session=False)
+            elif new_status == "booked":
+                db.query(Room).filter(Room.id.in_(room_ids)).update({"status": "Booked"}, synchronize_session=False)
+
     db.commit()
     db.refresh(booking)
     
@@ -59,6 +73,12 @@ def delete_booking(db: Session, booking_id: int):
     booking = get_booking(db, booking_id)
     if not booking:
         return None
+    
+    # Reset room status to Available before deleting booking
+    room_ids = [br.room_id for br in booking.booking_rooms]
+    if room_ids:
+        db.query(Room).filter(Room.id.in_(room_ids)).update({"status": "Available"}, synchronize_session=False)
+
     db.delete(booking)
     db.commit()
     return booking

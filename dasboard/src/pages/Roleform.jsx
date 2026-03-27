@@ -4,133 +4,126 @@ import API from "../services/api";
 import DashboardLayout from "../layout/DashboardLayout";
 import { Trash2, CheckCircle, XCircle, Edit, ChevronDown, ChevronRight } from "lucide-react";
 
-const availablePermissions = [
-  { label: "Dashboard", value: "/dashboard" },
+const modules = [
+  { id: "dashboard", label: "Dashboard", defaultActions: ["view"] },
   {
+    id: "account",
     label: "Account",
-    value: "/account",
-    tabs: [
-      { label: "Reports Dashboard", value: "/account/reports" },
-      { label: "Chart of Accounts", value: "/account/chart-of-accounts" },
-      { label: "Journal Entries", value: "/account/journal-entries" },
-      { label: "Trial Balance", value: "/account/trial-balance" },
-      { label: "Auto Report", value: "/account/auto-report" },
-      { label: "Comprehensive Report", value: "/account/comprehensive-report" },
-      { label: "GST Reports", value: "/account/gst-reports" }
+    subModules: [
+      { id: "account_reports", label: "Reports Dashboard", defaultActions: ["view"] },
+      { id: "account_chart", label: "Chart of Accounts", defaultActions: ["view", "create", "edit", "delete"] },
+      { id: "account_journal", label: "Journal Entries", defaultActions: ["view", "create", "edit", "delete"] },
+      { id: "account_trial", label: "Trial Balance", defaultActions: ["view"] },
+      { id: "account_auto_report", label: "Auto Report", defaultActions: ["view"] },
+      { id: "account_comprehensive_report", label: "Comprehensive Report", defaultActions: ["view"] },
+      { id: "account_gst_reports", label: "GST Reports", defaultActions: ["view"] },
     ]
   },
-  { label: "Bookings", value: "/bookings" },
-  { label: "Rooms", value: "/rooms" },
+  { id: "bookings", label: "Bookings", defaultActions: ["view", "create", "edit", "delete"] },
+  { id: "rooms", label: "Rooms", defaultActions: ["view", "create", "edit", "delete"] },
   {
+    id: "services",
     label: "Services",
-    value: "/services",
-    tabs: [
-      { label: "Dashboard", value: "/services/dashboard" },
-      { label: "Create Service", value: "/services/create" },
-      { label: "Assign Service", value: "/services/assign" },
-      { label: "Assigned Services", value: "/services/assigned" },
-      { label: "Service Requests", value: "/services/requests" },
-      { label: "Report", value: "/services/report" }
+    subModules: [
+      { id: "services_dashboard", label: "Dashboard", defaultActions: ["view"] },
+      { id: "services_create", label: "Create Service", defaultActions: ["view", "create", "edit", "delete"] },
+      { id: "services_assign", label: "Assign Service", defaultActions: ["view", "create", "edit", "delete"] },
+      { id: "services_assigned", label: "Assigned Services", defaultActions: ["view"] },
+      { id: "services_requests", label: "Service Requests", defaultActions: ["view", "edit"] },
+      { id: "services_report", label: "Report", defaultActions: ["view"] },
     ]
   },
   {
+    id: "food_orders",
     label: "Food Orders",
-    value: "/food-orders",
-    tabs: [
-      { label: "Dashboard", value: "/food-orders/dashboard" },
-      { label: "Orders", value: "/food-orders/orders" },
-      { label: "Requests", value: "/food-orders/requests" },
-      { label: "Management", value: "/food-orders/management" }
+    subModules: [
+      { id: "food_orders_dashboard", label: "Dashboard", defaultActions: ["view"] },
+      { id: "food_orders_list", label: "Orders", defaultActions: ["view", "create", "edit", "delete"] },
+      { id: "food_orders_requests", label: "Requests", defaultActions: ["view", "edit"] },
+      { id: "food_orders_management", label: "Management", defaultActions: ["view", "create", "edit", "delete"] },
     ]
   },
   {
+    id: "employee_management",
     label: "Employee Management",
-    value: "/employee-management",
-    tabs: [
-      { label: "Overview", value: "/employee-management/overview" },
-      { label: "Directory", value: "/employee-management/directory" },
-      { label: "Attendance", value: "/employee-management/attendance" },
-      { label: "Leave", value: "/employee-management/leave" },
-      { label: "Reports", value: "/employee-management/reports" },
-      { label: "Status", value: "/employee-management/status" },
-      { label: "Activity", value: "/employee-management/activity" }
+    subModules: [
+      { id: "employee_overview", label: "Overview", defaultActions: ["view"] },
+      { id: "employee_directory", label: "Directory", defaultActions: ["view", "create", "edit", "delete"] },
+      { id: "employee_attendance", label: "Attendance", defaultActions: ["view", "edit"] },
+      { id: "employee_leave", label: "Leave", defaultActions: ["view", "create", "edit"] },
+      { id: "employee_reports", label: "Reports", defaultActions: ["view"] },
+      { id: "employee_status", label: "Status", defaultActions: ["view", "edit"] },
+      { id: "employee_activity", label: "Activity", defaultActions: ["view"] },
     ]
   },
-  { label: "Role", value: "/roles" },
-  { label: "Expenses", value: "/expenses" },
+  { id: "roles", label: "Role Management", defaultActions: ["view", "create", "edit", "delete"] },
+  { id: "expenses", label: "Expenses", defaultActions: ["view", "create", "edit", "delete"] },
   {
-    label: "Food Management",
-    value: "/food-categories",
-    tabs: [
-      { label: "Categories", value: "/food-categories" },
-      { label: "Food Items", value: "/food-items" }
+    id: "food_inventory",
+    label: "Food Inventory",
+    subModules: [
+      { id: "food_categories", label: "Categories", defaultActions: ["view", "create", "edit", "delete"] },
+      { id: "food_items", label: "Food Items", defaultActions: ["view", "create", "edit", "delete"] },
     ]
   },
   {
+    id: "billing",
     label: "Billing",
-    value: "/billing",
-    tabs: [
-      { label: "Checkout", value: "/billing/checkout" },
-      { label: "History", value: "/billing/history" }
+    subModules: [
+      { id: "billing_checkout", label: "Checkout", defaultActions: ["view", "create"] },
+      { id: "billing_history", label: "History", defaultActions: ["view"] },
     ]
   },
   {
+    id: "web_management",
     label: "WEB Management",
-    value: "/Userfrontend_data",
-    tabs: [
-      { label: "Banners", value: "/Userfrontend_data/banners" },
-      { label: "Gallery", value: "/Userfrontend_data/gallery" },
-      { label: "Reviews", value: "/Userfrontend_data/reviews" },
-      { label: "Resort Info", value: "/Userfrontend_data/resortInfo" },
-      { label: "Experiences", value: "/Userfrontend_data/signatureExperiences" },
-      { label: "Weddings", value: "/Userfrontend_data/planWeddings" },
-      { label: "Attractions", value: "/Userfrontend_data/nearbyAttractions" },
-      { label: "Attraction Banners", value: "/Userfrontend_data/nearbyAttractionBanners" }
+    subModules: [
+      { id: "web_banners", label: "Banners", defaultActions: ["view", "edit"] },
+      { id: "web_gallery", label: "Gallery", defaultActions: ["view", "edit"] },
+      { id: "web_reviews", label: "Reviews", defaultActions: ["view", "edit"] },
+      { id: "web_resort_info", label: "Resort Info", defaultActions: ["view", "edit"] },
+      { id: "web_experiences", label: "Experiences", defaultActions: ["view", "edit"] },
+      { id: "web_weddings", label: "Weddings", defaultActions: ["view", "edit"] },
+      { id: "web_attractions", label: "Attractions", defaultActions: ["view", "edit"] },
+      { id: "web_attraction_banners", label: "Attraction Banners", defaultActions: ["view", "edit"] },
     ]
   },
-  { label: "Packages", value: "/package" },
-  { label: "Reports", value: "/report" },
-  { label: "GuestProfiles", value: "/guestprofiles" },
+  { id: "packages", label: "Packages", defaultActions: ["view", "create", "edit", "delete"] },
+  { id: "reports_global", label: "Reports", defaultActions: ["view"] },
+  { id: "guest_profiles", label: "Guest Profiles", defaultActions: ["view", "create", "edit", "delete"] },
   {
+    id: "inventory",
     label: "Inventory",
-    value: "/inventory",
-    tabs: [
-      { label: "Items", value: "/inventory/items" },
-      { label: "Categories", value: "/inventory/categories" },
-      { label: "Vendors", value: "/inventory/vendors" },
-      { label: "Purchases", value: "/inventory/purchases" },
-      { label: "Transactions", value: "/inventory/transactions" },
-      { label: "Requisitions", value: "/inventory/requisitions" },
-      { label: "Issues", value: "/inventory/issues" },
-      { label: "Waste", value: "/inventory/waste" },
-      { label: "Locations", value: "/inventory/locations" },
-      { label: "Assets", value: "/inventory/assets" },
-      { label: "Location Stock", value: "/inventory/location-stock" },
-      { label: "Recipes", value: "/inventory/recipe" }
+    subModules: [
+      { id: "inventory_items", label: "Items", defaultActions: ["view", "create", "edit", "delete"] },
+      { id: "inventory_categories", label: "Categories", defaultActions: ["view", "create", "edit", "delete"] },
+      { id: "inventory_vendors", label: "Vendors", defaultActions: ["view", "create", "edit", "delete"] },
+      { id: "inventory_purchases", label: "Purchases", defaultActions: ["view", "create", "edit", "delete"] },
+      { id: "inventory_transactions", label: "Transactions", defaultActions: ["view"] },
+      { id: "inventory_requisitions", label: "Requisitions", defaultActions: ["view", "create", "edit"] },
+      { id: "inventory_issues", label: "Issues", defaultActions: ["view", "create"] },
+      { id: "inventory_waste", label: "Waste", defaultActions: ["view", "create", "delete"] },
+      { id: "inventory_locations", label: "Locations", defaultActions: ["view", "create", "edit", "delete"] },
+      { id: "inventory_assets", label: "Assets", defaultActions: ["view", "create", "edit", "delete"] },
+      { id: "inventory_stock", label: "Location Stock", defaultActions: ["view"] },
+      { id: "inventory_recipe", label: "Recipes", defaultActions: ["view", "create", "edit", "delete"] },
     ]
   },
   {
-    label: "Mobile App Access",
-    value: "/mobile",
-    tabs: [
-      { label: "Owner Mobile App", value: "/mobile/owner" },
-      { label: "Manager Mobile App", value: "/mobile/manager" },
-      { label: "Kitchen/F&B Module", value: "/mobile/kitchen" },
-      { label: "Housekeeping Module", value: "/mobile/housekeeping" },
-      { label: "Maintenance/Technical", value: "/mobile/maintenance" },
-      { label: "Waiter/Order App", value: "/mobile/waiter" },
-      { label: "Staff Portal Mobile", value: "/mobile/employee" }
-    ]
-
-  },
-  {
+    id: "settings_group",
     label: "Settings",
-    value: "/settings",
-    tabs: [
-      { label: "System Settings", value: "/settings/system" },
-      { label: "Legal Documents", value: "/settings/legal" }
+    subModules: [
+      { id: "settings_system", label: "System Settings", defaultActions: ["view", "edit"] },
+      { id: "settings_legal", label: "Legal Documents", defaultActions: ["view", "edit"] },
     ]
   }
+];
+
+const actions = [
+  { id: "view", label: "View", icon: <CheckCircle size={14} className="text-blue-500" /> },
+  { id: "create", label: "Add", icon: <CheckCircle size={14} className="text-green-500" /> },
+  { id: "edit", label: "Edit", icon: <Edit size={14} className="text-amber-500" /> },
+  { id: "delete", label: "Delete", icon: <Trash2 size={14} className="text-red-500" /> },
 ];
 
 // Define roles that cannot be deleted from the UI
@@ -145,7 +138,6 @@ const RoleForm = () => {
   const [editRoleId, setEditRoleId] = useState(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [roleToDelete, setRoleToDelete] = useState(null);
-  const [expandedSections, setExpandedSections] = useState({});
 
   const fetchRoles = async () => {
     try {
@@ -165,7 +157,8 @@ const RoleForm = () => {
     setForm((prev) => ({ ...prev, [name]: value.trimStart() }));
   };
 
-  const handlePermissionChange = (permissionValue) => {
+  const handlePermissionChange = (moduleId, actionId) => {
+    const permissionValue = `${moduleId}:${actionId}`;
     setForm((prev) => {
       const newPermissions = prev.permissions.includes(permissionValue)
         ? prev.permissions.filter((p) => p !== permissionValue)
@@ -174,21 +167,45 @@ const RoleForm = () => {
     });
   };
 
-  const toggleSection = (value) => {
-    setExpandedSections(prev => ({
-      ...prev,
-      [value]: !prev[value]
-    }));
+  const handleSelectAllModule = (moduleId, shouldSelect) => {
+    const moduleActions = modules.find(m => m.id === moduleId).defaultActions;
+    const modulePermissions = moduleActions.map(a => `${moduleId}:${a}`);
+    
+    setForm(prev => {
+      let filtered = prev.permissions.filter(p => !p.startsWith(`${moduleId}:`));
+      if (shouldSelect) {
+        return { ...prev, permissions: [...filtered, ...modulePermissions] };
+      }
+      return { ...prev, permissions: filtered };
+    });
+  };
+
+  const handleSelectAllGlobal = (shouldSelect) => {
+    if (shouldSelect) {
+      const allPermissions = [];
+      modules.forEach(m => {
+        m.defaultActions.forEach(a => {
+          allPermissions.push(`${m.id}:${a}`);
+        });
+      });
+      setForm(prev => ({ ...prev, permissions: allPermissions }));
+    } else {
+      setForm(prev => ({ ...prev, permissions: [] }));
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!form.name) {
+      setError("Role name is required");
+      return;
+    }
     setLoading(true);
     setError("");
     setSuccess("");
     try {
       const payload = {
-        ...form,
+        name: form.name,
         permissions: JSON.stringify(form.permissions),
       };
       if (editRoleId) {
@@ -202,24 +219,25 @@ const RoleForm = () => {
       setEditRoleId(null);
       await fetchRoles();
     } catch (err) {
-      if (editRoleId && err.response && err.response.status === 404) {
-        setError("Failed to update role. It may have been deleted by another user.");
-        setEditRoleId(null);
-        setForm({ name: "", permissions: [] });
-        await fetchRoles();
-      } else {
-        const errorMsg = err.response?.data?.detail || err.message || (editRoleId ? "Failed to update role" : "Failed to create role");
-        setError(errorMsg);
-      }
+      const errorMsg = err.response?.data?.detail || err.message || "Action failed";
+      setError(errorMsg);
     }
     setLoading(false);
   };
 
   const handleEditClick = (role) => {
     setEditRoleId(role.id);
+    let perms = role.permissions;
+    if (typeof perms === 'string') {
+      try {
+        perms = JSON.parse(perms);
+      } catch (e) {
+        perms = [];
+      }
+    }
     setForm({
       name: role.name,
-      permissions: role.permissions || [],
+      permissions: Array.isArray(perms) ? perms : [],
     });
     setSuccess("");
     setError("");
@@ -249,211 +267,282 @@ const RoleForm = () => {
       await fetchRoles();
       setSuccess("Role deleted successfully!");
     } catch (err) {
-      if (err.response && err.response.status === 404) {
-        setError("Failed to delete role. It may have already been deleted.");
-      } else {
-        setError("Failed to delete role. Please try again.");
-      }
+      setError("Failed to delete role.");
     } finally {
       setLoading(false);
       setRoleToDelete(null);
     }
   };
 
-  const handleCancelDelete = () => {
-    setRoleToDelete(null);
-    setShowConfirm(false);
-  };
-
   return (
     <DashboardLayout>
-      <div className="max-w-6xl mx-auto p-8 bg-gray-50 rounded-2xl shadow-lg space-y-10">
-        <h2 className="text-4xl font-extrabold text-blue-900 text-center tracking-tight">Role Management</h2>
-
-        {/* Alerts */}
-        {success && (
-          <div className="flex items-center gap-2 p-4 text-sm font-medium text-green-700 bg-green-100 rounded-lg">
-            <CheckCircle size={20} />
-            {success}
-          </div>
-        )}
-        {error && (
-          <div className="flex items-center gap-2 p-4 text-sm font-medium text-red-700 bg-red-100 rounded-lg">
-            <XCircle size={20} />
-            {error}
-          </div>
-        )}
-
-        {/* Role Creation Form */}
-        <div className="bg-white p-6 rounded-xl shadow-md space-y-6">
-          <h3 className="text-2xl font-semibold text-blue-800 border-b pb-4">{editRoleId ? "Edit Role" : "Create New Role"}</h3>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label htmlFor="roleName" className="block text-sm font-semibold text-gray-700 mb-1">
-                Role Name
-              </label>
-              <input
-                id="roleName"
-                type="text"
-                name="name"
-                value={form.name}
-                onChange={handleChange}
-                required
-                placeholder="e.g., Administrator, Manager, Staff"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">Permissions</label>
-              <div className="space-y-2 p-4 border rounded-lg bg-gray-50 max-h-96 overflow-y-auto">
-                {availablePermissions.map((permission) => (
-                  <div key={permission.value} className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      {permission.tabs && (
-                        <button
-                          type="button"
-                          onClick={() => toggleSection(permission.value)}
-                          className="text-gray-500 hover:text-gray-700"
-                        >
-                          {expandedSections[permission.value] ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                        </button>
-                      )}
-                      <label className="flex items-center gap-2 text-sm text-gray-800 cursor-pointer font-medium">
-                        <input
-                          type="checkbox"
-                          checked={form.permissions.includes(permission.value)}
-                          onChange={() => handlePermissionChange(permission.value)}
-                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        {permission.label}
-                      </label>
-                    </div>
-
-                    {/* Sub-tabs */}
-                    {permission.tabs && expandedSections[permission.value] && (
-                      <div className="ml-8 space-y-1 border-l-2 border-gray-200 pl-4">
-                        {permission.tabs.map((tab) => (
-                          <label key={tab.value} className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={form.permissions.includes(tab.value)}
-                              onChange={() => handlePermissionChange(tab.value)}
-                              className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                            />
-                            {tab.label}
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex gap-4 pt-4">
-              <button
-                type="submit"
-                disabled={loading}
-                className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-lg transition-transform transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed"
-              >
-                {loading ? "Saving..." : (editRoleId ? "Update Role" : "Create Role")}
-              </button>
-              {editRoleId && (
-                <button
-                  type="button"
-                  onClick={handleCancelEdit}
-                  className="flex-1 py-3 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold rounded-lg shadow-lg transition-transform transform hover:scale-105"
-                >
-                  Cancel
-                </button>
-              )}
-            </div>
-          </form>
+      <div className="max-w-6xl mx-auto p-4 md:p-8 space-y-8 animate-in fade-in duration-500">
+        <div className="text-center space-y-2">
+          <h2 className="text-3xl md:text-5xl font-black text-[#2d5016] tracking-tight">Role Management</h2>
+          <p className="text-gray-500 font-medium">Define access levels and granular permissions for your team.</p>
         </div>
 
-        {/* Existing Roles Table */}
-        <div className="space-y-4 bg-white p-6 rounded-xl shadow-md">
-          <h3 className="text-2xl font-semibold text-blue-800 border-b pb-4">Existing Roles</h3>
-          <div className="overflow-x-auto rounded-lg border border-gray-200 shadow-sm">
-            <table className="min-w-full text-sm text-left">
-              <thead className="bg-gray-100 text-gray-700 uppercase tracking-wider">
-                <tr>
-                  <th className="px-6 py-3">#</th>
-                  <th className="px-6 py-3">Role Name</th>
-                  <th className="px-6 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {roles.length > 0 ? (
-                  roles.map((role) => {
+        {/* Alerts */}
+        <AnimatePresence>
+          {success && (
+            <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
+              className="flex items-center gap-3 p-4 text-sm font-bold text-green-800 bg-green-100 border-l-4 border-green-500 rounded-r-lg shadow-sm">
+              <CheckCircle size={20} /> {success}
+            </motion.div>
+          )}
+          {error && (
+            <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
+              className="flex items-center gap-3 p-4 text-sm font-bold text-red-800 bg-red-100 border-l-4 border-red-500 rounded-r-lg shadow-sm">
+              <XCircle size={20} /> {error}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Form Card */}
+        <div className="bg-white rounded-3xl shadow-2xl border border-gray-100 overflow-hidden transform transition-all">
+          <div className="p-6 md:p-10 space-y-8">
+            <h3 className="text-2xl font-bold text-gray-800 border-b border-gray-100 pb-4">
+              {editRoleId ? "Edit Role Configuration" : "Initialize New Role"}
+            </h3>
+            
+            <form onSubmit={handleSubmit} className="space-y-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-end">
+                <div className="space-y-2">
+                  <label className="text-xs font-black uppercase tracking-widest text-[#2d5016] ml-1">Role Identifier</label>
+                  <input
+                    type="text"
+                    name="name"
+                    value={form.name}
+                    onChange={handleChange}
+                    required
+                    placeholder="e.g. Revenue Manager"
+                    className="w-full px-6 py-4 bg-gray-50 border-2 border-gray-100 rounded-2xl focus:border-[#8bc34a] focus:bg-white focus:outline-none transition-all font-bold text-gray-800 shadow-sm"
+                  />
+                </div>
+                <div className="flex gap-4">
+                  <button type="button" onClick={() => handleSelectAllGlobal(true)} className="flex-1 py-4 text-xs font-black uppercase tracking-widest bg-gray-100 text-gray-600 rounded-2xl hover:bg-gray-200 transition-colors">Select All Access</button>
+                  <button type="button" onClick={() => handleSelectAllGlobal(false)} className="flex-1 py-4 text-xs font-black uppercase tracking-widest bg-gray-100 text-gray-600 rounded-2xl hover:bg-gray-200 transition-colors">Revoke All</button>
+                </div>
+              </div>
+
+              {/* Permission Grid */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black uppercase tracking-widest text-[#2d5016] ml-1">Access Control Matrix</label>
+                  <button 
+                    type="button" 
+                    onClick={() => {
+                      const allP = [];
+                      modules.forEach(m => {
+                        if (m.subModules) m.subModules.forEach(s => (s.defaultActions || ["view", "create", "edit", "delete"]).forEach(a => allP.push(`${s.id}:${a}`)));
+                        else (m.defaultActions || ["view", "create", "edit", "delete"]).forEach(a => allP.push(`${m.id}:${a}`));
+                      });
+                      const isEverythingSelected = allP.every(p => form.permissions.includes(p));
+                      handleSelectAllGlobal(!isEverythingSelected);
+                    }}
+                    className="text-[10px] font-black uppercase tracking-tighter text-[#8bc34a] hover:text-[#2d5016]"
+                  >
+                    Toggle Master Access
+                  </button>
+                </div>
+
+                <div className="overflow-hidden border-2 border-gray-50 rounded-3xl shadow-inner max-h-[600px] overflow-y-auto custom-scrollbar">
+                  <table className="w-full text-left border-collapse table-fixed">
+                    <thead className="sticky top-0 bg-[#f1f8e9] z-10 shadow-sm">
+                      <tr>
+                        <th className="w-1/3 p-6 text-sm font-black text-[#2d5016] uppercase tracking-wider">Module / scope</th>
+                        {actions.map(action => (
+                          <th key={action.id} className="p-6 text-center text-sm font-black text-[#2d5016] uppercase tracking-wider">{action.label}</th>
+                        ))}
+                        <th className="w-24 p-6 text-center text-sm font-black text-[#2d5016] uppercase tracking-wider">Bulk</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {modules.map((module) => {
+                        const renderRow = (m, isSub = false) => {
+                          const mActions = m.defaultActions || ["view", "create", "edit", "delete"];
+                          return (
+                            <tr key={m.id} className={`${isSub ? 'bg-white/50' : 'bg-[#fafdfa]'} hover:bg-[#f1f8e9]/30 transition-colors group`}>
+                              <td className={`p-6 ${isSub ? 'pl-12 text-xs text-gray-500' : 'font-bold text-gray-800'}`}>
+                                {m.label}
+                                {!isSub && <div className="text-[10px] text-gray-400 font-mono uppercase mt-0.5">{m.id}</div>}
+                              </td>
+                              {actions.map(action => {
+                                const isAvailable = mActions.includes(action.id);
+                                return (
+                                  <td key={action.id} className="p-6 text-center">
+                                    {isAvailable ? (
+                                      <label className="relative inline-flex items-center cursor-pointer group/cb">
+                                        <input
+                                          type="checkbox"
+                                          className="sr-only peer"
+                                          checked={form.permissions.includes(`${m.id}:${action.id}`)}
+                                          onChange={() => handlePermissionChange(m.id, action.id)}
+                                        />
+                                        <div className="w-6 h-6 bg-white border-2 border-gray-100 rounded-xl peer-checked:bg-[#8bc34a] peer-checked:border-[#8bc34a] transition-all flex items-center justify-center shadow-sm">
+                                          <CheckCircle size={14} className="text-white opacity-0 peer-checked:opacity-100 transition-opacity" strokeWidth={3} />
+                                        </div>
+                                      </label>
+                                    ) : (
+                                      <div className="w-1.5 h-1.5 bg-gray-100 rounded-full mx-auto" />
+                                    )}
+                                  </td>
+                                );
+                              })}
+                              <td className="p-6 text-center">
+                                {!isSub ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const groupP = [];
+                                      if (m.subModules) m.subModules.forEach(s => (s.defaultActions || ["view", "create", "edit", "delete"]).forEach(a => groupP.push(`${s.id}:${a}`)));
+                                      else (m.defaultActions || ["view", "create", "edit", "delete"]).forEach(a => groupP.push(`${m.id}:${a}`));
+                                      
+                                      const allSelected = groupP.every(p => form.permissions.includes(p));
+                                      handleSelectAllModule(m.id, !allSelected);
+                                    }}
+                                    className="text-[10px] font-black uppercase tracking-tighter text-[#8bc34a] hover:text-[#2d5016] transition-colors"
+                                  >
+                                    Toggle
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const rowP = (m.defaultActions || ["view", "create", "edit", "delete"]).map(a => `${m.id}:${a}`);
+                                      const allSelected = rowP.every(p => form.permissions.includes(p));
+                                      setForm(prev => {
+                                        let filtered = prev.permissions.filter(p => !rowP.includes(p));
+                                        if (!allSelected) {
+                                          return { ...prev, permissions: [...filtered, ...rowP] };
+                                        }
+                                        return { ...prev, permissions: filtered };
+                                      });
+                                    }}
+                                    className="text-[10px] font-bold text-gray-300 hover:text-[#8bc34a]"
+                                  >
+                                    Row
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        };
+
+                        return (
+                          <React.Fragment key={module.id}>
+                            {renderRow(module)}
+                            {module.subModules && module.subModules.map(sub => renderRow(sub, true))}
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="flex gap-6 pt-6">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 py-5 bg-[#2d5016] hover:bg-[#1a330a] text-white font-black uppercase tracking-widest rounded-2xl shadow-xl shadow-green-900/10 transition-all hover:-translate-y-1 disabled:opacity-50"
+                >
+                  {loading ? "Synchronizing..." : (editRoleId ? "Propagate Updates" : "Deploy Role")}
+                </button>
+                {editRoleId && (
+                  <button
+                    type="button"
+                    onClick={handleCancelEdit}
+                    className="flex-1 py-5 bg-gray-100 hover:bg-gray-200 text-gray-600 font-black uppercase tracking-widest rounded-2xl transition-all"
+                  >
+                    Abort Edit
+                  </button>
+                )}
+              </div>
+            </form>
+          </div>
+        </div>
+
+        {/* Roles Table */}
+        <div className="bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden">
+          <div className="p-6 md:p-10 space-y-6">
+            <h3 className="text-2xl font-bold text-gray-800">Operational Hierarchy</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="border-b border-gray-50">
+                    <th className="px-6 py-4 text-xs font-black uppercase tracking-widest text-gray-400">ID</th>
+                    <th className="px-6 py-4 text-xs font-black uppercase tracking-widest text-gray-400">Designation</th>
+                    <th className="px-6 py-4 text-xs font-black uppercase tracking-widest text-gray-400">Scope</th>
+                    <th className="px-6 py-4 text-right text-xs font-black uppercase tracking-widest text-gray-400">Directives</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50 text-sm">
+                  {roles.map((role) => {
                     const isProtected = PROTECTED_ROLES.includes(role.name.toLowerCase());
                     return (
-                      <tr key={role.id} className="border-t border-gray-200 hover:bg-gray-50 transition-colors group">
-                        <td className="px-6 py-4 font-mono text-gray-500">{role.id}</td>
-                        <td className="px-6 py-4 font-medium text-gray-900">{role.name}</td>
-                        <td className="px-6 py-4 text-right">
-                          <div className="flex items-center justify-end gap-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button
-                              onClick={() => handleEditClick(role)}
-                              className="text-blue-600 hover:text-blue-800 transition-colors"
-                              title="Edit Role"
-                            >
-                              <Edit size={18} />
+                      <tr key={role.id} className="hover:bg-gray-50 transition-colors group">
+                        <td className="px-6 py-6 font-mono text-gray-400 font-bold">#{role.id}</td>
+                        <td className="px-6 py-6 border-l-2 border-transparent group-hover:border-[#8bc34a] transition-all">
+                          <span className="font-black text-gray-800 tracking-tight text-lg">{role.name}</span>
+                        </td>
+                        <td className="px-6 py-6">
+                          <div className="flex flex-wrap gap-1">
+                            {Array.isArray(role.permissions) ? (
+                              role.permissions.slice(0, 3).map(p => (
+                                <span key={p} className="px-2 py-1 bg-blue-50 text-blue-600 rounded-md text-[10px] font-bold uppercase">{p}</span>
+                              ))
+                            ) : null}
+                            {Array.isArray(role.permissions) && role.permissions.length > 3 && (
+                              <span className="px-2 py-1 bg-gray-50 text-gray-400 rounded-md text-[10px] font-bold">+{role.permissions.length - 3}</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-6 py-6 text-right">
+                          <div className="flex items-center justify-end gap-3 translate-x-4 opacity-0 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300">
+                            <button onClick={() => handleEditClick(role)} className="p-2.5 text-blue-500 hover:bg-blue-50 rounded-xl transition-colors">
+                              <Edit size={20} />
                             </button>
-                            <button
-                              onClick={() => handleDeleteClick(role)}
-                              className={`transition-colors ${isProtected ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:text-red-800'}`}
-                              title={isProtected ? "This role cannot be deleted" : "Delete Role"}
-                              disabled={isProtected}
-                            >
-                              <Trash2 size={18} />
-                            </button>
+                            {!isProtected && (
+                              <button onClick={() => handleDeleteClick(role)} className="p-2.5 text-red-500 hover:bg-red-50 rounded-xl transition-colors">
+                                <Trash2 size={20} />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
                     );
-                  })
-                ) : (
-                  <tr>
-                    <td colSpan="3" className="text-center text-gray-400 py-6">
-                      No roles found
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Confirmation Modal */}
       {showConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 bg-opacity-50">
-          <div className="bg-white p-8 rounded-lg shadow-2xl max-w-sm text-center space-y-4">
-            <h4 className="text-lg font-bold text-gray-800">Confirm Deletion</h4>
-            <p className="text-gray-600">
-              Are you sure you want to delete the role "<span className="font-semibold">{roleToDelete?.name}</span>"? This action cannot be undone.
-            </p>
-            <div className="flex justify-center gap-4 mt-4">
-              <button
-                onClick={handleCancelDelete}
-                className="px-6 py-2 border rounded-lg text-gray-700 hover:bg-gray-100 transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmDelete}
-                className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
-              >
-                Delete
-              </button>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-300">
+          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+            className="bg-white p-10 rounded-[40px] shadow-2xl max-w-md w-full text-center space-y-6">
+            <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mx-auto text-red-500">
+              <Trash2 size={40} />
             </div>
-          </div>
+            <div className="space-y-2">
+              <h4 className="text-2xl font-black text-gray-800">Decommission Role?</h4>
+              <p className="text-gray-500 font-medium">
+                Are you certain about deleting "<span className="text-red-500 font-bold">{roleToDelete?.name}</span>"? This may affect users currently assigned to this role.
+              </p>
+            </div>
+            <div className="flex gap-4">
+              <button onClick={() => setShowConfirm(false)} className="flex-1 py-4 bg-gray-100 text-gray-600 font-black uppercase tracking-widest rounded-2xl hover:bg-gray-200 transition-all">Cancel</button>
+              <button onClick={handleConfirmDelete} className="flex-1 py-4 bg-red-600 text-white font-black uppercase tracking-widest rounded-2xl shadow-lg shadow-red-200 hover:bg-red-700 transition-all">Terminate</button>
+            </div>
+          </motion.div>
         </div>
       )}
     </DashboardLayout>
   );
 };
 
-export default RoleForm;
+export default RoleForm;

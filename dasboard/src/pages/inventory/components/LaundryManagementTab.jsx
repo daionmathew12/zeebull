@@ -2,8 +2,10 @@ import React, { useState } from 'react';
 import API from '../../../services/api';
 import { formatDateIST, formatDateTimeIST } from '../../../utils/dateUtils';
 import { RefreshCcw, CheckCircle, ArrowLeftCircle, Loader2 } from 'lucide-react';
+import { usePermissions } from '../../../hooks/usePermissions';
 
 const LaundryManagementTab = ({ logs, onRefresh, locations, addNotification }) => {
+    const { hasPermission } = usePermissions();
     const [loading, setLoading] = useState(false);
     const [showReturnModal, setShowReturnModal] = useState(false);
     const [selectedLog, setSelectedLog] = useState(null);
@@ -111,25 +113,29 @@ const LaundryManagementTab = ({ logs, onRefresh, locations, addNotification }) =
                                         {formatDateTimeIST(log.sent_at)}
                                     </td>
                                     <td className="px-6 py-4 text-right space-x-2">
-                                        {log.status === 'Incomplete Washing' && (
-                                            <button
-                                                onClick={() => handleUpdateStatus(log.id, 'Washed')}
-                                                disabled={loading}
-                                                className="inline-flex items-center gap-1 px-3 py-1 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-                                            >
-                                                <CheckCircle className="w-3.5 h-3.5" />
-                                                Mark Washed
-                                            </button>
-                                        )}
-                                        {(log.status === 'Washed' || log.status === 'Incomplete Washing') && (
-                                            <button
-                                                onClick={() => handleOpenReturnModal(log)}
-                                                disabled={loading}
-                                                className="inline-flex items-center gap-1 px-3 py-1 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
-                                            >
-                                                <ArrowLeftCircle className="w-3.5 h-3.5" />
-                                                Return Stock
-                                            </button>
+                                        {hasPermission('inventory_laundry:edit') && (
+                                            <>
+                                                {log.status === 'Incomplete Washing' && (
+                                                    <button
+                                                        onClick={() => handleUpdateStatus(log.id, 'Washed')}
+                                                        disabled={loading}
+                                                        className="inline-flex items-center gap-1 px-3 py-1 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                                                    >
+                                                        <CheckCircle className="w-3.5 h-3.5" />
+                                                        Mark Washed
+                                                    </button>
+                                                )}
+                                                {(log.status === 'Washed' || log.status === 'Incomplete Washing') && (
+                                                    <button
+                                                        onClick={() => handleOpenReturnModal(log)}
+                                                        disabled={loading}
+                                                        className="inline-flex items-center gap-1 px-3 py-1 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+                                                    >
+                                                        <ArrowLeftCircle className="w-3.5 h-3.5" />
+                                                        Return Stock
+                                                    </button>
+                                                )}
+                                            </>
                                         )}
                                     </td>
                                 </tr>

@@ -2,134 +2,126 @@ import React, { useState, useEffect } from "react";
 import API from "../services/api";
 import { Trash2, CheckCircle, XCircle, Edit, ChevronDown, ChevronRight, ShieldCheck } from "lucide-react";
 
-const availablePermissions = [
-    { label: "Dashboard", value: "/dashboard" },
+const modules = [
+    { id: "dashboard", label: "Dashboard", defaultActions: ["view"] },
     {
+        id: "account",
         label: "Account",
-        value: "/account",
-        tabs: [
-            { label: "Reports Dashboard", value: "/account/reports" },
-            { label: "Chart of Accounts", value: "/account/chart-of-accounts" },
-            { label: "Journal Entries", value: "/account/journal-entries" },
-            { label: "Trial Balance", value: "/account/trial-balance" },
-            { label: "Auto Report", value: "/account/auto-report" },
-            { label: "Comprehensive Report", value: "/account/comprehensive-report" },
-            { label: "GST Reports", value: "/account/gst-reports" }
+        subModules: [
+            { id: "account_reports", label: "Reports Dashboard", defaultActions: ["view"] },
+            { id: "account_chart", label: "Chart of Accounts", defaultActions: ["view", "create", "edit", "delete"] },
+            { id: "account_journal", label: "Journal Entries", defaultActions: ["view", "create", "edit", "delete"] },
+            { id: "account_trial", label: "Trial Balance", defaultActions: ["view"] },
+            { id: "account_auto_report", label: "Auto Report", defaultActions: ["view"] },
+            { id: "account_comprehensive_report", label: "Comprehensive Report", defaultActions: ["view"] },
+            { id: "account_gst_reports", label: "GST Reports", defaultActions: ["view"] },
         ]
     },
-    { label: "Bookings", value: "/bookings" },
-    { label: "Rooms", value: "/rooms" },
+    { id: "bookings", label: "Bookings", defaultActions: ["view", "create", "edit", "delete"] },
+    { id: "rooms", label: "Rooms", defaultActions: ["view", "create", "edit", "delete"] },
     {
+        id: "services",
         label: "Services",
-        value: "/services",
-        tabs: [
-            { label: "Dashboard", value: "/services/dashboard" },
-            { label: "Create Service", value: "/services/create" },
-            { label: "Assign Service", value: "/services/assign" },
-            { label: "Assigned Services", value: "/services/assigned" },
-            { label: "Service Requests", value: "/services/requests" },
-            { label: "Report", value: "/services/report" }
+        subModules: [
+            { id: "services_dashboard", label: "Dashboard", defaultActions: ["view"] },
+            { id: "services_create", label: "Create Service", defaultActions: ["view", "create", "edit", "delete"] },
+            { id: "services_assign", label: "Assign Service", defaultActions: ["view", "create", "edit", "delete"] },
+            { id: "services_assigned", label: "Assigned Services", defaultActions: ["view"] },
+            { id: "services_requests", label: "Service Requests", defaultActions: ["view", "edit"] },
+            { id: "services_report", label: "Report", defaultActions: ["view"] },
         ]
     },
     {
+        id: "food_orders",
         label: "Food Orders",
-        value: "/food-orders",
-        tabs: [
-            { label: "Dashboard", value: "/food-orders/dashboard" },
-            { label: "Orders", value: "/food-orders/orders" },
-            { label: "Requests", value: "/food-orders/requests" },
-            { label: "Management", value: "/food-orders/management" }
+        subModules: [
+            { id: "food_orders_dashboard", label: "Dashboard", defaultActions: ["view"] },
+            { id: "food_orders_list", label: "Orders", defaultActions: ["view", "create", "edit", "delete"] },
+            { id: "food_orders_requests", label: "Requests", defaultActions: ["view", "edit"] },
+            { id: "food_orders_management", label: "Management", defaultActions: ["view", "create", "edit", "delete"] },
         ]
     },
     {
+        id: "employee_management",
         label: "Employee Management",
-        value: "/employee-management",
-        tabs: [
-            { label: "Overview", value: "/employee-management/overview" },
-            { label: "Directory", value: "/employee-management/directory" },
-            { label: "Attendance", value: "/employee-management/attendance" },
-            { label: "Leave", value: "/employee-management/leave" },
-            { label: "Reports", value: "/employee-management/reports" },
-            { label: "Status", value: "/employee-management/status" },
-            { label: "Activity", value: "/employee-management/activity" }
+        subModules: [
+            { id: "employee_overview", label: "Overview", defaultActions: ["view"] },
+            { id: "employee_directory", label: "Directory", defaultActions: ["view", "create", "edit", "delete"] },
+            { id: "employee_attendance", label: "Attendance", defaultActions: ["view", "edit"] },
+            { id: "employee_leave", label: "Leave", defaultActions: ["view", "create", "edit"] },
+            { id: "employee_reports", label: "Reports", defaultActions: ["view"] },
+            { id: "employee_status", label: "Status", defaultActions: ["view", "edit"] },
+            { id: "employee_activity", label: "Activity", defaultActions: ["view"] },
         ]
     },
-    { label: "Role", value: "/roles" },
-    { label: "Expenses", value: "/expenses" },
+    { id: "roles", label: "Role Management", defaultActions: ["view", "create", "edit", "delete"] },
+    { id: "expenses", label: "Expenses", defaultActions: ["view", "create", "edit", "delete"] },
     {
-        label: "Food Management",
-        value: "/food-categories",
-        tabs: [
-            { label: "Categories", value: "/food-categories" },
-            { label: "Food Items", value: "/food-items" }
+        id: "food_inventory",
+        label: "Food Inventory",
+        subModules: [
+            { id: "food_categories", label: "Categories", defaultActions: ["view", "create", "edit", "delete"] },
+            { id: "food_items", label: "Food Items", defaultActions: ["view", "create", "edit", "delete"] },
         ]
     },
     {
+        id: "billing",
         label: "Billing",
-        value: "/billing",
-        tabs: [
-            { label: "Checkout", value: "/billing/checkout" },
-            { label: "History", value: "/billing/history" }
+        subModules: [
+            { id: "billing_checkout", label: "Checkout", defaultActions: ["view", "create"] },
+            { id: "billing_history", label: "History", defaultActions: ["view"] },
         ]
     },
     {
+        id: "web_management",
         label: "WEB Management",
-        value: "/Userfrontend_data",
-        tabs: [
-            { label: "Banners", value: "/Userfrontend_data/banners" },
-            { label: "Gallery", value: "/Userfrontend_data/gallery" },
-            { label: "Reviews", value: "/Userfrontend_data/reviews" },
-            { label: "Resort Info", value: "/Userfrontend_data/resortInfo" },
-            { label: "Experiences", value: "/Userfrontend_data/signatureExperiences" },
-            { label: "Weddings", value: "/Userfrontend_data/planWeddings" },
-            { label: "Attractions", value: "/Userfrontend_data/nearbyAttractions" },
-            { label: "Attraction Banners", value: "/Userfrontend_data/nearbyAttractionBanners" }
+        subModules: [
+            { id: "web_banners", label: "Banners", defaultActions: ["view", "edit"] },
+            { id: "web_gallery", label: "Gallery", defaultActions: ["view", "edit"] },
+            { id: "web_reviews", label: "Reviews", defaultActions: ["view", "edit"] },
+            { id: "web_resort_info", label: "Resort Info", defaultActions: ["view", "edit"] },
+            { id: "web_experiences", label: "Experiences", defaultActions: ["view", "edit"] },
+            { id: "web_weddings", label: "Weddings", defaultActions: ["view", "edit"] },
+            { id: "web_attractions", label: "Attractions", defaultActions: ["view", "edit"] },
+            { id: "web_attraction_banners", label: "Attraction Banners", defaultActions: ["view", "edit"] },
         ]
     },
-    { label: "Packages", value: "/package" },
-    { label: "Reports", value: "/report" },
-    { label: "GuestProfiles", value: "/guestprofiles" },
+    { id: "packages", label: "Packages", defaultActions: ["view", "create", "edit", "delete"] },
+    { id: "reports_global", label: "Reports", defaultActions: ["view"] },
+    { id: "guest_profiles", label: "Guest Profiles", defaultActions: ["view", "create", "edit", "delete"] },
     {
+        id: "inventory",
         label: "Inventory",
-        value: "/inventory",
-        tabs: [
-            { label: "Items", value: "/inventory/items" },
-            { label: "Categories", value: "/inventory/categories" },
-            { label: "Vendors", value: "/inventory/vendors" },
-            { label: "Purchases", value: "/inventory/purchases" },
-            { label: "Transactions", value: "/inventory/transactions" },
-            { label: "Requisitions", value: "/inventory/requisitions" },
-            { label: "Issues", value: "/inventory/issues" },
-            { label: "Waste", value: "/inventory/waste" },
-            { label: "Locations", value: "/inventory/locations" },
-            { label: "Assets", value: "/inventory/assets" },
-            { label: "Location Stock", value: "/inventory/location-stock" },
-            { label: "Recipes", value: "/inventory/recipe" }
+        subModules: [
+            { id: "inventory_items", label: "Items", defaultActions: ["view", "create", "edit", "delete"] },
+            { id: "inventory_categories", label: "Categories", defaultActions: ["view", "create", "edit", "delete"] },
+            { id: "inventory_vendors", label: "Vendors", defaultActions: ["view", "create", "edit", "delete"] },
+            { id: "inventory_purchases", label: "Purchases", defaultActions: ["view", "create", "edit", "delete"] },
+            { id: "inventory_transactions", label: "Transactions", defaultActions: ["view"] },
+            { id: "inventory_requisitions", label: "Requisitions", defaultActions: ["view", "create", "edit"] },
+            { id: "inventory_issues", label: "Issues", defaultActions: ["view", "create"] },
+            { id: "inventory_waste", label: "Waste", defaultActions: ["view", "create", "delete"] },
+            { id: "inventory_locations", label: "Locations", defaultActions: ["view", "create", "edit", "delete"] },
+            { id: "inventory_assets", label: "Assets", defaultActions: ["view", "create", "edit", "delete"] },
+            { id: "inventory_stock", label: "Location Stock", defaultActions: ["view"] },
+            { id: "inventory_recipe", label: "Recipes", defaultActions: ["view", "create", "edit", "delete"] },
         ]
     },
     {
-        label: "Mobile App Access",
-        value: "/mobile",
-        tabs: [
-            { label: "Owner Mobile App", value: "/mobile/owner" },
-            { label: "Manager Mobile App", value: "/mobile/manager" },
-            { label: "Kitchen/F&B Module", value: "/mobile/kitchen" },
-            { label: "Housekeeping Module", value: "/mobile/housekeeping" },
-            { label: "Maintenance/Technical", value: "/mobile/maintenance" },
-            { label: "Waiter/Order App", value: "/mobile/waiter" },
-            { label: "Staff Portal Mobile", value: "/mobile/employee" }
-        ]
-
-
-    },
-    {
+        id: "settings_group",
         label: "Settings",
-        value: "/settings",
-        tabs: [
-            { label: "System Settings", value: "/settings/system" },
-            { label: "Legal Documents", value: "/settings/legal" }
+        subModules: [
+            { id: "settings_system", label: "System Settings", defaultActions: ["view", "edit"] },
+            { id: "settings_legal", label: "Legal Documents", defaultActions: ["view", "edit"] },
         ]
     }
+];
+
+const actions = [
+    { id: "view", label: "View", icon: <CheckCircle size={14} className="text-blue-500" /> },
+    { id: "create", label: "Add", icon: <CheckCircle size={14} className="text-green-500" /> },
+    { id: "edit", label: "Edit", icon: <Edit size={14} className="text-amber-500" /> },
+    { id: "delete", label: "Delete", icon: <Trash2 size={14} className="text-red-500" /> },
 ];
 
 const PROTECTED_ROLES = ['admin'];
@@ -143,7 +135,6 @@ const RoleManagementTab = () => {
     const [editRoleId, setEditRoleId] = useState(null);
     const [showConfirm, setShowConfirm] = useState(false);
     const [roleToDelete, setRoleToDelete] = useState(null);
-    const [expandedSections, setExpandedSections] = useState({});
 
     const fetchRoles = async () => {
         try {
@@ -163,19 +154,64 @@ const RoleManagementTab = () => {
         setForm((prev) => ({ ...prev, [name]: value.trimStart() }));
     };
 
-    const handlePermissionChange = (permissionValue) => {
+    const handlePermissionChange = (moduleId, actionId) => {
+        const permission = `${moduleId}:${actionId}`;
         setForm((prev) => {
-            const newPermissions = prev.permissions.includes(permissionValue)
-                ? prev.permissions.filter((p) => p !== permissionValue)
-                : [...prev.permissions, permissionValue];
+            const newPermissions = prev.permissions.includes(permission)
+                ? prev.permissions.filter((p) => p !== permission)
+                : [...prev.permissions, permission];
             return { ...prev, permissions: newPermissions };
         });
     };
 
-    const toggleSection = (value) => {
-        setExpandedSections(prev => ({
+    const toggleGroup = (module) => {
+        const groupPermissions = [];
+        
+        // Include module's own actions
+        const moduleActionsToUse = module.defaultActions || ["view", "create", "edit", "delete"];
+        moduleActionsToUse.forEach(act => groupPermissions.push(`${module.id}:${act}`));
+
+        // Include submodules if they exist
+        if (module.subModules) {
+            module.subModules.forEach(sub => {
+                const subActionsToUse = sub.defaultActions || ["view", "create", "edit", "delete"];
+                subActionsToUse.forEach(act => groupPermissions.push(`${sub.id}:${act}`));
+            });
+        }
+
+        const allSelected = groupPermissions.every(p => form.permissions.includes(p));
+
+        setForm(prev => {
+            let newPermissions;
+            if (allSelected) {
+                newPermissions = prev.permissions.filter(p => !groupPermissions.includes(p));
+            } else {
+                newPermissions = [...new Set([...prev.permissions, ...groupPermissions])];
+            }
+            return { ...prev, permissions: newPermissions };
+        });
+    };
+
+    const toggleAll = () => {
+        const allPossible = [];
+        modules.forEach(m => {
+            // Include module's own actions
+            const moduleActionsToUse = m.defaultActions || ["view", "create", "edit", "delete"];
+            moduleActionsToUse.forEach(act => allPossible.push(`${m.id}:${act}`));
+
+            // Include submodules if they exist
+            if (m.subModules) {
+                m.subModules.forEach(sub => {
+                    const subActionsToUse = sub.defaultActions || ["view", "create", "edit", "delete"];
+                    subActionsToUse.forEach(act => allPossible.push(`${sub.id}:${act}`));
+                });
+            }
+        });
+
+        const isEverythingSelected = allPossible.every(p => form.permissions.includes(p));
+        setForm(prev => ({
             ...prev,
-            [value]: !prev[value]
+            permissions: isEverythingSelected ? [] : allPossible
         }));
     };
 
@@ -214,10 +250,21 @@ const RoleManagementTab = () => {
     };
 
     const handleEditClick = (role) => {
+        let parsedPermissions = [];
+        if (typeof role.permissions === 'string') {
+            try {
+                parsedPermissions = JSON.parse(role.permissions);
+            } catch (e) {
+                parsedPermissions = [];
+            }
+        } else if (Array.isArray(role.permissions)) {
+            parsedPermissions = role.permissions;
+        }
+
         setEditRoleId(role.id);
         setForm({
             name: role.name,
-            permissions: role.permissions || [],
+            permissions: parsedPermissions,
         });
         setSuccess("");
         setError("");
@@ -258,35 +305,82 @@ const RoleManagementTab = () => {
         }
     };
 
-    const handleCancelDelete = () => {
-        setRoleToDelete(null);
-        setShowConfirm(false);
+    const renderPermissionRow = (module, isSub = false) => {
+        const moduleActions = module.defaultActions || ["view", "create", "edit", "delete"];
+        
+        return (
+            <tr key={module.id} className={`${isSub ? 'bg-white/50' : 'bg-gray-50/50'} hover:bg-orange-50/30 transition-colors border-b border-gray-100`}>
+                <td className={`px-4 py-3 ${isSub ? 'pl-10 text-xs text-gray-600' : 'font-semibold text-gray-700'}`}>
+                    {module.label}
+                </td>
+                {actions.map(action => (
+                    <td key={action.id} className="px-4 py-3 text-center">
+                        {moduleActions.includes(action.id) ? (
+                            <label className="inline-flex items-center cursor-pointer group">
+                                <input
+                                    type="checkbox"
+                                    checked={form.permissions.includes(`${module.id}:${action.id}`)}
+                                    onChange={() => handlePermissionChange(module.id, action.id)}
+                                    className="hidden"
+                                />
+                                <div className={`
+                                    w-5 h-5 rounded border transition-all flex items-center justify-center
+                                    ${form.permissions.includes(`${module.id}:${action.id}`) 
+                                        ? 'bg-orange-500 border-orange-500 text-white shadow-sm ring-2 ring-orange-200' 
+                                        : 'bg-white border-gray-300 text-transparent group-hover:border-orange-400'}
+                                `}>
+                                    <CheckCircle size={12} strokeWidth={3} />
+                                </div>
+                            </label>
+                        ) : (
+                            <div className="w-5 h-5 mx-auto rounded bg-gray-100 opacity-20 border border-gray-200"></div>
+                        )}
+                    </td>
+                ))}
+                {!isSub && (
+                    <td className="px-4 py-3 text-center">
+                        <button
+                            type="button"
+                            onClick={() => toggleGroup(module)}
+                            className="text-[10px] uppercase tracking-tighter font-bold text-orange-600 hover:text-orange-700 underline"
+                        >
+                            Toggle Group
+                        </button>
+                    </td>
+                )}
+            </tr>
+        );
     };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 overflow-x-hidden">
             {/* Alerts */}
             {success && (
-                <div className="flex items-center gap-2 p-4 text-sm font-medium text-green-700 bg-green-100 rounded-lg">
+                <div className="flex items-center gap-2 p-4 text-sm font-medium text-green-700 bg-green-100 rounded-lg animate-in fade-in slide-in-from-top-2 duration-300">
                     <CheckCircle size={20} />
                     {success}
                 </div>
             )}
             {error && (
-                <div className="flex items-center gap-2 p-4 text-sm font-medium text-red-700 bg-red-100 rounded-lg">
+                <div className="flex items-center gap-2 p-4 text-sm font-medium text-red-700 bg-red-100 rounded-lg animate-in shake duration-300">
                     <XCircle size={20} />
                     {error}
                 </div>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
                 {/* Role Creation Form */}
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 space-y-6">
-                    <h3 className="text-xl font-bold text-gray-800 border-b pb-4">{editRoleId ? "Edit Role" : "Create New Role"}</h3>
-                    <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="xl:col-span-3 bg-white p-6 rounded-2xl shadow-xl border border-gray-100 space-y-6">
+                    <div className="flex items-center justify-between border-b pb-4">
+                        <h3 className="text-xl font-extrabold text-gray-900 tracking-tight">
+                            {editRoleId ? "Modify Assigned Role" : "Create Advanced Role"}
+                        </h3>
+                    </div>
+                    
+                    <form onSubmit={handleSubmit} className="space-y-6">
                         <div>
-                            <label htmlFor="roleName" className="block text-sm font-semibold text-gray-700 mb-1">
-                                Role Name
+                            <label htmlFor="roleName" className="block text-sm font-bold text-gray-700 mb-2 uppercase tracking-wide">
+                                Role Identity
                             </label>
                             <input
                                 id="roleName"
@@ -295,55 +389,63 @@ const RoleManagementTab = () => {
                                 value={form.name}
                                 onChange={handleChange}
                                 required
-                                placeholder="e.g., Administrator, Manager, Staff"
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 transition-colors"
+                                placeholder="e.g., Senior Accountant, Floor Manager"
+                                className="w-full px-5 py-3 border-2 border-gray-100 rounded-xl focus:outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 transition-all font-medium text-gray-700"
                             />
                         </div>
 
                         <div>
-                            <label className="block text-sm font-semibold text-gray-700 mb-2">Permissions</label>
-                            <div className="space-y-2 p-4 border rounded-lg bg-gray-50 max-h-[400px] overflow-y-auto custom-scrollbar">
-                                {availablePermissions.map((permission) => (
-                                    <div key={permission.value} className="space-y-1">
-                                        <div className="flex items-center gap-2">
-                                            {permission.tabs && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => toggleSection(permission.value)}
-                                                    className="text-gray-400 hover:text-gray-600 transition-colors"
-                                                >
-                                                    {expandedSections[permission.value] ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                                                </button>
-                                            )}
-                                            <label className="flex items-center gap-3 text-sm text-gray-700 cursor-pointer font-medium hover:text-orange-600 transition-colors py-1">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={form.permissions.includes(permission.value)}
-                                                    onChange={() => handlePermissionChange(permission.value)}
-                                                    className="h-4 w-4 rounded border-gray-300 text-orange-600 focus:ring-orange-500"
-                                                />
-                                                {permission.label}
-                                            </label>
-                                        </div>
+                            <div className="flex items-center justify-between mb-4">
+                                <label className="block text-sm font-bold text-gray-700 uppercase tracking-wide">Access Control Matrix</label>
+                                <button 
+                                    type="button" 
+                                    onClick={toggleAll}
+                                    className="text-xs font-bold text-gray-500 hover:text-orange-600 transition-colors uppercase"
+                                >
+                                    { (()=>{
+                                        const allP = [];
+                                        modules.forEach(m => {
+                                            const moduleActionsToUse = m.defaultActions || ["view", "create", "edit", "delete"];
+                                            moduleActionsToUse.forEach(a => allP.push(`${m.id}:${a}`));
+                                            if (m.subModules) {
+                                                m.subModules.forEach(s => {
+                                                    const subActionsToUse = s.defaultActions || ["view", "create", "edit", "delete"];
+                                                    subActionsToUse.forEach(a => allP.push(`${s.id}:${a}`));
+                                                });
+                                            }
+                                        });
+                                        return allP.every(p => form.permissions.includes(p));
+                                    })() ? "Revoke All" : "Grant Master Access"}
+                                </button>
+                            </div>
 
-                                        {/* Sub-tabs */}
-                                        {permission.tabs && expandedSections[permission.value] && (
-                                            <div className="ml-8 space-y-1 border-l-2 border-orange-100 pl-4 py-1">
-                                                {permission.tabs.map((tab) => (
-                                                    <label key={tab.value} className="flex items-center gap-3 text-sm text-gray-600 cursor-pointer hover:text-orange-500 py-1 transition-colors">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={form.permissions.includes(tab.value)}
-                                                            onChange={() => handlePermissionChange(tab.value)}
-                                                            className="h-3.5 w-3.5 rounded border-gray-300 text-orange-600 focus:ring-orange-500"
-                                                        />
-                                                        {tab.label}
-                                                    </label>
+                            <div className="border-2 border-gray-50 rounded-2xl overflow-hidden shadow-inner bg-gray-50">
+                                <div className="max-h-[600px] overflow-y-auto custom-scrollbar">
+                                    <table className="w-full text-left border-collapse table-fixed">
+                                        <thead className="sticky top-0 bg-white shadow-sm z-10">
+                                            <tr>
+                                                <th className="w-1/3 px-4 py-4 text-[10px] font-black uppercase text-gray-400 tracking-widest">Module / Scope</th>
+                                                {actions.map(action => (
+                                                    <th key={action.id} className="px-4 py-4 text-center">
+                                                        <div className="flex flex-col items-center gap-1">
+                                                            {action.icon}
+                                                            <span className="text-[10px] font-black uppercase text-gray-500 tracking-tighter">{action.label}</span>
+                                                        </div>
+                                                    </th>
                                                 ))}
-                                            </div>
-                                        )}
-                                    </div>
-                                ))}
+                                                <th className="w-20 px-4 py-4 text-center text-[10px] font-black uppercase text-gray-400 tracking-widest">Grp</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {modules.map(module => (
+                                                <React.Fragment key={module.id}>
+                                                    {renderPermissionRow(module)}
+                                                    {module.subModules && module.subModules.map(sub => renderPermissionRow(sub, true))}
+                                                </React.Fragment>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                         </div>
 
@@ -351,15 +453,15 @@ const RoleManagementTab = () => {
                             <button
                                 type="submit"
                                 disabled={loading}
-                                className="flex-1 py-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-lg shadow-md transition-all disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                className="flex-1 py-4 bg-orange-500 hover:bg-orange-600 text-white font-black rounded-xl shadow-xl shadow-orange-200 transition-all disabled:bg-gray-300 transform active:scale-95 uppercase tracking-wider"
                             >
-                                {loading ? "Saving..." : (editRoleId ? "Update Role" : "Create Role")}
+                                {loading ? "Synchronizing..." : (editRoleId ? "Apply Changes" : "Commission Role")}
                             </button>
                             {editRoleId && (
                                 <button
                                     type="button"
                                     onClick={handleCancelEdit}
-                                    className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-lg transition-all"
+                                    className="px-8 py-4 bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold rounded-xl transition-all uppercase tracking-wide"
                                 >
                                     Cancel
                                 </button>
@@ -369,8 +471,8 @@ const RoleManagementTab = () => {
                 </div>
 
                 {/* Existing Roles Table */}
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 space-y-6">
-                    <h3 className="text-xl font-bold text-gray-800 border-b pb-4">Role Directory</h3>
+                <div className="xl:col-span-2 bg-white p-6 rounded-2xl shadow-xl border border-gray-100 space-y-6 mt-0">
+                    <h3 className="text-xl font-extrabold text-gray-900 tracking-tight border-b pb-4">Role Directory</h3>
                     <div className="overflow-x-auto rounded-lg border border-gray-100">
                         <table className="min-w-full text-sm text-left">
                             <thead className="bg-gray-50 text-gray-600 font-semibold">

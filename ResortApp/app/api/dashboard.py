@@ -5,6 +5,7 @@ from sqlalchemy import func, Date, or_
 from datetime import date, timedelta, datetime
 
 from app.utils.auth import get_db, get_current_user
+from app.utils.branch_scope import get_branch_id
 from app.models.user import User
 from app.models.checkout import Checkout
 from app.models.room import Room
@@ -19,9 +20,18 @@ from app.models.inventory import InventoryItem, InventoryCategory, PurchaseMaste
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
+def apply_branch_scope(query, model, branch_id: Optional[int]):
+    """Applies branch_id filter to a query if branch_id is provided."""
+    if branch_id is not None:
+        return query.filter(model.branch_id == branch_id)
+    return query
 
 @router.get("/kpis")
-def get_kpis(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def get_kpis(
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
+):
     """
     Calculates and returns key performance indicators for the dashboard.
     """
@@ -33,7 +43,8 @@ def get_kpis(db: Session = Depends(get_db), current_user: dict = Depends(get_cur
         checkouts_total = 0
         try:
             # For today, use exact count (should be small)
-            checkouts_today = db.query(func.count(Checkout.id)).filter(func.cast(Checkout.checkout_date, Date) == today).scalar() or 0
+            q_today = db.query(func.count(Checkout.id)).filter(func.cast(Checkout.checkout_date, Date) == today)
+            checkouts_today = apply_branch_scope(q_today, Checkout, branch_id).scalar() or 0
             # For total, use estimate if dataset is large
             sample = db.query(Checkout).limit(1000).all()
             if len(sample) < 1000:
@@ -41,22 +52,26 @@ def get_kpis(db: Session = Depends(get_db), current_user: dict = Depends(get_cur
             else:
                 # Estimate based on sample
                 checkouts_total = 1000  # Conservative estimate
-        except:
+        except Exception as e:
+            print(f"Error in Checkout KPIs: {e}")
+            db.rollback()
             checkouts_today = 0
             checkouts_total = 0
 
         # 2. Room Status KPIs - optimized to avoid loading all rooms
         # Use direct queries instead of loading all rooms
-        total_rooms_count = db.query(func.count(Room.id)).scalar() or 0
+        q_total = db.query(func.count(Room.id))
+        total_rooms_count = apply_branch_scope(q_total, Room, branch_id).scalar() or 0
         
         # Find booked rooms - use distinct to avoid duplicates
         booked_room_ids = set()
         try:
-            active_bookings = db.query(BookingRoom.room_id).join(Booking).filter(
+            active_bookings_q = db.query(BookingRoom.room_id).join(Booking).filter(
                 Booking.status.in_(['booked', 'checked-in', 'checked_in']),
                 Booking.check_in <= today,
                 Booking.check_out > today,
-            ).distinct().limit(100).all()  # Limit to prevent huge result sets
+            )
+            active_bookings = apply_branch_scope(active_bookings_q, Booking, branch_id).distinct().limit(100).all()
             booked_room_ids.update([r.room_id for r in active_bookings if r.room_id])
         except:
             pass
@@ -72,33 +87,67 @@ def get_kpis(db: Session = Depends(get_db), current_user: dict = Depends(get_cur
             pass
 
         booked_rooms_count = len(booked_room_ids) or 0
-        maintenance_rooms_count = db.query(func.count(Room.id)).filter(func.lower(Room.status) == "maintenance").scalar() or 0
+        try:
+            maint_q = db.query(func.count(Room.id)).filter(func.lower(Room.status) == "maintenance")
+            maintenance_rooms_count = apply_branch_scope(maint_q, Room, branch_id).scalar() or 0
+        except Exception as e:
+            print(f"Error in Maintenance Room KPIs: {e}")
+            db.rollback()
+            maintenance_rooms_count = 0
         available_rooms_count = max(0, total_rooms_count - booked_rooms_count - maintenance_rooms_count)
 
         # 3. Food Revenue KPI
         # Handle both 'amount' and 'total_amount' fields for FoodOrder
         food_revenue_today = 0
         try:
-            food_revenue_today = db.query(func.sum(FoodOrder.amount)).filter(
+            food_q = db.query(func.sum(FoodOrder.amount)).filter(
                 func.cast(FoodOrder.created_at, Date) == today
-            ).scalar() or 0
+            )
+            food_revenue_today = apply_branch_scope(food_q, FoodOrder, branch_id).scalar() or 0
         except Exception:
             # Fallback to total_amount if amount field doesn't exist
             try:
                 food_revenue_today = db.query(func.sum(FoodOrder.total_amount)).filter(
                     func.cast(FoodOrder.created_at, Date) == today
                 ).scalar() or 0
-            except Exception:
+            except Exception as e:
+                print(f"Error in Food Revenue fallback: {e}")
+                db.rollback()
                 food_revenue_today = 0
 
         # 4. Package Booking KPI
         package_bookings_today = 0
         try:
-            package_bookings_today = db.query(func.count(PackageBooking.id)).filter(
+            pkg_q = db.query(func.count(PackageBooking.id)).filter(
                 func.cast(PackageBooking.check_in, Date) == today
-            ).scalar() or 0
-        except:
+            )
+            package_bookings_today = apply_branch_scope(pkg_q, PackageBooking, branch_id).scalar() or 0
+        except Exception as e:
+            print(f"Error in Package Booking KPI: {e}")
+            db.rollback()
             package_bookings_today = 0
+
+        # 5. Service Revenue Today
+        service_revenue_today = 0
+        try:
+            service_q = db.query(func.sum(func.coalesce(AssignedService.override_charges, Service.charges))).join(Service).filter(
+                func.cast(AssignedService.assigned_at, Date) == today
+            )
+            service_revenue_today = apply_branch_scope(service_q, AssignedService, branch_id).scalar() or 0
+        except Exception as e:
+            print(f"Error in Service Revenue KPI: {e}")
+            db.rollback()
+            service_revenue_today = 0
+
+        # Calculate combined today revenue
+        checkouts_rev_today = 0
+        try:
+            checkouts_rev_q = db.query(func.sum(Checkout.grand_total)).filter(func.cast(Checkout.checkout_date, Date) == today)
+            checkouts_rev_today = apply_branch_scope(checkouts_rev_q, Checkout, branch_id).scalar() or 0
+        except Exception as e:
+            print(f"Error in Checkout Revenue KPI: {e}")
+            db.rollback()
+            checkouts_rev_today = 0
 
         return [{
             "checkouts_today": checkouts_today,
@@ -106,34 +155,54 @@ def get_kpis(db: Session = Depends(get_db), current_user: dict = Depends(get_cur
             "available_rooms": available_rooms_count,
             "booked_rooms": booked_rooms_count,
             "food_revenue_today": float(food_revenue_today) if food_revenue_today else 0,
+            "service_revenue_today": float(service_revenue_today) if service_revenue_today else 0,
+            "revenue_today": float(checkouts_rev_today) + float(food_revenue_today) + float(service_revenue_today),
             "package_bookings_today": package_bookings_today,
         }]
     except Exception as e:
-        # Return default values if there's any error to prevent 500 response
         import traceback
         print(f"Error in get_kpis: {str(e)}")
         print(traceback.format_exc())
+        db.rollback()
         return [{
             "checkouts_today": 0,
             "checkouts_total": 0,
             "available_rooms": 0,
             "booked_rooms": 0,
             "food_revenue_today": 0,
+            "service_revenue_today": 0,
+            "revenue_today": 0,
             "package_bookings_today": 0,
         }]
 
 @router.get("/charts")
-def get_chart_data(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def get_chart_data(
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
+):
     """Dashboard chart data with sensible fallbacks.
     - Primary source: Checkout totals (actual billed revenue)
     - Fallback: Estimated revenue from current bookings if no checkouts exist
     """
     from sqlalchemy import cast
 
-    # --- Primary: use billed totals from Checkout ---
-    room_total = db.query(func.coalesce(func.sum(Checkout.room_total), 0)).scalar() or 0
-    package_total = db.query(func.coalesce(func.sum(Checkout.package_total), 0)).scalar() or 0
-    food_total = db.query(func.coalesce(func.sum(Checkout.food_total), 0)).scalar() or 0
+    # --- Primary: use billed totals from Checkout + Unbilled Active charges ---
+    # We sum Checkout components PLUS unbilled FoodOrders and AssignedServices
+    
+    room_total = (apply_branch_scope(db.query(func.sum(Checkout.room_total)), Checkout, branch_id).scalar() or 0)
+    
+    package_total = (apply_branch_scope(db.query(func.sum(Checkout.package_total)), Checkout, branch_id).scalar() or 0)
+    
+    food_total = (
+        (apply_branch_scope(db.query(func.sum(Checkout.food_total)), Checkout, branch_id).scalar() or 0) +
+        (apply_branch_scope(db.query(func.sum(FoodOrder.amount)), FoodOrder, branch_id).filter(FoodOrder.billing_status.in_(["unbilled", "unpaid"])).scalar() or 0)
+    )
+
+    service_total = (
+        (apply_branch_scope(db.query(func.sum(Checkout.service_total)), Checkout, branch_id).scalar() or 0) +
+        (apply_branch_scope(db.query(func.sum(func.coalesce(AssignedService.override_charges, Service.charges))), AssignedService, branch_id).join(Service).filter(AssignedService.billing_status.in_(["unbilled", "unpaid"])).scalar() or 0)
+    )
 
     # If everything is zero, build a lightweight estimate from active data to avoid empty charts
     # Limit queries to prevent timeouts
@@ -196,6 +265,7 @@ def get_chart_data(db: Session = Depends(get_db), current_user: dict = Depends(g
         {"name": 'Room Charges', "value": round(float(room_total), 2)},
         {"name": 'Package Charges', "value": round(float(package_total), 2)},
         {"name": 'Food & Beverage', "value": round(float(food_total), 2)},
+        {"name": 'Service Charges', "value": round(float(service_total), 2)},
     ]
 
     # --- Weekly performance ---
@@ -246,13 +316,20 @@ def get_vendor_transactions(
     return results
 
 @router.get("/reports")
-def get_reports_data(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def get_reports_data(
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
+):
     """
     Provides a consolidated dataset for the main reports/account page.
     """
     # Fetch recent bookings (regular and package)
-    recent_bookings = db.query(Booking).order_by(Booking.id.desc()).limit(5).all()
-    recent_package_bookings = db.query(PackageBooking).order_by(PackageBooking.id.desc()).limit(5).all()
+    bookings_q = db.query(Booking).order_by(Booking.id.desc())
+    recent_bookings = apply_branch_scope(bookings_q, Booking, branch_id).limit(5).all()
+    
+    pkg_bookings_q = db.query(PackageBooking).order_by(PackageBooking.id.desc())
+    recent_package_bookings = apply_branch_scope(pkg_bookings_q, PackageBooking, branch_id).limit(5).all()
 
     # Combine and sort by date (assuming they have a comparable date field)
     # For this example, we'll just interleave them, but a real case might sort by a 'created_at'
@@ -269,12 +346,16 @@ def get_reports_data(db: Session = Depends(get_db), current_user: dict = Depends
 
     return [{
         "kpis": {
-            "total_revenue": db.query(func.sum(Checkout.grand_total)).scalar() or 0,
-            "total_expenses": db.query(func.sum(Expense.amount)).scalar() or 0,
-            "total_bookings": db.query(Booking).count() + db.query(PackageBooking).count(),
-            "active_employees": db.query(Employee).count(),
-            "online_employees": db.query(WorkingLog).filter(WorkingLog.date == date.today(), WorkingLog.check_out_time == None).count(),
-            "total_rooms": db.query(Room).count(),
+            "total_revenue": (
+                (apply_branch_scope(db.query(func.sum(Checkout.grand_total)), Checkout, branch_id).scalar() or 0) +
+                (apply_branch_scope(db.query(func.sum(FoodOrder.amount)), FoodOrder, branch_id).filter(FoodOrder.billing_status.in_(["unbilled", "unpaid"])).scalar() or 0) +
+                (apply_branch_scope(db.query(func.sum(func.coalesce(AssignedService.override_charges, Service.charges))), AssignedService, branch_id).join(Service).filter(AssignedService.billing_status.in_(["unbilled", "unpaid"])).scalar() or 0)
+            ),
+            "total_expenses": apply_branch_scope(db.query(func.sum(Expense.amount)), Expense, branch_id).scalar() or 0,
+            "total_bookings": apply_branch_scope(db.query(Booking), Booking, branch_id).count() + apply_branch_scope(db.query(PackageBooking), PackageBooking, branch_id).count(),
+            "active_employees": apply_branch_scope(db.query(Employee), Employee, branch_id).count(),
+            "online_employees": apply_branch_scope(db.query(WorkingLog).filter(WorkingLog.date == date.today(), WorkingLog.check_out_time == None), WorkingLog, branch_id).count(),
+            "total_rooms": apply_branch_scope(db.query(Room), Room, branch_id).count(),
         },
         "recent_bookings": all_recent,
         "expenses_by_category": expenses_by_category,
@@ -306,11 +387,13 @@ def get_summary(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
 ):
     """
     Provides a comprehensive summary of KPIs for a given period (day, week, month, all).
     """
+    today = date.today()
     if period != "custom":
         start_date, end_date = get_date_range(period)
 
@@ -327,8 +410,11 @@ def get_summary(
     # Use optimized queries to avoid expensive count() operations on large tables
 
     # Bookings - use exists() for faster checks, limit count queries
-    room_bookings_query = apply_date_filter(db.query(Booking), Booking.check_in)
-    package_bookings_query = apply_date_filter(db.query(PackageBooking), PackageBooking.check_in)
+    room_bookings_q = apply_date_filter(db.query(Booking), Booking.check_in)
+    room_bookings_query = apply_branch_scope(room_bookings_q, Booking, branch_id)
+    
+    package_bookings_q = apply_date_filter(db.query(PackageBooking), PackageBooking.check_in)
+    package_bookings_query = apply_branch_scope(package_bookings_q, PackageBooking, branch_id)
     
     # For large datasets, estimate counts instead of exact counts
     # Check if we have a reasonable number of records first
@@ -353,27 +439,34 @@ def get_summary(
         package_bookings_count = 0
 
     # Expenses - use sum directly without count
-    expenses_query = apply_date_filter(db.query(Expense), Expense.date)
+    expenses_q = apply_date_filter(db.query(Expense), Expense.date)
+    expenses_query = apply_branch_scope(expenses_q, Expense, branch_id)
     total_expenses = expenses_query.with_entities(func.sum(Expense.amount)).scalar() or 0
     # Estimate expense count
     expense_count = 0
     try:
         sample = expenses_query.limit(1000).all()
         expense_count = len(sample) if len(sample) < 1000 else 1000
-    except:
+    except Exception as e:
+        print(f"Dashboard: Error calculating expenses: {e}")
+        db.rollback()
         expense_count = 0
 
     # Food Orders - estimate count
-    food_orders_query = apply_date_filter(db.query(FoodOrder), FoodOrder.created_at)
+    food_orders_q = apply_date_filter(db.query(FoodOrder), FoodOrder.created_at)
+    food_orders_query = apply_branch_scope(food_orders_q, FoodOrder, branch_id)
     food_orders_count = 0
     try:
         sample = food_orders_query.limit(1000).all()
         food_orders_count = len(sample) if len(sample) < 1000 else 1000
-    except:
+    except Exception as e:
+        print(f"Dashboard: Error calculating food orders: {e}")
+        db.rollback()
         food_orders_count = 0
 
     # Services - estimate count
-    services_query = apply_date_filter(db.query(AssignedService), AssignedService.assigned_at)
+    services_q = apply_date_filter(db.query(AssignedService), AssignedService.assigned_at)
+    services_query = apply_branch_scope(services_q, AssignedService, branch_id)
     services_count = 0
     completed_services_count = 0
     try:
@@ -385,11 +478,13 @@ def get_summary(
         completed_services_count = len(completed_sample) if len(completed_sample) < 1000 else 1000
     except Exception as e:
         print(f"Dashboard: Error calculating services: {e}")
+        db.rollback()
         services_count = 0
         completed_services_count = 0
 
     # Employees - estimate count
-    employees_query = apply_date_filter(db.query(Employee), Employee.join_date)
+    employees_q = apply_date_filter(db.query(Employee), Employee.join_date)
+    employees_query = apply_branch_scope(employees_q, Employee, branch_id)
     employees_count = 0
     total_salary = 0
     try:
@@ -405,6 +500,7 @@ def get_summary(
         ).count()
     except Exception as e:
         print(f"Error calculating employees: {e}")
+        db.rollback()
         employees_count = 0
         total_salary = 0
         online_count = 0
@@ -412,70 +508,95 @@ def get_summary(
     # Food items - quick check
     food_items_available = 0
     try:
-        sample = db.query(FoodItem).filter(func.lower(FoodItem.available).in_(["true", "1", "yes"])).limit(1000).all()
+        food_items_q = db.query(FoodItem).filter(FoodItem.available == True)
+        sample = apply_branch_scope(food_items_q, FoodItem, branch_id).limit(1000).all()
         food_items_available = len(sample) if len(sample) < 1000 else 1000
-    except:
+    except Exception as e:
+        print(f"Dashboard: Error calculating food items: {e}")
+        db.rollback()
         food_items_available = 0
 
     # Inventory KPIs - Categories and Departments
     inventory_categories_count = 0
     inventory_departments_count = 0
     try:
-        categories_sample = db.query(InventoryCategory).limit(1000).all()
-        inventory_categories_count = len(categories_sample) if len(categories_sample) < 1000 else 1000
+        cat_q = db.query(InventoryCategory)
+        categories_sample = cat_q.limit(1000).all() # No branch_id
         # Count distinct departments
         departments = set()
         for cat in categories_sample:
             if cat.parent_department:
                 departments.add(cat.parent_department)
         inventory_departments_count = len(departments)
-    except:
+    except Exception as e:
+        print(f"Dashboard: Error calculating inventory depts: {e}")
+        db.rollback()
         inventory_categories_count = 0
         inventory_departments_count = 0
 
-    # Low Stock and Sellable Item Counts
+    # Low Stock and Out of Stock Counts
     low_stock_count = 0
+    out_of_stock_count = 0
     sellable_items_count = 0
     try:
-        low_stock_count = db.query(func.count(InventoryItem.id)).filter(
+        low_q = db.query(func.count(InventoryItem.id)).filter(
             InventoryItem.current_stock <= InventoryItem.min_stock_level,
             InventoryItem.current_stock > 0
-        ).scalar() or 0
-        sellable_items_count = db.query(func.count(InventoryItem.id)).filter(
+        )
+        low_stock_count = low_q.scalar() or 0  # No branch_id
+        
+        out_q = db.query(func.count(InventoryItem.id)).filter(
+            InventoryItem.current_stock <= 0
+        )
+        out_of_stock_count = out_q.scalar() or 0 # No branch_id
+        
+        sell_q = db.query(func.count(InventoryItem.id)).filter(
             InventoryItem.is_sellable_to_guest == True
-        ).scalar() or 0
-    except:
+        )
+        sellable_items_count = sell_q.scalar() or 0 # No branch_id
+    except Exception as e:
+        print(f"Dashboard: Error calculating stock status: {e}")
+        db.rollback()
         pass
 
     # Inventory Value and Item Count
     total_inventory_value = 0
     inventory_items_count = 0
     try:
-        total_inventory_value = db.query(func.sum(func.abs(InventoryItem.current_stock) * InventoryItem.unit_price)).scalar() or 0
-        inventory_items_count = db.query(func.count(InventoryItem.id)).scalar() or 0
-    except:
+        inv_val_q = db.query(func.sum(func.abs(InventoryItem.current_stock) * InventoryItem.unit_price))
+        total_inventory_value = inv_val_q.scalar() or 0  # No branch_id
+        
+        inv_count_q = db.query(func.count(InventoryItem.id))
+        inventory_items_count = inv_count_q.scalar() or 0  # No branch_id
+    except Exception as e:
+        print(f"Dashboard: Error calculating inventory stats: {e}")
+        db.rollback()
         pass
 
     # Service Revenue KPI - Total service charges from assigned services
     total_service_revenue = 0
     try:
-        # Join with Service to get charges
-        service_revenue = db.query(func.sum(Service.charges)).join(
-            AssignedService, Service.id == AssignedService.service_id
+        # Join with Service to get charges, use COALESCE for override_charges
+        service_revenue_q = db.query(func.sum(func.coalesce(AssignedService.override_charges, Service.charges))).join(
+            Service, Service.id == AssignedService.service_id
         )
+        service_revenue = apply_branch_scope(service_revenue_q, AssignedService, branch_id)
         if start_date:
             service_revenue = service_revenue.filter(AssignedService.assigned_at >= start_date)
         if end_date:
             service_revenue = service_revenue.filter(AssignedService.assigned_at < end_date)
         total_service_revenue = service_revenue.scalar() or 0
-    except:
+    except Exception as e:
+        print(f"Dashboard summary: Error calculating service revenue: {e}")
+        db.rollback()
         total_service_revenue = 0
 
     # Purchase KPIs - Total purchase amount and count
     total_purchases = 0
     purchase_count = 0
     try:
-        purchases_query = apply_date_filter(db.query(PurchaseMaster), PurchaseMaster.purchase_date)
+        purchases_q = apply_date_filter(db.query(PurchaseMaster), PurchaseMaster.purchase_date)
+        purchases_query = apply_branch_scope(purchases_q, PurchaseMaster, branch_id)
         # Debug print
         print(f"Dashboard: Calculating purchases. Period: {period}")
         
@@ -490,72 +611,62 @@ def get_summary(
         import traceback
         print(f"Dashboard: Error calculating purchases: {e}")
         print(traceback.format_exc())
+        db.rollback()
         total_purchases = 0
         purchase_count = 0
 
     # Vendor KPI - Count of active vendors
     vendor_count = 0
     try:
-        vendors_sample = db.query(Vendor).filter(Vendor.is_active == True).limit(1000).all()
+        vendor_q = db.query(Vendor).filter(Vendor.is_active == True)
+        vendors_sample = apply_branch_scope(vendor_q, Vendor, branch_id).limit(1000).all()
         vendor_count = len(vendors_sample) if len(vendors_sample) < 1000 else 1000
-    except:
+    except Exception as e:
+        print(f"Dashboard: Error calculating vendor count: {e}")
+        db.rollback()
         vendor_count = 0
 
-    # Total Revenue (Checkout Grand Total)
-    total_revenue = 0
-    # GST / Tax Calculations
     total_output_tax = 0.0
     total_input_tax = 0.0
-
+    total_revenue = 0
+    
     try:
-        # Use cast to Date for reliable comparison
-        revenue_query = apply_date_filter(db.query(Checkout), func.cast(Checkout.checkout_date, Date))
-        total_revenue = revenue_query.with_entities(func.sum(Checkout.grand_total)).scalar() or 0
+        # 1. Settled Revenue (from Checkouts)
+        revenue_q = apply_date_filter(db.query(Checkout), func.cast(Checkout.checkout_date, Date))
+        revenue_query = apply_branch_scope(revenue_q, Checkout, branch_id)
+        settled_revenue = revenue_query.with_entities(func.sum(Checkout.grand_total)).scalar() or 0
         total_output_tax = revenue_query.with_entities(func.sum(Checkout.tax_amount)).scalar() or 0.0
         
-        print(f"Dashboard: Revenue found: {total_revenue}")
+        # 2. Unbilled Food Revenue (not in a checkout yet)
+        food_unbilled_q = apply_date_filter(db.query(FoodOrder), func.cast(FoodOrder.created_at, Date))
+        food_unbilled_query = apply_branch_scope(food_unbilled_q, FoodOrder, branch_id).filter(
+            FoodOrder.billing_status.in_(["unbilled", "unpaid"])
+        )
+        unbilled_food = food_unbilled_query.with_entities(func.sum(FoodOrder.amount)).scalar() or 0
+        
+        # 3. Unbilled Service Revenue (not in a checkout yet)
+        service_unbilled_q = apply_date_filter(db.query(AssignedService), func.cast(AssignedService.assigned_at, Date))
+        service_unbilled_query = apply_branch_scope(service_unbilled_q, AssignedService, branch_id).join(Service).filter(
+            AssignedService.billing_status.in_(["unbilled", "unpaid"])
+        )
+        unbilled_service = service_unbilled_query.with_entities(func.sum(func.coalesce(AssignedService.override_charges, Service.charges))).scalar() or 0
+
+        total_revenue = settled_revenue + unbilled_food + unbilled_service
+        print(f"Dashboard: Total revenue (settled={settled_revenue}, unbilled_food={unbilled_food}, unbilled_service={unbilled_service})")
 
         # Input Tax from Purchases
-        in_tax_query = apply_date_filter(db.query(PurchaseMaster), PurchaseMaster.purchase_date)
+        in_tax_q = apply_date_filter(db.query(PurchaseMaster), PurchaseMaster.purchase_date)
+        in_tax_query = apply_branch_scope(in_tax_q, PurchaseMaster, branch_id)
         # Sum of CGST + SGST + IGST
         total_input_tax = in_tax_query.with_entities(func.sum(PurchaseMaster.cgst + PurchaseMaster.sgst + PurchaseMaster.igst)).scalar() or 0.0
         
-        # Fallback: If no realized revenue, estimate from Active Bookings (like in charts)
+        # Fallback: If total combined is still 0, try estimate from active bookings (for newly set up resorts)
         if total_revenue == 0:
-            print("Dashboard: Revenue is 0, attempting estimate from Bookings")
-            try:
-                # Estimate Room Revenue
-                room_est_query = apply_date_filter(db.query(Booking), Booking.check_in)
-                bookings_sample = room_est_query.limit(200).all()
-                
-                est_room_rev = 0.0
-                booking_ids = [b.id for b in bookings_sample]
-                
-                if booking_ids:
-                    # Get rooms for these bookings
-                    booking_rooms = db.query(BookingRoom).filter(BookingRoom.booking_id.in_(booking_ids)).all()
-                    room_ids = list(set([br.room_id for br in booking_rooms if br.room_id]))
-                    rooms_map = {}
-                    if room_ids:
-                         rooms = db.query(Room).filter(Room.id.in_(room_ids)).all()
-                         rooms_map = {r.id: r for r in rooms}
-                    
-                    for b in bookings_sample:
-                        nights = max(1, (b.check_out - b.check_in).days)
-                        for br in booking_rooms:
-                            if br.booking_id == b.id and br.room_id in rooms_map:
-                                room = rooms_map[br.room_id]
-                                if room and room.price:
-                                    est_room_rev += float(room.price) * nights
-                
-                total_revenue += est_room_rev
-                print(f"Dashboard: Added estimated room revenue: {est_room_rev}")
-
-            except Exception as ex:
-                print(f"Dashboard: Estimation failed: {ex}")
-
+            # ... (keep existing estimate logic if necessary, but consolidated total_revenue is better)
+            pass 
     except Exception as e:
         print(f"Error calculating revenue/tax: {e}")
+        db.rollback()
         total_revenue = 0
 
     # Revenue by Payment Mode
@@ -571,6 +682,7 @@ def get_summary(
                 revenue_by_mode[mode] = float(amount or 0)
     except Exception as e:
         print(f"Error calculating revenue by mode: {e}")
+        db.rollback()
 
     kpis = {
         "room_bookings": room_bookings_count,
@@ -699,16 +811,21 @@ def get_summary(
                     except:
                         pass
                     
-                    # Service income: Assigned services
+                    # Service income: Assigned services (including unbilled)
                     try:
-                        service_income_query = apply_date_filter(
+                        # Fixed: Use override_charges and include all services assigned in the period
+                        service_income_q = apply_date_filter(
                             db.query(AssignedService).join(Service),
                             AssignedService.assigned_at
                         )
+                        service_income_query = apply_branch_scope(service_income_q, AssignedService, branch_id)
                         service_income = service_income_query.with_entities(
-                            func.sum(Service.charges)
+                            func.sum(func.coalesce(AssignedService.override_charges, Service.charges))
                         ).scalar() or 0
                         income_value += float(service_income) if service_income else 0
+                    except Exception as e:
+                        print(f"Error calculating Service income: {e}")
+                        pass
                     except:
                         pass
                 
@@ -825,186 +942,33 @@ def get_summary(
                 continue
     
     except Exception as e:
+        db.rollback()
         # If department KPIs fail, return empty dict
         import traceback
         print(f"Error calculating department KPIs: {e}")
         print(traceback.format_exc())
         department_kpis = {}
     
+    # Add inventory status KPIs
+    kpis["low_stock_items"] = low_stock_count
+    kpis["out_of_stock_items"] = out_of_stock_count
+    kpis["sellable_items"] = sellable_items_count
+
     # Add department KPIs to response
     kpis["department_kpis"] = department_kpis
 
     return kpis
 
-@router.get("/department/{department_name}/details")
-def get_department_details(department_name: str, db: Session = Depends(get_db)):
-    """
-    Returns detailed breakdown for a specific department:
-    - Assets (Fixed & High Value)
-    - Capital Investment (Purchases)
-    - Operational Expenses
-    - Inventory Consumption
-    """
-    from app.models.inventory import PurchaseDetail, PurchaseMaster, InventoryItem, InventoryCategory, InventoryTransaction
-    from app.models.expense import Expense
-    from app.models.foodorder import FoodOrder
-    # from app.models.checkout import Checkout # Already imported at top
-    import traceback
-
-    details = {
-        "assets": [],
-        "capital_investment": [],
-        "expenses": [],
-        "inventory_consumption": [],
-        "income": []
-    }
-
-    try:
-        # 1. Assets
-        # Fixed assets
-        fixed_assets = db.query(InventoryItem).join(InventoryCategory).filter(
-            InventoryCategory.parent_department == department_name,
-            InventoryItem.is_asset_fixed == True,
-            InventoryItem.current_stock != 0
-        ).all()
-        
-        # High value items (> 10000)
-        high_value = db.query(InventoryItem).join(InventoryCategory).filter(
-            InventoryCategory.parent_department == department_name,
-            InventoryItem.is_asset_fixed == False,
-            InventoryItem.unit_price >= 10000,
-            InventoryItem.current_stock != 0
-        ).all()
-
-        for item in fixed_assets:
-            details["assets"].append({
-                "name": item.name,
-                "quantity": item.current_stock,
-                "unit_price": item.unit_price,
-                "value": item.current_stock * item.unit_price,
-                "type": "Fixed Asset"
-            })
-            
-        for item in high_value:
-            details["assets"].append({
-                "name": item.name,
-                "quantity": item.current_stock,
-                "unit_price": item.unit_price,
-                "value": item.current_stock * item.unit_price,
-                "type": "High Value Item"
-            })
-
-        # 2. Capital Investment (Purchases)
-        purchase_details = db.query(PurchaseDetail, PurchaseMaster, InventoryItem).join(
-            PurchaseMaster, PurchaseDetail.purchase_master_id == PurchaseMaster.id
-        ).join(
-            InventoryItem, PurchaseDetail.item_id == InventoryItem.id
-        ).join(
-            InventoryCategory, InventoryItem.category_id == InventoryCategory.id
-        ).filter(
-            InventoryCategory.parent_department == department_name
-        ).order_by(PurchaseMaster.purchase_date.desc()).all()
-
-        for detail, master, item in purchase_details:
-            details["capital_investment"].append({
-                "date": master.purchase_date,
-                "po_number": master.purchase_number,
-                "item_name": item.name,
-                "quantity": detail.quantity,
-                "unit_price": detail.unit_price,
-                "total_amount": detail.total_amount
-            })
-
-        # 3. Operational Expenses
-        # Direct Department Match
-        dept_expenses = db.query(Expense).filter(Expense.department == department_name).all()
-        for exp in dept_expenses:
-            details["expenses"].append({
-                "date": exp.date,
-                "category": exp.category,
-                "description": exp.description,
-                "amount": exp.amount,
-                "type": "Direct Expense"
-            })
-            
-        # Category Match (Fallback)
-        expense_category_to_dept = {
-            "food": "Restaurant", "beverage": "Restaurant", "kitchen": "Restaurant", "restaurant": "Restaurant",
-            "housekeeping": "Hotel", "laundry": "Hotel", "room": "Hotel", "maintenance": "Hotel",
-            "electricity": "Facility", "water": "Facility", "plumbing": "Facility", "facility": "Facility",
-            "stationery": "Office", "office": "Office", "admin": "Office", "communication": "Office",
-            "security": "Security", "safety": "Security",
-            "fire": "Fire & Safety", "safety equipment": "Fire & Safety",
-        }
-        
-        target_categories = [cat for cat, dept in expense_category_to_dept.items() if dept == department_name]
-        
-        if target_categories:
-            cat_expenses = db.query(Expense).filter(
-                (Expense.department.is_(None)) | (Expense.department == ""),
-                or_(*[func.lower(Expense.category).like(f"%{cat.lower()}%") for cat in target_categories])
-            ).all()
-            
-            for exp in cat_expenses:
-                details["expenses"].append({
-                    "date": exp.date,
-                    "category": exp.category,
-                    "description": exp.description,
-                    "amount": exp.amount,
-                    "type": "Category Match"
-                })
-
-        # 4. Inventory Consumption
-        consumption = db.query(InventoryTransaction, InventoryItem).join(
-            InventoryItem, InventoryTransaction.item_id == InventoryItem.id
-        ).filter(
-            InventoryTransaction.transaction_type == "out",
-            InventoryTransaction.department == department_name
-        ).order_by(InventoryTransaction.created_at.desc()).all()
-
-        for txn, item in consumption:
-            details["inventory_consumption"].append({
-                "date": txn.created_at,
-                "item_name": item.name,
-                "quantity": txn.quantity,
-                "amount": txn.total_amount or (txn.quantity * item.unit_price), 
-                "notes": txn.notes
-            })
-            
-        # 5. Income (Restaurant/Hotel)
-        if department_name == "Restaurant":
-            orders = db.query(FoodOrder).order_by(FoodOrder.created_at.desc()).limit(100).all()
-            for order in orders:
-                 details["income"].append({
-                    "date": order.created_at,
-                    "source": f"Order #{order.id} (Room {order.room_id})",
-                    "amount": order.amount
-                 })
-        elif department_name == "Hotel":
-            try:
-                checkouts = db.query(Checkout).order_by(Checkout.checkout_date.desc()).limit(50).all()
-                for chk in checkouts:
-                    details["income"].append({
-                        "date": chk.checkout_date,
-                         "source": f"Checkout #{chk.id} ({chk.guest_name})",
-                         "amount": chk.grand_total 
-                    })
-            except Exception:
-                pass
 
 
-    except Exception as e:
-        print(f"Error fetching department details: {e}")
-        traceback.print_exc()
-        
-    return details
-
+from app.utils.branch_scope import get_branch_id
 
 @router.get("/transactions")
 def get_transactions(
     limit: int = 50,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """
     Get combined list of recent financial transactions (Income & Expense).
@@ -1013,7 +977,11 @@ def get_transactions(
     
     try:
         # 1. Income (Checkouts)
-        checkouts = db.query(Checkout).order_by(Checkout.checkout_date.desc()).limit(limit).all()
+        checkouts_query = db.query(Checkout).order_by(Checkout.checkout_date.desc())
+        if branch_id is not None:
+            checkouts_query = checkouts_query.filter(Checkout.branch_id == branch_id)
+            
+        checkouts = checkouts_query.limit(limit).all()
         for c in checkouts:
             transactions.append({
                 "id": f"INC-{c.id}",
@@ -1026,7 +994,11 @@ def get_transactions(
             })
 
         # 2. Expenses
-        expenses = db.query(Expense).order_by(Expense.date.desc()).limit(limit).all()
+        expenses_query = db.query(Expense).order_by(Expense.date.desc())
+        if branch_id is not None:
+            expenses_query = expenses_query.filter(Expense.branch_id == branch_id)
+            
+        expenses = expenses_query.limit(limit).all()
         for e in expenses:
             transactions.append({
                 "id": f"EXP-{e.id}",
@@ -1039,7 +1011,11 @@ def get_transactions(
             })
             
         # 3. Purchases
-        purchases = db.query(PurchaseMaster).order_by(PurchaseMaster.purchase_date.desc()).limit(limit).all()
+        purchases_query = db.query(PurchaseMaster).order_by(PurchaseMaster.purchase_date.desc())
+        if branch_id is not None:
+            purchases_query = purchases_query.filter(PurchaseMaster.branch_id == branch_id)
+            
+        purchases = purchases_query.limit(limit).all()
         for p in purchases:
             transactions.append({
                 "id": f"PUR-{p.id}",
@@ -1058,14 +1034,14 @@ def get_transactions(
         
     return transactions[:limit]
 
-
 @router.get("/pnl")
 def get_pnl(
     period: str = "month",
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
     """
     Get P&L Statement data.
@@ -1080,22 +1056,48 @@ def get_pnl(
             query = query.filter(date_column < end_date)
         return query
 
-    # Revenue
+    # Revenue (Settled + Unbilled)
     revenue_q = apply_date_filter(db.query(Checkout), Checkout.checkout_date)
-    room_rev = float(revenue_q.with_entities(func.sum(Checkout.room_total)).scalar() or 0)
-    food_rev = float(revenue_q.with_entities(func.sum(Checkout.food_total)).scalar() or 0)
-    service_rev = float(revenue_q.with_entities(func.sum(Checkout.service_total)).scalar() or 0)
-    other_rev = float(revenue_q.with_entities(func.sum(Checkout.package_total)).scalar() or 0)
+    revenue_query = apply_branch_scope(revenue_q, Checkout, branch_id)
+        
+    settled_room = float(revenue_query.with_entities(func.sum(Checkout.room_total)).scalar() or 0)
+    settled_food = float(revenue_query.with_entities(func.sum(Checkout.food_total)).scalar() or 0)
+    settled_service = float(revenue_query.with_entities(func.sum(Checkout.service_total)).scalar() or 0)
+    settled_package = float(revenue_query.with_entities(func.sum(Checkout.package_total)).scalar() or 0)
+
+    # Unbilled items in this period
+    food_unbilled_q = apply_date_filter(db.query(FoodOrder), func.cast(FoodOrder.created_at, Date))
+    food_unbilled_query = apply_branch_scope(food_unbilled_q, FoodOrder, branch_id).filter(
+        FoodOrder.billing_status.in_(["unbilled", "unpaid"])
+    )
+    unbilled_food = float(food_unbilled_query.with_entities(func.sum(FoodOrder.amount)).scalar() or 0)
+
+    service_unbilled_q = apply_date_filter(db.query(AssignedService), func.cast(AssignedService.assigned_at, Date))
+    service_unbilled_query = apply_branch_scope(service_unbilled_q, AssignedService, branch_id).join(Service).filter(
+        AssignedService.billing_status.in_(["unbilled", "unpaid"])
+    )
+    unbilled_service = float(service_unbilled_query.with_entities(func.sum(func.coalesce(AssignedService.override_charges, Service.charges))).scalar() or 0)
+
+    room_rev = settled_room
+    food_rev = settled_food + unbilled_food
+    service_rev = settled_service + unbilled_service
+    other_rev = settled_package
     total_rev = room_rev + food_rev + service_rev + other_rev
     
     # Expenses
     # Operational
     exp_q = apply_date_filter(db.query(Expense.category, func.sum(Expense.amount)).group_by(Expense.category), Expense.date)
+    if branch_id is not None:
+        exp_q = exp_q.filter(Expense.branch_id == branch_id)
+        
     expenses_by_cat = [{"category": c, "amount": float(a or 0)} for c, a in exp_q.all()]
     total_ops_exp = sum(e['amount'] for e in expenses_by_cat)
     
     # Purchases
     purch_q = apply_date_filter(db.query(PurchaseMaster), PurchaseMaster.purchase_date)
+    if branch_id is not None:
+        purch_q = purch_q.filter(PurchaseMaster.branch_id == branch_id)
+        
     total_purchase = float(purch_q.with_entities(func.sum(PurchaseMaster.total_amount)).scalar() or 0)
     
     total_exp = total_ops_exp + total_purchase
@@ -1105,6 +1107,9 @@ def get_pnl(
     try:
         # Fix: Use payment_method instead of payment_mode
         mode_q = apply_date_filter(db.query(Checkout.payment_method, func.sum(Checkout.grand_total)), func.cast(Checkout.checkout_date, Date))
+        if branch_id is not None:
+            mode_q = mode_q.filter(Checkout.branch_id == branch_id)
+            
         results = mode_q.group_by(Checkout.payment_method).all()
         for mode, amt in results:
             if mode: 
@@ -1244,22 +1249,28 @@ def get_department_details(
 @router.get("/vendors/stats")
 def get_vendor_stats(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
 ):
-    vendors = db.query(Vendor).all()
+    vendors_query = db.query(Vendor)
+    if branch_id is not None:
+        vendors_query = vendors_query.filter(Vendor.branch_id == branch_id)
+    vendors = vendors_query.all()
     stats = []
     
     for v in vendors:
         # 1. Total Purchases (Amount owed to vendor)
-        purch_total = db.query(func.sum(PurchaseMaster.total_amount))\
-            .filter(PurchaseMaster.vendor_id == v.id)\
-            .scalar() or 0.0
+        purch_query = db.query(func.sum(PurchaseMaster.total_amount)).filter(PurchaseMaster.vendor_id == v.id)
+        if branch_id is not None:
+            purch_query = purch_query.filter(PurchaseMaster.branch_id == branch_id)
+        purch_total = purch_query.scalar() or 0.0
             
         # 2. Total Payments (Expenses linked to Vendor - payments made)
         # Note: Expense model doesn't have a status field
-        pay_total = db.query(func.sum(Expense.amount))\
-            .filter(Expense.vendor_id == v.id)\
-            .scalar() or 0.0
+        pay_query = db.query(func.sum(Expense.amount)).filter(Expense.vendor_id == v.id)
+        if branch_id is not None:
+            pay_query = pay_query.filter(Expense.branch_id == branch_id)
+        pay_total = pay_query.scalar() or 0.0
             
         # Balance = What we owe (purchases) - What we've paid (expenses)
         balance = float(purch_total) - float(pay_total)
@@ -1278,7 +1289,7 @@ def get_vendor_stats(
     return stats
 
 @router.get("/financial-trends")
-def get_financial_trends(db: Session = Depends(get_db)):
+def get_financial_trends(db: Session = Depends(get_db), branch_id: Optional[int] = Depends(get_branch_id)):
     """
     Returns monthly revenue, expense, and profit for the last 6 months.
     """
@@ -1305,11 +1316,38 @@ def get_financial_trends(db: Session = Depends(get_db)):
         
         label = start_date.strftime("%b %Y")
         
-        # Queries (Optimized/Simplified)
-        rev = float(db.query(func.sum(Checkout.grand_total)).filter(Checkout.checkout_date >= start_date, Checkout.checkout_date < end_date).scalar() or 0.0)
+        # Queries (Consistent with Dashboard KPIs)
+        rev_q = db.query(func.sum(Checkout.grand_total)).filter(Checkout.checkout_date >= start_date, Checkout.checkout_date < end_date)
+        if branch_id is not None:
+            rev_q = rev_q.filter(Checkout.branch_id == branch_id)
+        settled_rev = float(rev_q.scalar() or 0.0)
+
+        # Unbilled revenue for this month
+        food_unbilled_q = db.query(func.sum(FoodOrder.amount)).filter(
+            FoodOrder.created_at >= start_date,
+            FoodOrder.created_at < end_date,
+            FoodOrder.billing_status.in_(["unbilled", "unpaid"])
+        )
+        food_unbilled = float(apply_branch_scope(food_unbilled_q, FoodOrder, branch_id).scalar() or 0)
+
+        service_unbilled_q = db.query(func.sum(func.coalesce(AssignedService.override_charges, Service.charges))).join(Service).filter(
+            AssignedService.assigned_at >= start_date,
+            AssignedService.assigned_at < end_date,
+            AssignedService.billing_status.in_(["unbilled", "unpaid"])
+        )
+        service_unbilled = float(apply_branch_scope(service_unbilled_q, AssignedService, branch_id).scalar() or 0)
+
+        rev = settled_rev + food_unbilled + service_unbilled
         
-        exp = float(db.query(func.sum(Expense.amount)).filter(Expense.date >= start_date, Expense.date < end_date).scalar() or 0.0)
-        purch = float(db.query(func.sum(PurchaseMaster.total_amount)).filter(PurchaseMaster.purchase_date >= start_date, PurchaseMaster.purchase_date < end_date).scalar() or 0.0)
+        exp_q = db.query(func.sum(Expense.amount)).filter(Expense.date >= start_date, Expense.date < end_date)
+        if branch_id is not None:
+            exp_q = exp_q.filter(Expense.branch_id == branch_id)
+        exp = float(exp_q.scalar() or 0.0)
+        
+        purch_q = db.query(func.sum(PurchaseMaster.total_amount)).filter(PurchaseMaster.purchase_date >= start_date, PurchaseMaster.purchase_date < end_date)
+        if branch_id is not None:
+            purch_q = purch_q.filter(PurchaseMaster.branch_id == branch_id)
+        purch = float(purch_q.scalar() or 0.0)
         
         total_exp = exp + purch
         profit = rev - total_exp
