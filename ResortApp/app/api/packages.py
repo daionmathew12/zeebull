@@ -852,7 +852,7 @@ def check_in_package_booking(
         raise HTTPException(status_code=400, detail=f"Invalid booking ID format: {booking_id}")
     booking_id = numeric_id
     
-    success, result = crud_package.check_in_package(db, booking_id, id_card_image, guest_photo, room_ids, amenityAllocation)
+    success, result = crud_package.check_in_package(db, booking_id, current_user, id_card_image, guest_photo, room_ids, amenityAllocation)
     if not success:
         raise HTTPException(status_code=400, detail=result)
     return result

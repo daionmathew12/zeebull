@@ -538,7 +538,7 @@ def get_item_comprehensive_details(
     transfer_q = db.query(InventoryTransaction)\
         .filter(
             InventoryTransaction.item_id == item_id,
-            InventoryTransaction.transaction_type.in_(['transfer_out', 'transfer_in'])
+            InventoryTransaction.transaction_type.in_(['transfer_out', 'transfer_in', 'transfer'])
         )
     if branch_id is not None:
         transfer_q = transfer_q.filter(InventoryTransaction.branch_id == branch_id)

@@ -601,7 +601,7 @@ async def handleCompleteCheckoutRequest(
     inventory_data_with_charges = []
     missing_items_details = []
     
-    from app.models.inventory import InventoryItem, LocationStock, InventoryTransaction, AssetMapping, StockIssueDetail, StockIssue, LaundryLog
+    from app.models.inventory import InventoryItem, LocationStock, InventoryTransaction, AssetMapping, StockIssueDetail, StockIssue, LaundryLog, Location, AssetRegistry, WasteLog
     from app.models.service_request import ServiceRequest
     from sqlalchemy import or_, func
     from sqlalchemy.orm import joinedload
@@ -670,6 +670,22 @@ async def handleCompleteCheckoutRequest(
                 total_missing_charges += item_charge
                 item_dict['missing_charge'] = item_charge
 
+            # ADDED: Transaction for consumed/lost items
+            if total_lost > 0:
+                out_txn = InventoryTransaction(
+                    item_id=item.item_id,
+                    transaction_type="out",
+                    quantity=total_lost,
+                    unit_price=inv_item.unit_price or 0.0,
+                    total_amount=(inv_item.unit_price or 0.0) * total_lost,
+                    reference_number=f"CHKINV-{checkout_request.id}",
+                    notes=f"Checkout consumption/loss - Room {target_room_number}",
+                    created_by=current_user.id,
+                    source_location_id=room_loc_id,
+                    branch_id=branch_id
+                )
+                db.add(out_txn)
+
             # 3. Handle Returns (Unused pieces of the allocated set)
             if not is_mapped_asset:
                 unused_qty = max(0, allocated_stock - total_lost)
@@ -720,6 +736,32 @@ async def handleCompleteCheckoutRequest(
                                 last_updated=datetime.utcnow(),
                                 branch_id=branch_id
                             ))
+                        
+                        # ADDED: Transaction for returned items
+                        return_txn = InventoryTransaction(
+                            item_id=item.item_id,
+                            transaction_type="transfer_in", # Consistent with history view
+                            quantity=unused_qty,
+                            unit_price=inv_item.unit_price or 0.0,
+                            total_amount=0.0,
+                            reference_number=f"CHKINV-RET-{checkout_request.id}",
+                            notes=f"Returned at checkout - Room {target_room_number}",
+                            created_by=current_user.id,
+                            source_location_id=room_loc_id,
+                            destination_location_id=target_return_loc_id,
+                            branch_id=branch_id
+                        )
+                        db.add(return_txn)
+                        
+                        # Update global current_stock if returning to warehouse-like location
+                        return_loc = db.query(Location).filter(Location.id == target_return_loc_id).first()
+                        if return_loc and return_loc.location_type:
+                            loc_type = return_loc.location_type.upper()
+                            if loc_type in ["WAREHOUSE", "CENTRAL_WAREHOUSE", "BRANCH_STORE", "REPAIR", "LAUNDRY"]:
+                                inv_item.current_stock = (inv_item.current_stock or 0) + unused_qty
+                                print(f"[CHECKOUT-DEBUG] Updated global stock for {inv_item.name}: +{unused_qty} (Returned to {return_loc.name})")
+                        
+                        print(f"[CHECKOUT-DEBUG] Room {target_room_number}: {unused_qty} units of {inv_item.name} returning to Loc ID {target_return_loc_id}")
                             
                     # Handle Waste and Damages
                     if damage_qty > 0:
@@ -1098,6 +1140,30 @@ async def handleCompleteCheckoutRequest(
                         return_stock.quantity += 1
                     else:
                         db.add(LocationStock(location_id=asset.return_location_id, item_id=target_item_id, quantity=1, last_updated=datetime.utcnow(), branch_id=branch_id))
+                    
+                    # ADDED: Transaction for returned asset
+                    asset_return_txn = InventoryTransaction(
+                        item_id=target_item_id,
+                        transaction_type="transfer_in", # Corrected for history visibility
+                        quantity=1,
+                        unit_price=t_item.unit_price if t_item else 0.0,
+                        total_amount=0.0,
+                        reference_number=f"ASSET-RET-{checkout_request.id}",
+                        notes=f"Asset returned at checkout - Room {target_room_number}",
+                        created_by=current_user.id,
+                        source_location_id=target_location_id,
+                        destination_location_id=asset.return_location_id,
+                        branch_id=branch_id
+                    )
+                    db.add(asset_return_txn)
+                    
+                    # ADDED: Update global current_stock for returned assets
+                    return_loc_asset = db.query(Location).filter(Location.id == asset.return_location_id).first()
+                    if return_loc_asset and return_loc_asset.location_type:
+                        if return_loc_asset.location_type.upper() in ["WAREHOUSE", "CENTRAL_WAREHOUSE", "BRANCH_STORE", "REPAIR", "LAUNDRY"]:
+                            if inv_item_obj:
+                                inv_item_obj.current_stock = (inv_item_obj.current_stock or 0) + 1
+                                print(f"[CHECKOUT-DEBUG] Fixed Asset {t_item.name if t_item else 'Unknown'} returned to global stock (+1)")
 
                 elif asset.request_replacement:
                     default_store = db.query(Location).filter(Location.location_type == 'WAREHOUSE', Location.is_active == True).first()
@@ -2300,22 +2366,23 @@ def _calculate_bill_for_single_room(db: Session, room_number: str, branch_id: in
     # Include ALL food orders (both billed and unbilled) - show paid ones with zero amount
     # Get food and service charges for THIS ROOM ONLY, filtered by check-in datetime
     # Include ALL food orders (both billed and unbilled) - show paid ones with zero amount
-    food_query = db.query(FoodOrderItem)\
-                           .join(FoodOrder)\
-                           .options(joinedload(FoodOrderItem.food_item), joinedload(FoodOrderItem.order))\
-                           .filter(FoodOrder.room_id == room.id)
-
     if is_package:
-         food_query = food_query.filter(
-             or_(
-                 FoodOrder.package_booking_id == booking.id,
-                 and_(
-                     FoodOrder.package_booking_id == None,
-                     FoodOrder.booking_id == None,
-                     FoodOrder.created_at >= check_in_datetime
-                 )
-             )
-         )
+         # For packages, prioritize the package_booking_id. 
+         # We include ALL food orders for this package, across ANY room in the package.
+         food_query = db.query(FoodOrderItem)\
+                                .join(FoodOrder)\
+                                .options(joinedload(FoodOrderItem.food_item), joinedload(FoodOrderItem.order))\
+                                .filter(
+                                    or_(
+                                        FoodOrder.package_booking_id == booking.id,
+                                        and_(
+                                            FoodOrder.room_id == room.id, # Fallback for room-specific unlinked orders
+                                            FoodOrder.package_booking_id == None,
+                                            FoodOrder.booking_id == None,
+                                            FoodOrder.created_at >= check_in_datetime
+                                        )
+                                    )
+                                )
     else:
          food_query = food_query.filter(
              or_(
@@ -2343,22 +2410,18 @@ def _calculate_bill_for_single_room(db: Session, room_number: str, branch_id: in
     
     # Get ALL assigned services for this room (both billed and unbilled)
     # Similar to food items, we show billed services as "Paid" with zero charge
-    # Get ALL assigned services for this room (both billed and unbilled)
-    # Similar to food items, we show billed services as "Paid" with zero charge
-    svc_query = db.query(AssignedService).options(joinedload(AssignedService.service)).filter(
-        AssignedService.room_id == room.id
-    )
-
     # Use booking's actual check_in date as a fallback start (not the adjusted check_in_datetime
     # which may have been pushed forward by a previous guest's checkout)
     booking_check_in_datetime = datetime.combine(booking.check_in, datetime.min.time())
     booking_check_out_datetime = datetime.combine(booking.check_out, datetime.max.time())
 
     if is_package:
-         svc_query = svc_query.filter(
+         # For packages, include ALL services linked to this package booking across ALL rooms
+         svc_query = db.query(AssignedService).options(joinedload(AssignedService.service)).filter(
              or_(
                  AssignedService.package_booking_id == booking.id,
                  and_(
+                     AssignedService.room_id == room.id,
                      AssignedService.package_booking_id == None,
                      AssignedService.booking_id == None,
                      AssignedService.assigned_at >= booking_check_in_datetime,
@@ -2367,7 +2430,9 @@ def _calculate_bill_for_single_room(db: Session, room_number: str, branch_id: in
              )
          )
     else:
-         svc_query = svc_query.filter(
+         svc_query = db.query(AssignedService).options(joinedload(AssignedService.service)).filter(
+             AssignedService.room_id == room.id
+         ).filter(
              or_(
                  AssignedService.booking_id == booking.id,
                  and_(
@@ -2410,6 +2475,10 @@ def _calculate_bill_for_single_room(db: Session, room_number: str, branch_id: in
             # Check if order is complimentary (amount is 0)
             is_complimentary = item.order and item.order.amount == 0
             
+            # HIDE complimentary items for package bookings to keep bill guest-friendly
+            if is_package and is_complimentary:
+                continue
+                
             # Use same pricing logic for breakdown
             current_item_price = get_food_item_price_at_time(
                 item.food_item, 
@@ -3154,26 +3223,25 @@ def _calculate_bill_for_entire_booking(db: Session, room_number: str, branch_id:
         
     last_checkout = last_checkout_query.order_by(Checkout.checkout_date.desc()).first()
     
-    # if last_checkout and last_checkout.checkout_date:
-    #     if last_checkout.checkout_date > check_in_datetime:
-    #         check_in_datetime = last_checkout.checkout_date
-    #         print(f"[DEBUG] Adjusted check-in datetime based on previous checkout: {check_in_datetime}")
-            
-    print(f"[DEBUG] Using billing start time: {check_in_datetime}")
+    # Relax start time slightly to catch orders made at/before formal check-in on the first day
+    check_in_datetime = check_in_datetime - timedelta(hours=1)
+    
+    print(f"[DEBUG] Using billing start time (relaxed): {check_in_datetime}")
 
     # Sum up additional food and service charges from all rooms
     # Scope to the CURRENT booking only to avoid cross-booking pollution.
     # Include orders explicitly linked to this booking, OR orders with no booking link
     # (legacy/walk-in orders) that were created during the current stay period.
     if is_package:
+        # Prioritize package_booking_id across ALL rooms
         all_food_order_items = (db.query(FoodOrderItem)
                                .join(FoodOrder)
                                .options(joinedload(FoodOrderItem.food_item), joinedload(FoodOrderItem.order))
                                .filter(
-                                   FoodOrder.room_id.in_(room_ids),
                                    or_(
                                        FoodOrder.package_booking_id == booking.id,
                                        and_(
+                                           FoodOrder.room_id.in_(room_ids),
                                            FoodOrder.package_booking_id == None,
                                            FoodOrder.booking_id == None,
                                            FoodOrder.created_at >= check_in_datetime
@@ -3217,12 +3285,12 @@ def _calculate_bill_for_entire_booking(db: Session, room_number: str, branch_id:
     # Filter by booking ID to include all services linked to this booking,
     # OR include services with no booking link but assigned during this booking's stay
     if is_package:
+        # Include ALL services for this package across ALL rooms
         all_assigned_services = db.query(AssignedService).options(joinedload(AssignedService.service)).filter(
-            AssignedService.room_id.in_(room_ids)
-        ).filter(
             or_(
                 AssignedService.package_booking_id == booking.id,
                 and_(
+                    AssignedService.room_id.in_(room_ids),
                     AssignedService.package_booking_id == None,
                     AssignedService.booking_id == None,
                     AssignedService.assigned_at >= booking_check_in_datetime,
@@ -3265,6 +3333,11 @@ def _calculate_bill_for_entire_booking(db: Session, room_number: str, branch_id:
         if item.food_item:
             # Check if order is complimentary (amount is 0)
             is_complimentary = item.order and item.order.amount == 0
+            
+            # HIDE complimentary items for package bookings to keep bill guest-friendly
+            if is_package and is_complimentary:
+                continue
+                
             item_amount = 0.0 if is_complimentary else (item.quantity * item.food_item.price)
             
             charges.food_items.append({

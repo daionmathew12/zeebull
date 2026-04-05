@@ -751,11 +751,18 @@ def create_booking(booking: BookingCreate, db: Session = Depends(get_db), curren
             
         # Check Availability by Counting
         total_rooms = db.query(Room).filter(Room.room_type_id == room_type.id, Room.branch_id == branch_id, Room.status != "Deleted").count()
-        # For online (guest) bookings, strictly use the "Online Inventory" (total_inventory) limit if it is explicitly set > 0.
-        # Otherwise, fallback to the total physical rooms.
-        if room_type.total_inventory and room_type.total_inventory > 0:
+        
+        # Determine capacity based on source
+        # Online bookings (User End, OTA) strictly respect Online Inventory limit if set.
+        # Dashboard/Admin bookings can use all physical rooms.
+        online_sources = ["userend", "website", "ota", "booking.com", "expedia", "agoda"]
+        current_source = (booking.source or "").lower().replace(" ", "")
+        is_online = any(s in current_source for s in online_sources)
+        
+        if is_online and room_type.total_inventory and room_type.total_inventory > 0:
             capacity = room_type.total_inventory
         else:
+            # Dashboard/Direct bookings use the total physical room capacity
             capacity = max(total_rooms, room_type.total_inventory or 0)
         
         # Count 1: Physical assignments of this room type

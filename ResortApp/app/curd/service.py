@@ -494,15 +494,15 @@ def create_assigned_service(db: Session, assigned: AssignedServiceCreate, branch
 
                 # Default fallback location (Central Warehouse)
                 default_location = db.query(Location).filter(
-                    (Location.location_type == "WAREHOUSE") | 
-                    (Location.location_type == "CENTRAL_WAREHOUSE") |
+                    (func.upper(Location.location_type) == "WAREHOUSE") | 
+                    (func.upper(Location.location_type) == "CENTRAL_WAREHOUSE") |
                     (Location.is_inventory_point == True)
                 ).first()
                 
                 if not default_location:
                     # Fallback to any warehouse
                     default_location = db.query(Location).filter(
-                        Location.location_type.in_(["WAREHOUSE", "CENTRAL_WAREHOUSE", "BRANCH_STORE"])
+                        func.upper(Location.location_type).in_(["WAREHOUSE", "CENTRAL_WAREHOUSE", "BRANCH_STORE"])
                     ).first()
                 
                 # Check for EmployeeInventoryAssignment model
@@ -813,16 +813,16 @@ def update_assigned_service_status(db: Session, assigned_id: int, update_data: A
                     global_return_location = db.query(Location).filter(Location.id == update_data.return_location_id).first()
                 
                 if not global_return_location:
-                    # Fallback to main warehouse
+                    # Fallback to main warehouse (case-insensitive)
                     global_return_location = db.query(Location).filter(
-                        (Location.location_type == "WAREHOUSE") | 
-                        (Location.location_type == "CENTRAL_WAREHOUSE") |
+                        (func.upper(Location.location_type) == "WAREHOUSE") | 
+                        (func.upper(Location.location_type) == "CENTRAL_WAREHOUSE") |
                         (Location.is_inventory_point == True)
                     ).filter(Location.branch_id == assigned.branch_id).first()
                     
                     if not global_return_location:
                         global_return_location = db.query(Location).filter(
-                            Location.location_type.in_(["WAREHOUSE", "CENTRAL_WAREHOUSE", "BRANCH_STORE"]),
+                            func.upper(Location.location_type).in_(["WAREHOUSE", "CENTRAL_WAREHOUSE", "BRANCH_STORE"]),
                             Location.branch_id == assigned.branch_id
                         ).first()
 
@@ -930,7 +930,7 @@ def update_assigned_service_status(db: Session, assigned_id: int, update_data: A
 
                         # 4. Handle Clean Returns (Back to Store)
                         if quantity_returned > 0:
-                            item.current_stock += round(quantity_returned, 4)
+                            item.current_stock = (item.current_stock or 0.0) + round(float(quantity_returned), 4)
                             dest_loc = global_return_location
                             if return_data and hasattr(return_data, 'return_location_id') and return_data.return_location_id:
                                 spec_loc = db.query(Location).filter(Location.id == return_data.return_location_id).first()

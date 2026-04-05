@@ -8,7 +8,16 @@ from datetime import datetime
 
 from app.models.Package import Package, PackageImage, PackageBooking, PackageBookingRoom
 from app.models.room import Room
+from app.models.user import User
 from app.schemas.packages import PackageBookingCreate
+from app.models.foodorder import FoodOrder, FoodOrderItem
+from app.models.food_item import FoodItem
+from app.schemas.foodorder import FoodOrderCreate, FoodOrderItemCreate
+from app.curd import foodorder as crud_food_order
+from app.utils.employee_helpers import get_fallback_employee_id
+from app.models.inventory import StockIssue, StockIssueDetail, LocationStock, Location, InventoryItem
+from sqlalchemy import or_, func, and_
+import json
 
 
 # ------------------- Packages -------------------
@@ -390,7 +399,7 @@ import shutil
 UPLOAD_DIR = "uploads/checkin_proofs"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-def check_in_package(db: Session, booking_id: int, id_card_image: UploadFile = None, guest_photo: UploadFile = None, room_ids: str = None, amenityAllocation: str = None):
+def check_in_package(db: Session, booking_id: int, current_user: User, id_card_image: UploadFile = None, guest_photo: UploadFile = None, room_ids: str = None, amenityAllocation: str = None):
     try:
         booking = db.query(PackageBooking).filter(PackageBooking.id == booking_id).first()
         if not booking:
@@ -478,6 +487,142 @@ def check_in_package(db: Session, booking_id: int, id_card_image: UploadFile = N
                 shutil.copyfileobj(guest_photo.file, buffer)
             booking.guest_photo_url = guest_photo_filename
             
+        # 1.5. PROCESS AMENITY ALLOCATION / SCHEDULED ORDERS (Ported from booking.py)
+        if amenityAllocation:
+            try:
+                from datetime import time, timedelta, date
+                alloc_data = json.loads(amenityAllocation)
+                items = alloc_data.get("items", [])
+                
+                # Find first room ID
+                room_id = None
+                if booking.rooms and len(booking.rooms) > 0:
+                    room_id = booking.rooms[0].room_id
+                
+                if items and room_id:
+                    check_in_date = date.today()
+                    
+                    for item in items:
+                        name = item.get("name")
+                        scheduled_time = item.get("scheduledTime")
+                        scheduled_date_str = item.get("scheduledDate")
+                        
+                        if name and scheduled_time:
+                            try:
+                                 scheduled_time = scheduled_time.strip()
+                                 if " " in scheduled_time:
+                                     try:
+                                         t = datetime.strptime(scheduled_time, "%I:%M %p")
+                                         sh, sm = t.hour, t.minute
+                                     except ValueError:
+                                         sh, sm = map(int, scheduled_time.split(":")[:2])
+                                 else:
+                                     sh, sm = map(int, scheduled_time.split(":")[:2])
+                                     
+                                 if scheduled_date_str:
+                                     s_year, s_month, s_day = map(int, scheduled_date_str.split("-"))
+                                     scheduled_dt = datetime(s_year, s_month, s_day, sh, sm)
+                                 else:
+                                     now = datetime.now()
+                                     scheduled_dt = datetime.combine(check_in_date, time(sh, sm))
+                                     if scheduled_dt < now:
+                                         scheduled_dt = scheduled_dt + timedelta(days=1)
+                                 
+                                 schedule_str = scheduled_dt.strftime("%Y-%m-%d %H:%M:%S")
+                                 
+                                 # Build items list
+                                 items_to_add = []
+                                 specific_items = item.get("specificFoodItems", [])
+                                 
+                                 if specific_items and len(specific_items) > 0:
+                                     for spec_item in specific_items:
+                                         f_id = spec_item.get("foodItemId")
+                                         qty = spec_item.get("quantity", 1)
+                                         if f_id:
+                                             items_to_add.append(FoodOrderItemCreate(food_item_id=int(f_id), quantity=int(qty)))
+                                 
+                                 if not items_to_add:
+                                     found_item = db.query(FoodItem).filter(FoodItem.name.ilike(name)).first()
+                                     if not found_item:
+                                         if "breakfast" in name.lower():
+                                             found_item = db.query(FoodItem).filter(FoodItem.name.ilike("%breakfast%")).first()
+                                         elif "lunch" in name.lower():
+                                             found_item = db.query(FoodItem).filter(FoodItem.name.ilike("%lunch%")).first()
+                                         elif "dinner" in name.lower():
+                                             found_item = db.query(FoodItem).filter(FoodItem.name.ilike("%dinner%")).first()
+                                     
+                                     if found_item:
+                                         qty = item.get("complimentaryPerNight", 1)
+                                         items_to_add.append(FoodOrderItemCreate(food_item_id=found_item.id, quantity=int(qty)))
+                                 
+                                 if items_to_add:
+                                     assigned_emp_id = item.get("assigned_employee_id")
+                                     if not assigned_emp_id:
+                                         assigned_emp_id = get_fallback_employee_id(db, current_user.employee.id if (current_user and current_user.employee) else None)
+                                     
+                                     order_data = FoodOrderCreate(
+                                         room_id=room_id,
+                                         amount=0.0,
+                                         assigned_employee_id=int(assigned_emp_id) if assigned_emp_id else None,
+                                         items=items_to_add,
+                                         status="scheduled",
+                                         billing_status="unbilled",
+                                         order_type="room_service",
+                                         delivery_request=f"SCHEDULED_FOR: {schedule_str} -- Package Meal: {name}"
+                                     )
+                                     crud_food_order.create_food_order(db, order_data, branch_id=booking.branch_id)
+                            except Exception as e:
+                                print(f"Error creating scheduled order for {name}: {e}")
+            except Exception as e:
+                print(f"Error processing amenity allocation in package check-in: {e}")
+
+        # 1.6. AUTO-SCHEDULE PACKAGE MEALS if not in allocation
+        if booking.package and booking.package.food_included and not amenityAllocation:
+            try:
+                from datetime import time, timedelta, date
+                meals = [m.strip() for m in booking.package.food_included.split(",") if m.strip()]
+                # Load food timing JSON
+                timings = {}
+                if booking.package.food_timing:
+                    try: timings = json.loads(booking.package.food_timing)
+                    except: pass
+                
+                room_id = booking.rooms[0].room_id if booking.rooms else None
+                if room_id:
+                    for meal in meals:
+                        # Find meal in timings or use defaults
+                        meal_time_str = timings.get(meal, "08:00" if "breakfast" in meal.lower() else "13:00" if "lunch" in meal.lower() else "20:00")
+                        sh, sm = map(int, meal_time_str.split(":")[:2])
+                        
+                        now = datetime.now()
+                        scheduled_dt = datetime.combine(date.today(), time(sh, sm))
+                        if scheduled_dt < now:
+                            scheduled_dt = scheduled_dt + timedelta(days=1)
+                        
+                        schedule_str = scheduled_dt.strftime("%Y-%m-%d %H:%M:%S")
+                        
+                        found_item = db.query(FoodItem).filter(FoodItem.name.ilike(meal)).first()
+                        if not found_item:
+                             if "breakfast" in meal.lower(): found_item = db.query(FoodItem).filter(FoodItem.name.ilike("%breakfast%")).first()
+                             elif "lunch" in meal.lower(): found_item = db.query(FoodItem).filter(FoodItem.name.ilike("%lunch%")).first()
+                             elif "dinner" in meal.lower(): found_item = db.query(FoodItem).filter(FoodItem.name.ilike("%dinner%")).first()
+
+                        if found_item:
+                            assigned_emp_id = get_fallback_employee_id(db, current_user.employee.id if (current_user and current_user.employee) else None)
+                            order_data = FoodOrderCreate(
+                                room_id=room_id,
+                                amount=0.0,
+                                assigned_employee_id=int(assigned_emp_id) if assigned_emp_id else None,
+                                items=[FoodOrderItemCreate(food_item_id=found_item.id, quantity=booking.adults)],
+                                status="scheduled",
+                                billing_status="unbilled",
+                                order_type="room_service",
+                                delivery_request=f"AUTO-SCHEDULED: {schedule_str} -- Package Meal: {meal}"
+                            )
+                            crud_food_order.create_food_order(db, order_data, branch_id=booking.branch_id)
+            except Exception as e:
+                print(f"Error auto-scheduling package meals: {e}")
+
         # 2. Update booking status
         booking.status = "checked-in"
         booking.checked_in_at = datetime.utcnow()
@@ -486,6 +631,67 @@ def check_in_package(db: Session, booking_id: int, id_card_image: UploadFile = N
         if booking.rooms:
             room_ids = [br.room_id for br in booking.rooms]
             db.query(Room).filter(Room.id.in_(room_ids)).update({"status": "Checked-in"}, synchronize_session=False)
+
+        # 3.5. Process Stock Issues (if in allocation)
+        if amenityAllocation:
+            try:
+                # Issue stock to the room(s)
+                for br in booking.rooms:
+                    room = br.room
+                    if not room or not room.inventory_location_id: continue
+                    
+                    warehouse = db.query(Location).filter(Location.location_type == "WAREHOUSE").first()
+                    source_id = warehouse.id if warehouse else None
+                    if not source_id: continue
+
+                    stock_issue = StockIssue(
+                        source_location_id=source_id,
+                        destination_location_id=room.inventory_location_id,
+                        issue_date=datetime.utcnow(),
+                        status="approved",
+                        issued_by_id=current_user.id if current_user else None,
+                        reference_number=f"PKG-CHKIN-{booking.id}-{room.number}",
+                        notes=f"Auto Issue for Package Check-in {booking_id}",
+                        booking_id=None, # Regular booking_id column, might not fit package_booking_id
+                        guest_id=booking.user_id
+                    )
+                    db.add(stock_issue)
+                    db.flush()
+                    
+                    alloc_data = json.loads(amenityAllocation)
+                    for item in alloc_data.get("items", []):
+                        item_id = item.get("item_id")
+                        if not item_id: continue
+                        
+                        qty_per_night = float(item.get("complimentaryPerNight", 0))
+                        qty_per_stay = float(item.get("complimentaryPerStay", 0))
+                        
+                        from datetime import date
+                        check_in_dt = booking.check_in if isinstance(booking.check_in, date) else datetime.strptime(str(booking.check_in), '%Y-%m-%d').date()
+                        check_out_dt = booking.check_out if isinstance(booking.check_out, date) else datetime.strptime(str(booking.check_out), '%Y-%m-%d').date()
+                        nights = max(1, (check_out_dt - check_in_dt).days)
+                        total_qty = (qty_per_night * nights) + qty_per_stay
+                        
+                        if total_qty > 0:
+                            detail = StockIssueDetail(
+                                issue_id=stock_issue.id,
+                                item_id=item_id,
+                                issued_quantity=total_qty,
+                                unit=item.get("unit", "pcs"),
+                                notes=f"{item.get('frequency')} allocation"
+                            )
+                            db.add(detail)
+                            
+                            inv_item = db.query(InventoryItem).filter(InventoryItem.id == item_id).first()
+                            if inv_item: inv_item.current_stock = max(0, (inv_item.current_stock or 0) - total_qty)
+                            
+                            loc_stock = db.query(LocationStock).filter(LocationStock.location_id == room.inventory_location_id, LocationStock.item_id == item_id).first()
+                            if loc_stock:
+                                loc_stock.quantity = (loc_stock.quantity or 0) + total_qty
+                            else:
+                                db.add(LocationStock(location_id=room.inventory_location_id, item_id=item_id, quantity=total_qty))
+            except Exception as e:
+                print(f"Error processing package amenity stock issue: {e}")
 
         db.commit()
         db.refresh(booking)

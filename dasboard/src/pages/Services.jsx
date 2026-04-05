@@ -4594,7 +4594,7 @@ const Services = () => {
                                           {locations.filter(l =>
                                             asset.is_laundry
                                               ? l.location_type?.includes('LAUNDRY')
-                                              : (l.is_inventory_point || l.location_type?.includes('WAREHOUSE') || l.location_type?.includes('REPAIR'))
+                                              : (l.is_inventory_point || l.location_type?.toUpperCase().includes('WAREHOUSE') || l.location_type?.toUpperCase().includes('REPAIR'))
                                           ).map(loc => (
                                             <option key={loc.id} value={loc.id}>To {loc.name}</option>
                                           ))}
@@ -5310,8 +5310,9 @@ const Services = () => {
                                 <option value="">Select Location...</option>
                                 {locations.map(loc => {
                                   const isDefault = (
-                                    loc.location_type === 'WAREHOUSE' ||
-                                    loc.location_type === 'CENTRAL_WAREHOUSE' ||
+                                    loc.location_type?.toUpperCase() === 'WAREHOUSE' ||
+                                    loc.location_type?.toUpperCase() === 'CENTRAL_WAREHOUSE' ||
+                                    loc.location_type?.toUpperCase() === 'BRANCH_STORE' ||
                                     loc.is_inventory_point === true
                                   );
 

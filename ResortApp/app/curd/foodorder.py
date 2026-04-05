@@ -18,47 +18,42 @@ def get_booking_for_room(room_id, db: Session, branch_id: int, reference_date=No
     if not room_id:
         return None, False
     
-    # Ensure reference_date is a datetime or date object
+    # Ensure reference_date is a datetime or date object (defaults to IST Now)
     ref_dt = reference_date if reference_date else get_ist_now()
     ref_date = ref_dt.date() if isinstance(ref_dt, datetime) else ref_dt
     
-    # Check regular bookings first
-    query = (
+    # 1. Check regular bookings (Primary Selection: include date overlap AND active status)
+    active_booking = (
         db.query(Booking)
         .join(BookingRoom)
         .filter(BookingRoom.room_id == room_id, Booking.branch_id == branch_id)
-        .filter(Booking.status != "cancelled")
+        .filter(Booking.status.in_(["booked", "checked-in", "checked_in"]))
+        .filter(Booking.check_in <= ref_date)
+        .filter(Booking.check_out >= ref_date)
+        .order_by(Booking.id.desc()).first()
     )
-
-    
-    # Find booking covering the reference date (or currently active)
-    active_booking = query.filter(Booking.check_in <= ref_date)\
-                         .filter(Booking.check_out >= ref_date)\
-                         .order_by(Booking.id.desc()).first()
     
     if active_booking:
         return active_booking.id, False
     
-    # Check package bookings
-    pkg_query = (
+    # 2. Check package bookings (Primary Selection: include date overlap AND active status)
+    active_package_booking = (
         db.query(PackageBooking)
         .join(PackageBookingRoom)
         .filter(PackageBookingRoom.room_id == room_id, PackageBooking.branch_id == branch_id)
-        .filter(PackageBooking.status != "cancelled")
+        .filter(PackageBooking.status.in_(["booked", "checked-in", "checked_in"]))
+        .filter(PackageBooking.check_in <= ref_date)
+        .filter(PackageBooking.check_out >= ref_date)
+        .order_by(PackageBooking.id.desc()).first()
     )
-
-    
-    active_package_booking = pkg_query.filter(PackageBooking.check_in <= ref_date)\
-                                     .filter(PackageBooking.check_out >= ref_date)\
-                                     .order_by(PackageBooking.id.desc()).first()
     
     if active_package_booking:
         return active_package_booking.id, True
     
-    # Fallback: Just find ANY active booking (checked-in) for this room
+    # Fallback: Just find ANY active booking (checked-in) for this room if date check was too strict
     fallback = db.query(Booking).join(BookingRoom).filter(
         BookingRoom.room_id == room_id,
-        Booking.status == "checked-in",
+        Booking.status.in_(["checked-in", "checked_in"]),
         Booking.branch_id == branch_id
     ).order_by(Booking.id.desc()).first()
 
@@ -66,7 +61,7 @@ def get_booking_for_room(room_id, db: Session, branch_id: int, reference_date=No
     
     fallback_pkg = db.query(PackageBooking).join(PackageBookingRoom).filter(
         PackageBookingRoom.room_id == room_id,
-        PackageBooking.status == "checked-in",
+        PackageBooking.status.in_(["checked-in", "checked_in"]),
         PackageBooking.branch_id == branch_id
     ).order_by(PackageBooking.id.desc()).first()
 
