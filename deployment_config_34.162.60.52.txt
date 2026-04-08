@@ -1,0 +1,133 @@
+
+# Zeebull Hospitality Deployment Details
+# Target Server: 34.162.60.52
+# Date: 2026-04-08
+
+This document contains the complete configuration and deployment steps for the Zeebull Hospitality platform.
+
+## 1. System Architecture
+- **Web Server:** Nginx (Reverse Proxy & Static Hosting)
+- **Application Server:** Gunicorn with Uvicorn workers (FastAPI)
+- **Database:** PostgreSQL 14+
+- **Frontend:** React (Production Build)
+
+## 2. Directory Structure (Remote Server)
+- Root Directory: `/var/www/zeebull`
+- Backend: `/var/www/zeebull/ResortApp`
+- Admin Dashboard: `/var/www/zeebull/dasboard`
+- User End Portal: `/var/www/zeebull/userend`
+
+## 3. Server Initialization
+Run these on the remote server:
+```bash
+# Update and install dependencies
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y python3-pip python3-venv python3-dev libpq-dev postgresql postgresql-contrib nginx git curl build-essential
+
+# Install Node.js 18+
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt install -y nodejs
+```
+
+## 4. Database Configuration
+```bash
+sudo -u postgres psql
+```
+Inside SQL:
+```sql
+CREATE DATABASE zeebuldb;
+CREATE USER postgres WITH PASSWORD 'qwerty123';
+GRANT ALL PRIVILEGES ON DATABASE zeebuldb TO postgres;
+\q
+```
+
+## 5. Backend Deployment (ResortApp)
+- Port: 8011
+- Environment File (`/var/www/zeebull/ResortApp/.env`):
+```env
+DATABASE_URL=postgresql+psycopg2://postgres:qwerty123@localhost:5432/zeebuldb
+PORT=8011
+SECRET_KEY=zeebull-production-secret-9a3a9a3a
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=1440
+```
+
+- Systemd Service (`/etc/systemd/system/zeebull.service`):
+```ini
+[Unit]
+Description=Zeebull Backend API
+After=network.target
+
+[Service]
+User=basilabrahamaby
+Group=www-data
+WorkingDirectory=/var/www/zeebull/ResortApp
+Environment="PATH=/var/www/zeebull/ResortApp/venv/bin"
+ExecStart=/var/www/zeebull/ResortApp/venv/bin/gunicorn main:app --workers 3 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8011
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+## 6. Frontend Deployment
+### User End (Root Context)
+```bash
+cd /var/www/zeebull/userend
+npm install --legacy-peer-deps
+npm run build
+```
+
+### Admin Dashboard (/zeebulladmin)
+```bash
+cd /var/www/zeebull/dasboard
+npm install --legacy-peer-deps
+npm run build
+```
+
+## 7. Nginx Routing Configuration
+File: `/etc/nginx/sites-available/zeebull`
+```nginx
+server {
+    listen 80;
+    server_name 34.162.60.52;
+    client_max_body_size 50M;
+
+    # 1. User End Portal (Root)
+    location / {
+        root /var/www/zeebull/userend/build;
+        index index.html;
+        try_files $uri $uri/ /index.html;
+    }
+
+    # 2. Admin Dashboard
+    location ^~ /zeebulladmin {
+        alias /var/www/zeebull/dasboard/build;
+        try_files $uri $uri/ /zeebulladmin/index.html;
+    }
+
+    # 3. Backend API Reverse Proxy
+    location ^~ /zeebullapi/ {
+        proxy_pass http://127.0.0.1:8011/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 4. Static Files / Uploads
+    location ^~ /zeebullfiles/ {
+        alias /var/www/zeebull/ResortApp/uploads/;
+    }
+}
+```
+
+## 8. Final Steps
+```bash
+sudo ln -sf /etc/nginx/sites-available/zeebull /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t
+sudo systemctl restart nginx
+sudo systemctl enable zeebull
+sudo systemctl restart zeebull
+```

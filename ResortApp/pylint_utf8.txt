@@ -1,6 +1,0 @@
-﻿************* Module checkout
-app\api\checkout.py:3412:62: E0602: Undefined variable 'selling_price' (undefined-variable)
-app\api\checkout.py:4552:20: E1120: No value for argument 'branch_id' in function call (no-value-for-parameter)
-app\api\checkout.py:4793:36: E0602: Undefined variable 'checkout_requests' (undefined-variable)
-app\api\checkout.py:4820:36: E0602: Undefined variable 'checkout_requests' (undefined-variable)
-app\api\checkout.py:4929:29: E1120: No value for argument 'branch_id' in function call (no-value-for-parameter)

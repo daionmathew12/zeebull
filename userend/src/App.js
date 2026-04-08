@@ -528,7 +528,7 @@ const BackgroundAnimation = ({ theme }) => {
         <>
             <style>{`
                 /* 
-                   ORCHID RESORT  Ultra-Premium Design System v4
+                   Zeebull Hospitality  Ultra-Premium Design System v4
                    Theme: Midnight Obsidian  Liquid Gold  Platinum
                    Inspired by: Aman Resorts  The Brando  Six Senses
                  */
@@ -1217,7 +1217,7 @@ export default function App() {
     const [showBackToTop, setShowBackToTop] = useState(false);
     const [isChatOpen, setIsChatOpen] = useState(false);
     const [chatHistory, setChatHistory] = useState([
-        { role: "model", parts: [{ text: "Hello! I am your personal AI Concierge. How can I assist you with your stay at the Elysian Retreat today?" }] }
+        { role: "model", parts: [{ text: "Hello! I am your personal AI Concierge. How can I assist you with your stay at the Zeebull Hospitality today?" }] }
     ]);
     const [userMessage, setUserMessage] = useState("");
     const [isChatLoading, setIsChatLoading] = useState(false);

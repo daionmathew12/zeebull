@@ -15,6 +15,7 @@ export const isZeebullDeployment = () => {
   // Check if it's the dedicated server IP or specific paths
   return (
     hostname === "34.71.114.198" ||
+    hostname === "34.162.60.52" ||
     path.startsWith("/zeebulladmin") ||
     path.startsWith("/zeebull") ||
     path === "/"

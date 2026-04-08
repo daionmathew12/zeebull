@@ -191,6 +191,13 @@ class InventoryCheckItem(BaseModel):
     damage_location_id: Optional[int] = None
     request_replacement: Optional[bool] = False
     
+    # Ad-hoc billing fields from checkout audit
+    total_charge: Optional[float] = 0.0
+    unit_price: Optional[float] = 0.0
+    payable_usage_qty: Optional[float] = 0.0
+    damage_charge: Optional[float] = 0.0
+    missing_item_charge: Optional[float] = 0.0
+    
     # New fields
     is_laundry: Optional[bool] = False
     laundry_location_id: Optional[int] = None

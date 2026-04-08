@@ -121,13 +121,13 @@ const CheckoutDetailModal = React.memo(({ checkout, onClose }) => {
     const doc = new jsPDF();
 
     // 1. Header
-    doc.addImage(logo, 'JPEG', 14, 15, 30, 15);
+    doc.addImage(logo, 'PNG', 14, 15, 30, 15);
     doc.setFontSize(22);
     doc.setFont('helvetica', 'bold');
     doc.text('Resort Invoice', 105, 25, { align: 'center' });
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    doc.text('ORCHID TRAILS RESORT', 190, 20, { align: 'right' });
+    doc.text('Zeebull Hospitality', 190, 20, { align: 'right' });
     doc.text('Waynad, Kerala', 190, 25, { align: 'right' });
 
     // 2. Info

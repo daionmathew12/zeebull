@@ -2121,27 +2121,32 @@ def get_location_items(
 
     
     # 1. Get items from LocationStock (Primary Source for bulk items)
-    # 1. Get items from LocationStock (Primary Source for bulk items)
-    location_stocks = db.query(LocationStock).filter(
-        LocationStock.location_id == location_id,
-        LocationStock.branch_id == branch_id
-    ).all()
+    location_stocks_query = db.query(LocationStock).filter(
+        LocationStock.location_id == location_id
+    )
+    if branch_id is not None:
+        location_stocks_query = location_stocks_query.filter(LocationStock.branch_id == branch_id)
+    location_stocks = location_stocks_query.all()
 
     
     # 2. Get items assigned to this location via asset mappings
-    asset_mappings = db.query(AssetMapping).filter(
+    asset_mappings_query = db.query(AssetMapping).filter(
         AssetMapping.location_id == location_id,
-        AssetMapping.is_active == True,
-        AssetMapping.branch_id == branch_id
-    ).all()
+        AssetMapping.is_active == True
+    )
+    if branch_id is not None:
+        asset_mappings_query = asset_mappings_query.filter(AssetMapping.branch_id == branch_id)
+    asset_mappings = asset_mappings_query.all()
 
     
     # 3. Get items from asset registry (Only active/in_stock assets should count as current location stock)
-    asset_registry = db.query(AssetRegistry).filter(
+    asset_registry_query = db.query(AssetRegistry).filter(
         AssetRegistry.current_location_id == location_id,
-        AssetRegistry.status.in_(["active", "in_stock", "In Stock"]),
-        AssetRegistry.branch_id == branch_id
-    ).all()
+        AssetRegistry.status.in_(["active", "in_stock", "In Stock"])
+    )
+    if branch_id is not None:
+        asset_registry_query = asset_registry_query.filter(AssetRegistry.branch_id == branch_id)
+    asset_registry = asset_registry_query.all()
 
     
     # Combine all items
@@ -2164,9 +2169,10 @@ def get_location_items(
             # that might overlap on the same day due to loose date filtering.
             issue_query = db.query(StockIssueDetail).join(StockIssue).filter(
                 StockIssue.destination_location_id == location_id,
-                StockIssueDetail.item_id == item.id,
-                StockIssue.branch_id == branch_id
+                StockIssueDetail.item_id == item.id
             )
+            if branch_id is not None:
+                issue_query = issue_query.filter(StockIssue.branch_id == branch_id)
 
             
             # Use working_id (numeric ID) derived from booking_id prefix parsing if available
@@ -2263,63 +2269,75 @@ def get_location_items(
                 if qty <= 0:
                     return
 
-                complimentary_qty = 0.0
-                payable_qty = 0.0
-                rem = qty
-                last_issue_price = 0.0
+                # Group issues by price point for rentals/payable items
+                price_groups = {} # price -> {qty: float, is_payable: bool}
                 
+                rem = qty
                 for detail in issues:
                     if rem <= 0: break
                     issued = float(detail.issued_quantity)
                     attributed = min(rem, issued)
                     
-                    if detail.is_payable:
-                        payable_qty += attributed
-                        p = detail.rental_price if detail.rental_price and detail.rental_price > 0 else detail.unit_price
-                        if p and p > 0 and last_issue_price == 0:
-                            last_issue_price = float(p)
-                    else:
-                        complimentary_qty += attributed
-                    rem -= attributed
-                
-                selling_price = last_issue_price if last_issue_price > 0 else (item.selling_price if item.selling_price and item.selling_price > 0 else item.unit_price)
-                cost_price = item.unit_price or 0
-                stock_value = qty * cost_price
-                
-                key = f"item_{item.id}{key_suffix}"
-                display_name = item.name
-                if is_rent_split:
-                    if is_asset:
-                        display_name += " (Rented)"
-                    else:
-                        if payable_qty > 0 and complimentary_qty > 0:
-                            display_name += " (Comp/Payable)"
-                        elif payable_qty > 0:
-                            display_name += " (Payable)"
-                
-                items_dict[key] = {
-                    "item_id": item.id,
-                    "item_name": display_name,
-                    "item_code": item.item_code,
-                    "category_name": category.name if category else None,
-                    "unit": item.unit,
-                    "current_stock": qty,
-                    "location_stock": qty,
-                    "complimentary_qty": complimentary_qty,
-                    "payable_qty": payable_qty,
-                    "min_stock_level": item.min_stock_level,
-                    "unit_price": cost_price,
-                    "cost_price": cost_price,
-                    "selling_price": selling_price,
-                    "total_value": stock_value,
-                    "source": "Stock" + (" (Rented)" if is_rent_split else ""),
-                    "last_updated": stock.last_updated,
-                    "type": "asset" if is_asset else "consumable",
+                    # Determine price to use for grouping
+                    price = float(detail.rental_price if detail.rental_price and detail.rental_price > 0 else (detail.unit_price or item.unit_price or 0))
+                    is_pay = detail.is_payable or (is_rent_split and price > 0)
                     
-                    # Add explicit rental flags
-                    "is_rentable": is_rent_split, 
-                    "is_asset_fixed": item.is_asset_fixed 
-                }
+                    # Group key: (price, is_pay) to keep complimentary vs paid separate even at same price if needed
+                    group_key = (price, is_pay) if is_pay else (0.0, False)
+                    
+                    if group_key not in price_groups:
+                        price_groups[group_key] = {"qty": 0.0, "is_payable": is_pay}
+                    
+                    price_groups[group_key]["qty"] += attributed
+                    rem -= attributed
+
+                for (price, is_pay), group_data in price_groups.items():
+                    g_qty = group_data["qty"]
+                    
+                    selling_price = price if price > 0 else (item.selling_price if item.selling_price and item.selling_price > 0 else item.unit_price)
+                    cost_price = item.unit_price or 0
+                    stock_value = g_qty * cost_price
+                    
+                    # Unique key including price to prevent over-aggregation
+                    key = f"item_{item.id}{key_suffix}_{price}_{is_pay}"
+                    display_name = item.name
+                    
+                    if is_rent_split:
+                        if is_asset:
+                            display_name += " (Rented)"
+                        else:
+                            display_name += " (Payable)"
+                    else:
+                        # Logic for standard consumable display
+                        if is_pay:
+                             display_name += " (Payable)"
+                    
+                    if price > 0 and is_pay:
+                         # For clarity in mixed pricing, add the price to the display name if multiple rows exist
+                         if len(price_groups) > 1:
+                              display_name += f" @ {price}"
+
+                    items_dict[key] = {
+                        "item_id": item.id,
+                        "item_name": display_name,
+                        "item_code": item.item_code,
+                        "category_name": category.name if category else None,
+                        "unit": item.unit,
+                        "current_stock": g_qty,
+                        "location_stock": g_qty,
+                        "complimentary_qty": g_qty if not is_pay else 0.0,
+                        "payable_qty": g_qty if is_pay else 0.0,
+                        "min_stock_level": item.min_stock_level,
+                        "unit_price": cost_price,
+                        "cost_price": cost_price,
+                        "selling_price": selling_price,
+                        "total_value": stock_value,
+                        "source": "Stock" + (" (Rented)" if is_rent_split else ""),
+                        "last_updated": stock.last_updated,
+                        "type": "asset" if is_asset else "consumable",
+                        "is_rentable": is_rent_split,
+                        "is_asset_fixed": item.is_asset_fixed
+                    }
 
             # Determine if item is an asset
             is_asset_type = ((category and category.is_asset_fixed) or item.is_asset_fixed or item.track_laundry_cycle)
@@ -2498,9 +2516,11 @@ def get_location_items(
         joinedload(StockIssue.details).joinedload(StockIssueDetail.item),
         joinedload(StockIssue.issuer)
     ).filter(
-        StockIssue.destination_location_id == location_id,
-        StockIssue.branch_id == branch_id
+        StockIssue.destination_location_id == location_id
     )
+
+    if branch_id is not None:
+        stock_issues_in_query = stock_issues_in_query.filter(StockIssue.branch_id == branch_id)
 
     
     if filter_start:
@@ -2531,9 +2551,11 @@ def get_location_items(
         joinedload(StockIssue.issuer),
         joinedload(StockIssue.destination_location)
     ).filter(
-        StockIssue.source_location_id == location_id,
-        StockIssue.branch_id == branch_id
+        StockIssue.source_location_id == location_id
     )
+
+    if branch_id is not None:
+        stock_issues_out_query = stock_issues_out_query.filter(StockIssue.branch_id == branch_id)
 
     
     if filter_start:
@@ -2565,9 +2587,11 @@ def get_location_items(
         joinedload(WasteLog.food_item),
         joinedload(WasteLog.reporter)
     ).filter(
-        WasteLog.location_id == location_id,
-        WasteLog.branch_id == branch_id
+        WasteLog.location_id == location_id
     )
+
+    if branch_id is not None:
+        waste_logs_query = waste_logs_query.filter(WasteLog.branch_id == branch_id)
 
     
     if filter_start:
@@ -2663,13 +2687,15 @@ def get_location_items(
     
     adjustments = []
     if location_item_ids:
-        adjustments = db.query(InventoryTransaction).options(
+        adjustments_query = db.query(InventoryTransaction).options(
             joinedload(InventoryTransaction.user)
         ).filter(
             InventoryTransaction.item_id.in_(location_item_ids),
-            InventoryTransaction.created_at >= (datetime.now() - timedelta(days=30)),
-            InventoryTransaction.branch_id == branch_id
-        ).all()
+            InventoryTransaction.created_at >= (datetime.now() - timedelta(days=30))
+        )
+        if branch_id is not None:
+            adjustments_query = adjustments_query.filter(InventoryTransaction.branch_id == branch_id)
+        adjustments = adjustments_query.all()
 
 
     # Iterate and filter manually for this location context
@@ -2881,9 +2907,10 @@ def get_stock_by_location(
 
                     # Counts (Asset vs Consumable)
                     category = categories_map.get(item_id)
-                    is_asset = item.is_asset_fixed or \
-                              (category and category.is_asset_fixed) or \
-                              item.track_laundry_cycle
+                    is_asset = getattr(item, 'is_asset_fixed', False) or \
+                              (category and getattr(category, 'is_asset_fixed', False)) or \
+                              getattr(item, 'track_laundry_cycle', False) or \
+                              (category and getattr(category, 'track_laundry', False))
                     
                     if is_asset:
                         data['asset_count'] += qty

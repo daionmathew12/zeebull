@@ -1,4 +1,0 @@
-COUNT: 3
-ID: 2, NAME: 'guest'
-ID: 1, NAME: 'admin'
-ID: 3, NAME: 'test_role_1767705403_69'

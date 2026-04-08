@@ -1,5 +1,0 @@
-﻿Loaded .env from: C:\releasing\New Orchid\ResortApp\.env
-Database URL loaded: postgresql+psycopg2://postgres:qwerty123@localhost...
-================================================================================
-ALL INVENTORY ITEMS - COMPLIMENTARY LIMITS CHECK
-================================================================================

@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../services/api";
-import orchidLogo from "../assets/zeebulllogo.png";
+import zeebullLogo from "../assets/zeebulllogo.png";
 import { jwtDecode } from "jwt-decode";
 
 export default function LoginPage() {
@@ -97,18 +97,20 @@ export default function LoginPage() {
 
       {/* Login Card */}
       <div className="relative z-10 w-full max-w-md bg-white/95 backdrop-blur-lg rounded-2xl shadow-2xl p-6 sm:p-8 space-y-6 border border-[#c5e1a5]/50">
-        <div className="flex justify-center mb-2">
-          <div className="relative">
+        <div className="flex flex-col items-center justify-center mb-4 space-y-2">
+          <div className="relative group">
+            <div className="absolute -inset-1 bg-gradient-to-r from-[#8bc34a] to-[#7cb342] rounded-full blur opacity-20 group-hover:opacity-40 transition duration-1000 group-hover:duration-200"></div>
             <div className="relative flex items-center justify-center p-0">
               <img
-                src={orchidLogo}
-                alt="Zeebull Resort Logo"
-                className="h-28 md:h-36 w-auto object-contain drop-shadow-2xl"
+                src={zeebullLogo}
+                alt="Zeebull Hospitality Logo"
+                className="h-36 md:h-48 w-auto object-contain drop-shadow-2xl transition-all duration-500 transform hover:scale-105"
               />
             </div>
           </div>
+          <h1 className="text-2xl font-bold text-[#2d5016] tracking-tight mt-2">Zeebull Hospitality</h1>
         </div>
-        <p className="text-center text-[#2d5016] text-sm sm:text-base font-medium">Sign in to your account</p>
+        <p className="text-center text-gray-500 text-sm font-medium">Sign in to your account</p>
 
         <form className="space-y-4" onSubmit={handleLogin}>
           <div>

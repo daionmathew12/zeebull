@@ -301,7 +301,7 @@ export default function DashboardLayout({ children }) {
             {/* Left side: App Logo and Branch Switcher */}
             <div className="flex flex-col items-center gap-4 w-full">
               <div className="p-0 rounded-xl flex items-center justify-center w-full">
-                <img src={zeebullLogo} className="h-32 md:h-40 w-auto object-contain drop-shadow-2xl" alt="Zeebull Resort Logo" />
+                <img src={zeebullLogo} className="h-32 md:h-40 w-auto object-contain drop-shadow-2xl" alt="Zeebull Hospitality Logo" />
               </div>
 
               {/* Branch name/switcher section */}

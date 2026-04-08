@@ -2738,7 +2738,7 @@ const Inventory = () => {
 
         {/* Tabs */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100">
-          <div className="flex border-b border-gray-200 overflow-x-auto scrollbar-hide scroll-smooth">
+          <div className="flex border-b border-gray-200 overflow-x-auto custom-scrollbar scroll-smooth">
             {inventoryTabs.map((tab) => (
               <button
                 key={tab.id}
@@ -2756,7 +2756,7 @@ const Inventory = () => {
             ))}
           </div>
 
-          <div className="p-6">
+          <div className="p-6 max-h-[calc(100vh-320px)] overflow-y-auto custom-scrollbar">
             {/* Search Bar */}
             <div className="mb-4 flex gap-4">
               <div className="flex-1 relative">
@@ -9011,7 +9011,7 @@ function AssetMappingFormModal({
   // Filter items to show only fixed assets, excluding consumables
   const fixedAssets = items.filter((item) => {
     const category = categories.find((c) => c.id === item.category_id);
-    const isFixed = item.is_asset_fixed || category?.is_asset_fixed || false;
+    const isFixed = item.is_asset_fixed || category?.is_asset_fixed || item.track_laundry_cycle || category?.track_laundry || false;
 
     // Explicitly exclude items with consumable traits even if they have fixed asset flag (prevents misconfiguration or data entry errors)
     const isConsumable =
