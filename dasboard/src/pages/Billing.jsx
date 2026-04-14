@@ -913,6 +913,7 @@ const Billing = () => {
             available_stock: item.current_stock,
             used_qty: 0,
             missing_qty: 0,
+            is_returned: item.is_rentable || item.track_laundry_cycle || false,
             return_location_id: item.track_laundry_cycle ? laundryLocId : null
           }));
           
@@ -924,6 +925,7 @@ const Billing = () => {
             current_stock: 1,
             available_stock: 1,
             request_replacement: false,
+            is_returned: vAsset.track_laundry_cycle || false,
             return_location_id: vAsset.track_laundry_cycle ? laundryLocId : null
           }));
 
@@ -1024,6 +1026,7 @@ const Billing = () => {
           used_qty: item.used_qty || 0,
           missing_qty: item.missing_qty || 0,
           damage_qty: item.damage_qty || 0,
+          is_returned: !!item.is_returned,
           return_location_id: item.return_location_id,
           room_number: room.room_number
         }));
@@ -2206,6 +2209,7 @@ const Billing = () => {
                                 <th className="text-center py-2 font-medium text-red-800">Available</th>
                                 <th className="text-right py-2 font-medium text-red-800">Cost</th>
                                 <th className="text-center py-2 font-medium text-red-800">Damaged?</th>
+                                <th className="text-center py-2 font-medium text-red-800">Return?</th>
                                 <th className="text-left py-2 font-medium text-red-800">Notes</th>
                               </tr>
                             </thead>
@@ -2243,6 +2247,14 @@ const Billing = () => {
                                       />
                                     </div>
                                   </td>
+                                  <td className="py-2 text-center px-2">
+                                    <input
+                                      type="checkbox"
+                                      className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                                      checked={asset.is_returned === true}
+                                      onChange={(e) => handleUpdateAssetDamage(idx, 'is_returned', e.target.checked)}
+                                    />
+                                  </td>
                                   <td className="py-2 pl-2">
                                     <input
                                       type="text"
@@ -2273,6 +2285,7 @@ const Billing = () => {
                                 <th className="text-center py-2 font-medium text-indigo-800">Available</th>
                                 <th className="text-center py-2 font-medium text-indigo-800">Damaged</th>
                                 <th className="text-center py-2 font-medium text-indigo-800">Used/Miss</th>
+                                <th className="text-center py-2 font-medium text-indigo-800">Return?</th>
                                 <th className="text-left py-2 font-medium text-indigo-800">Return Loc.</th>
                               </tr>
                             </thead>
@@ -2315,6 +2328,21 @@ const Billing = () => {
                                       ) : (
                                         <div className="font-bold text-orange-600">Used: {item.used_qty || 0}</div>
                                       )}
+                                    </td>
+                                    <td className="py-3 text-center">
+                                      <input
+                                        type="checkbox"
+                                        className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                                        checked={item.is_returned === true}
+                                        onChange={(e) => {
+                                          const updatedDetails = { ...checkoutInventoryDetails };
+                                          const room = updatedDetails.room_details[activeRoomTab];
+                                          const newItems = [...room.items];
+                                          newItems[idx] = { ...newItems[idx], is_returned: e.target.checked };
+                                          room.items = newItems;
+                                          setCheckoutInventoryDetails(updatedDetails);
+                                        }}
+                                      />
                                     </td>
                                     <td className="py-3 pl-2 min-w-[140px]">
                                       <select

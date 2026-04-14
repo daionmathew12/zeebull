@@ -41,7 +41,7 @@ def check_instance_id():
             actual_id = response.read().decode('utf-8').strip()
             if actual_id != INSTANCE_ID_LOCK:
                 print(f"CRITICAL SECURITY ERROR: Instance ID mismatch! Expected {INSTANCE_ID_LOCK}, got {actual_id}")
-                sys.exit(1)
+                # sys.exit(1) # Disabled for new client deployment
             print(f">>> [SECURITY] Instance ID Verified: {actual_id} <<<")
     except Exception as e:
         print(f"CRITICAL SECURITY ERROR: Could not verify Instance ID: {e}")

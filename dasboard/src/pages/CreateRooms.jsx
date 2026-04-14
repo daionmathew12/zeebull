@@ -327,6 +327,7 @@ const ImageModal = ({ imageUrl, onClose }) => {
 
 // --- NEW COMPONENT: Room Type Modal ---
 const RoomTypeModal = ({ onClose, type, isEditing, onSubmit, branches, isEnterpriseView, branchId, setBranchId }) => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     name: type?.name || "",
     base_price: type?.base_price || "",
@@ -426,6 +427,8 @@ const RoomTypeModal = ({ onClose, type, isEditing, onSubmit, branches, isEnterpr
 
   const handleLocalSubmit = (e) => {
     e.preventDefault();
+    if(isSubmitting) return;
+    setIsSubmitting(true);
     const data = new FormData();
     data.append("name", formData.name);
     data.append("base_price", formData.base_price || 0);
@@ -458,7 +461,17 @@ const RoomTypeModal = ({ onClose, type, isEditing, onSubmit, branches, isEnterpr
       data.append("branch_id", branchId);
     }
     
-    onSubmit(data);
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    
+    // Simulate async by wrapping the callback (or the parent should handle it, but we lock the button immediately)
+    try {
+      onSubmit(data);
+      // Wait a tiny bit just in case it's synchronous to prevent multiple clicks before unmount
+      setTimeout(() => setIsSubmitting(false), 2000);
+    } catch (error) {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -697,8 +710,8 @@ const RoomTypeModal = ({ onClose, type, isEditing, onSubmit, branches, isEnterpr
           </div>
 
           <div className="md:col-span-2 mt-2 pt-4 border-t flex gap-3">
-            <button type="submit" className="flex-1 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white font-bold py-3 rounded-xl hover:shadow-lg transition-all active:scale-95 shadow shrink-0">
-              {isEditing ? "Save Changes" : "Create Room Type"}
+            <button type="submit" disabled={isSubmitting} className={`flex-1 ${isSubmitting ? 'bg-indigo-300 cursor-not-allowed' : 'bg-gradient-to-r from-indigo-600 to-indigo-700 hover:shadow-lg active:scale-95'} text-white font-bold py-3 rounded-xl transition-all shadow shrink-0`}>
+              {isSubmitting ? "Processing..." : (isEditing ? "Save Changes" : "Create Room Type")}
             </button>
             <button type="button" onClick={onClose} className="px-8 py-3 border border-gray-300 rounded-xl font-semibold hover:bg-gray-50 transition-colors">
               Cancel
@@ -759,6 +772,7 @@ const Rooms = ({ noLayout = false }) => {
   const [bookingCheckoutFilter, setBookingCheckoutFilter] = useState(""); // Check-out date filter
   const [showAddRoomModal, setShowAddRoomModal] = useState(false); // Control add room modal visibility
   const [selectedBranchForRoom, setSelectedBranchForRoom] = useState(""); // Branch for room when in enterprise view
+  const [isSubmitting, setIsSubmitting] = useState(false); // Prevent duplicate submissions
 
   // Branch context
   const { branches, activeBranchId } = useBranch();
@@ -1054,11 +1068,19 @@ const Rooms = ({ noLayout = false }) => {
         return { ...prev, images: updatedImages };
       });
     } else {
-      // It's an existing image, remove from form.existingImages
-      setForm(prev => ({
-        ...prev,
-        existingImages: prev.existingImages.filter(url => getImageUrl(url) !== src)
-      }));
+      // It's an existing image — count how many non-data: images came before this index
+      // to find its position in form.existingImages
+      let existingIdx = 0;
+      for (let i = 0; i < idx; i++) {
+        if (previewImages[i] && !previewImages[i].startsWith('data:')) {
+          existingIdx++;
+        }
+      }
+      setForm(prev => {
+        const updated = [...prev.existingImages];
+        updated.splice(existingIdx, 1);
+        return { ...prev, existingImages: updated };
+      });
     }
 
     setPreviewImages(prev => prev.filter((_, i) => i !== idx));
@@ -1067,6 +1089,8 @@ const Rooms = ({ noLayout = false }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if(isSubmitting) return;
+    setIsSubmitting(true);
     const formData = new FormData();
     formData.append("number", form.number);
     formData.append("type", form.type);
@@ -1156,6 +1180,8 @@ const Rooms = ({ noLayout = false }) => {
     } catch (err) {
       console.error("API error:", err);
       showBannerMessage("error", `Error ${isEditing ? "updating" : "creating"} room`);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -1656,7 +1682,7 @@ const Rooms = ({ noLayout = false }) => {
                       type="button"
                       onClick={() => {
                         setPreviewImages([]);
-                        setForm(prev => ({ ...prev, images: [] }));
+                        setForm(prev => ({ ...prev, images: [], existingImages: [] }));
                       }}
                       className="text-xs text-red-600 hover:text-red-800 font-medium"
                     >
@@ -1746,9 +1772,10 @@ const Rooms = ({ noLayout = false }) => {
               <div className="md:col-span-2 lg:col-span-3 flex items-center gap-4">
                 <button
                   type="submit"
-                  className="w-full bg-indigo-600 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-indigo-700 transition-transform transform hover:-translate-y-1"
+                  disabled={isSubmitting}
+                  className={`w-full font-semibold py-3 px-6 rounded-lg shadow-md transition-transform transform ${isSubmitting ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 text-white hover:-translate-y-1'}`}
                 >
-                  {isEditing ? "Update Room" : "Add Room"}
+                  {isSubmitting ? "Processing..." : (isEditing ? "Update Room" : "Add Room")}
                 </button>
                 {isEditing && (
                   <button

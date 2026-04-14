@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session, joinedload, noload
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.exc import ProgrammingError, SQLAlchemyError, IntegrityError
 from typing import List, Optional
 from datetime import date, datetime

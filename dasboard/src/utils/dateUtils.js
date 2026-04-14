@@ -2,8 +2,23 @@
  * Date and Time Utilities for India/Kerala (IST - UTC+5:30)
  */
 
-// IST timezone constant
-const IST_TIMEZONE = 'Asia/Kolkata';
+// IST timezone constant (defaults to Asia/Kolkata if not configured)
+export const IST_TIMEZONE = localStorage.getItem("SYSTEM_TIMEZONE") || "Asia/Kolkata";
+
+/**
+ * Ensures a date string has a timezone indicator. 
+ * If it's an ISO string missing one, appends 'Z' to treat as UTC.
+ */
+export const ensureUTC = (dateString) => {
+  if (typeof dateString !== 'string') return dateString;
+  if (!dateString.includes('T')) return dateString;
+  
+  // If it contains T but no Z and no + offset after the T
+  if (!dateString.endsWith('Z') && !dateString.includes('+', dateString.indexOf('T'))) {
+    return dateString + 'Z';
+  }
+  return dateString;
+};
 
 /**
  * Format date in IST timezone
@@ -14,7 +29,7 @@ const IST_TIMEZONE = 'Asia/Kolkata';
 export const formatDateIST = (dateString, options = {}) => {
   if (!dateString) return '-';
   
-  const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
+  const date = typeof dateString === 'string' ? new Date(ensureUTC(dateString)) : dateString;
   
   if (isNaN(date.getTime())) return '-';
   
@@ -38,7 +53,7 @@ export const formatDateIST = (dateString, options = {}) => {
 export const formatDateTimeIST = (dateString, options = {}) => {
   if (!dateString) return '-';
   
-  const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
+  const date = typeof dateString === 'string' ? new Date(ensureUTC(dateString)) : dateString;
   
   if (isNaN(date.getTime())) return '-';
   
@@ -64,7 +79,7 @@ export const formatDateTimeIST = (dateString, options = {}) => {
 export const formatTimeIST = (dateString) => {
   if (!dateString) return '-';
   
-  const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
+  const date = typeof dateString === 'string' ? new Date(ensureUTC(dateString)) : dateString;
   
   if (isNaN(date.getTime())) return '-';
   
@@ -110,7 +125,7 @@ export const getCurrentDateTimeIST = () => {
 export const toISTISO = (dateString) => {
   if (!dateString) return null;
   
-  const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
+  const date = typeof dateString === 'string' ? new Date(ensureUTC(dateString)) : dateString;
   
   if (isNaN(date.getTime())) return null;
   
@@ -188,7 +203,7 @@ export const formatDateTimeLong = (dateString) => {
 export const getRelativeTime = (dateString) => {
   if (!dateString) return '-';
   
-  const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
+  const date = typeof dateString === 'string' ? new Date(ensureUTC(dateString)) : dateString;
   
   if (isNaN(date.getTime())) return '-';
   
@@ -215,6 +230,7 @@ export default {
   formatDateIST,
   formatDateTimeIST,
   formatTimeIST,
+  ensureUTC,
   getCurrentDateIST,
   getCurrentDateTimeIST,
   toISTISO,

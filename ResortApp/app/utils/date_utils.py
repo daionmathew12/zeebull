@@ -5,8 +5,11 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, Union
 import pytz
 
-# IST timezone constant
-IST_TIMEZONE = pytz.timezone('Asia/Kolkata')
+from app.utils.timezone import get_system_timezone
+
+# IST timezone effectively becomes "System Timezone" but keeping variable names for back-compat
+def get_ist_timezone():
+    return get_system_timezone()
 
 def get_ist_now() -> datetime:
     """
@@ -15,7 +18,7 @@ def get_ist_now() -> datetime:
     Returns:
         datetime: Current datetime in IST
     """
-    return datetime.now(IST_TIMEZONE)
+    return datetime.now(get_ist_timezone())
 
 def get_ist_today() -> datetime:
     """
@@ -54,10 +57,10 @@ def to_ist(dt: Union[datetime, str, None]) -> Optional[datetime]:
     
     # If datetime is naive (no timezone), assume it's already in IST
     if dt.tzinfo is None:
-        return IST_TIMEZONE.localize(dt)
+        return get_ist_timezone().localize(dt)
     
     # Convert to IST
-    return dt.astimezone(IST_TIMEZONE)
+    return dt.astimezone(get_ist_timezone())
 
 def format_datetime_ist(dt: Union[datetime, str, None], format_str: str = '%d %b %Y, %I:%M %p') -> str:
     """
@@ -172,7 +175,7 @@ def utc_to_ist(utc_dt: datetime) -> datetime:
         # Assume UTC if naive
         utc_dt = utc_dt.replace(tzinfo=timezone.utc)
     
-    return utc_dt.astimezone(IST_TIMEZONE)
+    return utc_dt.astimezone(get_ist_timezone())
 
 def ist_to_utc(ist_dt: datetime) -> datetime:
     """
@@ -186,7 +189,7 @@ def ist_to_utc(ist_dt: datetime) -> datetime:
     """
     if ist_dt.tzinfo is None:
         # Assume IST if naive
-        ist_dt = IST_TIMEZONE.localize(ist_dt)
+        ist_dt = get_ist_timezone().localize(ist_dt)
     
     return ist_dt.astimezone(timezone.utc)
 

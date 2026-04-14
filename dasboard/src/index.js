@@ -3,6 +3,40 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./index.css";
 
+// --- GLOBAL TIMEZONE OVERRIDE ---
+// Forces all .toLocaleDateString, .toLocaleTimeString, and .toLocaleString
+// to respect the system timezone fetched from settings, rather than falling back
+// to the end user's browser (local device) timezone.
+const getSystemTimezone = () => localStorage.getItem("SYSTEM_TIMEZONE") || "Asia/Kolkata";
+
+const originalToLocaleString = Date.prototype.toLocaleString;
+Date.prototype.toLocaleString = function (locales, options) {
+  const opt = options || {};
+  if (!opt.timeZone) {
+    opt.timeZone = getSystemTimezone();
+  }
+  return originalToLocaleString.call(this, locales || "en-IN", opt);
+};
+
+const originalToLocaleDateString = Date.prototype.toLocaleDateString;
+Date.prototype.toLocaleDateString = function (locales, options) {
+  const opt = options || {};
+  if (!opt.timeZone) {
+    opt.timeZone = getSystemTimezone();
+  }
+  return originalToLocaleDateString.call(this, locales || "en-IN", opt);
+};
+
+const originalToLocaleTimeString = Date.prototype.toLocaleTimeString;
+Date.prototype.toLocaleTimeString = function (locales, options) {
+  const opt = options || {};
+  if (!opt.timeZone) {
+    opt.timeZone = getSystemTimezone();
+  }
+  return originalToLocaleTimeString.call(this, locales || "en-IN", opt);
+};
+// --------------------------------
+
 // Make date inputs clickable anywhere to open calendar
 const makeDateInputsClickable = () => {
   const handleDateInputClick = (e) => {

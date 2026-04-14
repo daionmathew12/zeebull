@@ -211,7 +211,7 @@ def get_detailed_service_usage_report(
                         if inv_ass.quantity_returned > 0:
                             inventory_items_returned.append({
                                 **item_data,
-                                "returned_at": inv_ass.returned_at.isoformat() if inv_ass.returned_at else None
+                                "returned_at": inv_ass.returned_at.isoformat() + "Z" if inv_ass.returned_at else None
                             })
             except Exception as inv_error:
                 print(f"[WARNING] Could not load inventory items for assigned service {assigned.id}: {inv_error}")

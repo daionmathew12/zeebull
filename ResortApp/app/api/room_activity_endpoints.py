@@ -35,7 +35,7 @@ def get_room_inventory_usage(
                 "item_name": item.name if item else "Unknown Item",
                 "quantity": abs(trans.quantity) if trans.transaction_type in ['consumption', 'sale'] else trans.quantity,
                 "used_by_name": employee.name if employee else "System",
-                "used_at": trans.transaction_date.isoformat() if trans.transaction_date else None,
+                "used_at": trans.transaction_date.isoformat() + "Z" if trans.transaction_date else None,
                 "guest_used": trans.transaction_type == 'sale',  # Sales are typically guest-related
                 "transaction_type": trans.transaction_type,
                 "notes": trans.notes
@@ -84,7 +84,7 @@ def get_room_activity_log(
                 "type": "service",
                 "description": f"{sr.request_type}: {sr.description or 'No description'}",
                 "performed_by": employee.name if employee else "Unassigned",
-                "timestamp": sr.completed_at.isoformat() if sr.completed_at else sr.created_at.isoformat(),
+                "timestamp": sr.completed_at.isoformat() + "Z" if sr.completed_at else sr.created_at.isoformat() + "Z",
                 "status": sr.status
             })
         
@@ -99,7 +99,7 @@ def get_room_activity_log(
                 "type": "booking",
                 "description": f"Guest check-in: {booking.guest_name}",
                 "performed_by": "Front Desk",
-                "timestamp": booking.check_in.isoformat() if booking.check_in else None,
+                "timestamp": booking.check_in.isoformat() + "Z" if booking.check_in else None,
                 "status": booking.status
             })
             
@@ -109,7 +109,7 @@ def get_room_activity_log(
                     "type": "booking",
                     "description": f"Guest check-out: {booking.guest_name}",
                     "performed_by": "Front Desk",
-                    "timestamp": booking.check_out.isoformat(),
+                    "timestamp": booking.check_out.isoformat() + "Z",
                     "status": booking.status
                 })
         

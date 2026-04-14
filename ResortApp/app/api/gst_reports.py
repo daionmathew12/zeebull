@@ -1302,7 +1302,7 @@ def get_itc_register(
                     "vendor_gstin": vendor_gstin or "",
                     "supplier_name": vendor_name,
                     "invoice_number": invoice_number or "N/A",
-                    "invoice_date": invoice_date.isoformat() if invoice_date else (p.purchase_date.isoformat() if p.purchase_date else None),
+                    "invoice_date": invoice_date.isoformat() + "Z" if invoice_date else (p.purchase_date.isoformat() + "Z" if p.purchase_date else None),
                     "invoice_value": round(invoice_value, 2),
                     "place_of_supply": place_of_supply,
                     "hsn_code": hsn_code or "",
@@ -1518,7 +1518,7 @@ async def reconcile_gstr2b(
                 purchase_invoices[invoice_number.strip()] = {
                     "purchase_id": p.id,
                     "invoice_number": invoice_number,
-                    "invoice_date": p.invoice_date.isoformat() if p.invoice_date else p.purchase_date.isoformat(),
+                    "invoice_date": p.invoice_date.isoformat() + "Z" if p.invoice_date else p.purchase_date.isoformat() + "Z",
                     "vendor_name": (vendor.legal_name or vendor.name or getattr(vendor, 'trade_name', None)) if vendor else "Unknown Vendor",
                     "vendor_gstin": vendor.gst_number if vendor else None,
                     "total_amount": float(p.total_amount or 0)
@@ -1681,7 +1681,7 @@ def get_rcm_register(
             
             rcm_data.append({
                 "rcm_invoice_no": exp.self_invoice_number or f"EXP-{exp.id}",  # Self-invoice or expense ID
-                "rcm_date": rcm_date.isoformat() if rcm_date else exp.date.isoformat(),
+                "rcm_date": rcm_date.isoformat() + "Z" if rcm_date else exp.date.isoformat() + "Z",
                 "supplier_name": vendor_name,
                 "supplier_gstin": vendor_gstin,
                 "nature_of_supply": exp.nature_of_supply or "Other",
@@ -1766,7 +1766,7 @@ def get_rcm_register(
                 
                 rcm_data.append({
                     "rcm_invoice_no": p.invoice_number or p.purchase_number or f"PUR-{p.id}",
-                    "rcm_date": rcm_date.isoformat() if rcm_date else p.purchase_date.isoformat(),
+                    "rcm_date": rcm_date.isoformat() + "Z" if rcm_date else p.purchase_date.isoformat() + "Z",
                     "supplier_name": vendor_name,
                     "supplier_gstin": vendor_gstin,
                     "nature_of_supply": "GTA" if "transport" in (detail.item.name or "").lower() else "Other",  # Default, can be enhanced
@@ -1925,7 +1925,7 @@ def get_advance_receipt_report(
                     advance_by_state[key]["count"] += 1
                     
                     advance_data.append({
-                        "receipt_date": b.check_in.isoformat() if b.check_in else None,
+                        "receipt_date": b.check_in.isoformat() + "Z" if b.check_in else None,
                         "booking_id": b.id,
                         "booking_type": "Regular",
                         "guest_name": b.guest_name,
@@ -1979,7 +1979,7 @@ def get_advance_receipt_report(
                     advance_by_state[key]["count"] += 1
                     
                     advance_data.append({
-                        "receipt_date": pb.check_in.isoformat() if pb.check_in else None,
+                        "receipt_date": pb.check_in.isoformat() + "Z" if pb.check_in else None,
                         "booking_id": pb.id,
                         "booking_type": "Package",
                         "guest_name": pb.guest_name,
@@ -2083,7 +2083,7 @@ def get_room_tariff_slab_report(
             expected_rate = get_room_tax_rate(room_total)
             
             invoice_data = {
-                "invoice_date": c.checkout_date.isoformat() if c.checkout_date else None,
+                "invoice_date": c.checkout_date.isoformat() + "Z" if c.checkout_date else None,
                 "invoice_number": c.invoice_number or f"INV-{c.id:06d}",
                 "guest_name": c.guest_name or "Unknown Guest",
                 "room_total": round(room_total, 2),

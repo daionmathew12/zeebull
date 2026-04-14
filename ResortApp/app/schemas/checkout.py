@@ -190,6 +190,7 @@ class InventoryCheckItem(BaseModel):
     return_location_id: Optional[int] = None
     damage_location_id: Optional[int] = None
     request_replacement: Optional[bool] = False
+    is_returned: bool = False
     
     # Ad-hoc billing fields from checkout audit
     total_charge: Optional[float] = 0.0

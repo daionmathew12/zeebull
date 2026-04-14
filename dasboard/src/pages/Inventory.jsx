@@ -1914,9 +1914,15 @@ const Inventory = () => {
         try {
           const billFormData = new FormData();
           billFormData.append("file", purchaseForm.bill_file);
-          await API.post(`/inventory/purchases/${res.data.id}/upload-bill`, billFormData, {
+          const billRes = await API.post(`/inventory/purchases/${res.data.id}/upload-bill`, billFormData, {
             headers: { "Content-Type": "multipart/form-data" }
           });
+          // Update the purchase in state with the uploaded bill URL
+          if (billRes.data?.bill_file_url) {
+            setPurchases(prev => prev.map(p =>
+              p.id === res.data.id ? { ...p, bill_file_url: billRes.data.bill_file_url } : p
+            ));
+          }
         } catch (billError) {
           console.warn("Bill upload failed (PO still created):", billError);
           addNotification({ title: "Warning", message: "Purchase Order created, but bill upload failed.", type: "warning" });
@@ -7168,6 +7174,11 @@ function PurchaseDetailsModal({ purchase, onClose, onUpdate }) {
   );
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const [showPaymentStatusDropdown, setShowPaymentStatusDropdown] = useState(false);
+  const [showBillViewer, setShowBillViewer] = useState(false);
+
+  // Resolve the bill file URL properly using the imageUtils helper
+  const billFileUrl = purchase?.bill_file_url ? getImageUrl(purchase.bill_file_url) : null;
+  const isPDF = billFileUrl && (billFileUrl.toLowerCase().endsWith('.pdf') || purchase?.bill_file_url?.toLowerCase().endsWith('.pdf'));
 
   useEffect(() => {
     if (purchase) {
@@ -7445,6 +7456,17 @@ function PurchaseDetailsModal({ purchase, onClose, onUpdate }) {
               <Printer className="w-4 h-4" />
               Print
             </button>
+            {/* View Invoice Button - only shown if bill exists */}
+            {billFileUrl && (
+              <button
+                onClick={() => isPDF ? window.open(billFileUrl, '_blank') : setShowBillViewer(true)}
+                className="px-3 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 flex items-center gap-2"
+                title="View Invoice / Bill"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                {isPDF ? 'View PDF' : 'View Invoice'}
+              </button>
+            )}
             {/* PDF Export Button */}
             <button
               onClick={handleExportPDF}
@@ -7588,14 +7610,41 @@ function PurchaseDetailsModal({ purchase, onClose, onUpdate }) {
             {purchase.bill_file_url && (
               <div>
                 <label className="text-xs font-medium text-gray-500">
-                  Purchase Bill
+                  Purchase Bill / Invoice
                 </label>
-                <p className="text-sm text-gray-900 mt-1">
-                  <a href={`http://localhost:8011/${purchase.bill_file_url}`} target="_blank" rel="noreferrer" className="text-indigo-600 hover:text-indigo-800 flex items-center gap-1 font-medium">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
-                    View Bill
-                  </a>
-                </p>
+                <div className="mt-1 flex items-center gap-2">
+                  {!isPDF && (
+                    <div
+                      className="w-16 h-16 rounded-lg overflow-hidden border border-gray-200 cursor-pointer hover:ring-2 hover:ring-emerald-400 transition-all flex-shrink-0 shadow-sm"
+                      onClick={() => setShowBillViewer(true)}
+                      title="Click to view full image"
+                    >
+                      <img
+                        src={billFileUrl}
+                        alt="Invoice"
+                        className="w-full h-full object-cover"
+                        onError={(e) => { e.target.style.display='none'; }}
+                      />
+                    </div>
+                  )}
+                  <div className="flex flex-col gap-1">
+                    <button
+                      onClick={() => isPDF ? window.open(billFileUrl, '_blank') : setShowBillViewer(true)}
+                      className="text-sm font-semibold text-emerald-600 hover:text-emerald-800 flex items-center gap-1.5 transition-colors"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                      {isPDF ? 'Open PDF' : 'View Full Image'}
+                    </button>
+                    <a
+                      href={billFileUrl}
+                      download
+                      className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1"
+                    >
+                      <Download className="w-3 h-3" />
+                      Download
+                    </a>
+                  </div>
+                </div>
               </div>
             )}
             {purchase.invoice_date && (
@@ -7811,6 +7860,52 @@ function PurchaseDetailsModal({ purchase, onClose, onUpdate }) {
           </div>
         </div>
       </div>
+
+      {/* ── Invoice Image Lightbox ── */}
+      {showBillViewer && billFileUrl && !isPDF && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-[20000] p-4 cursor-zoom-out"
+          onClick={() => setShowBillViewer(false)}
+        >
+          <div className="relative max-w-5xl max-h-full" onClick={(e) => e.stopPropagation()}>
+            {/* Close button */}
+            <button
+              onClick={() => setShowBillViewer(false)}
+              className="absolute -top-10 right-0 text-white hover:text-gray-300 text-3xl font-bold z-10 w-10 h-10 flex items-center justify-center"
+              title="Close"
+            >
+              ×
+            </button>
+
+            {/* Header */}
+            <div className="absolute -top-10 left-0 text-white text-sm font-medium opacity-80 flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              Invoice / Purchase Bill — {purchase.purchase_number}
+            </div>
+
+            {/* Image */}
+            <img
+              src={billFileUrl}
+              alt={`Invoice for ${purchase.purchase_number}`}
+              className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl"
+              style={{ minWidth: '300px' }}
+            />
+
+            {/* Download button */}
+            <div className="absolute -bottom-10 left-0 right-0 flex justify-center">
+              <a
+                href={billFileUrl}
+                download
+                className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700 flex items-center gap-2 shadow-lg"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Download className="w-4 h-4" />
+                Download Invoice
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
     </div>,
     document.body
   );

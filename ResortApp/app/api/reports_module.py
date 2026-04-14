@@ -112,7 +112,7 @@ def get_daily_arrival_report(
                     "booking_type": "Package"
                 })
         
-        return {"date": report_date.isoformat(), "arrivals": result, "total": len(result)}
+        return {"date": report_date.isoformat() + "Z", "arrivals": result, "total": len(result)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching daily arrival report: {str(e)}")
 
@@ -145,7 +145,7 @@ def get_daily_departure_report(
         result.append({
             "room_number": checkout.room_number,
             "guest_name": checkout.guest_name,
-            "checkout_time": checkout.checkout_date.isoformat() if checkout.checkout_date else None,
+            "checkout_time": checkout.checkout_date.isoformat() + "Z" if checkout.checkout_date else None,
             "room_total": checkout.room_total,
             "food_total": checkout.food_total,
             "service_total": checkout.service_total,
@@ -157,7 +157,7 @@ def get_daily_departure_report(
             "billing_instructions": "Standard checkout"  # Can be enhanced
         })
     
-    return {"date": report_date.isoformat(), "departures": result, "total": len(result)}
+    return {"date": report_date.isoformat() + "Z", "departures": result, "total": len(result)}
 
 
 @router.get("/front-office/occupancy")
@@ -196,7 +196,7 @@ def get_occupancy_report(
     occupancy_percentage = (occupied_rooms / total_rooms * 100) if total_rooms > 0 else 0
     
     return {
-        "date": report_date.isoformat(),
+        "date": report_date.isoformat() + "Z",
         "total_rooms": total_rooms,
         "occupied_rooms": occupied_rooms,
         "vacant_rooms": vacant_rooms,
@@ -235,8 +235,8 @@ def get_police_c_form_report(
             "guest_name": booking.guest_name,
             "guest_mobile": booking.guest_mobile,
             "guest_email": booking.guest_email,
-            "check_in": booking.check_in.isoformat(),
-            "check_out": booking.check_out.isoformat(),
+            "check_in": booking.check_in.isoformat() + "Z",
+            "check_out": booking.check_out.isoformat() + "Z",
             "passport_number": "N/A",  # Add passport field to Booking model
             "visa_number": "N/A",  # Add visa field to Booking model
             "nationality": "N/A",  # Add nationality field to Booking model
@@ -287,7 +287,7 @@ def get_night_audit_report(
     ).count()
     
     return {
-        "audit_date": audit_date.isoformat(),
+        "audit_date": audit_date.isoformat() + "Z",
         "room_revenue": float(room_revenue),
         "food_beverage_revenue": float(food_revenue),
         "service_revenue": float(service_revenue),
@@ -329,8 +329,8 @@ def get_no_show_cancellation_report(
         total_revenue_loss += revenue_loss
         result.append({
             "guest_name": booking.guest_name,
-            "check_in": booking.check_in.isoformat(),
-            "check_out": booking.check_out.isoformat(),
+            "check_in": booking.check_in.isoformat() + "Z",
+            "check_out": booking.check_out.isoformat() + "Z",
             "status": booking.status,
             "total_amount": booking.total_amount,
             "advance_deposit": booking.advance_deposit,
@@ -386,8 +386,8 @@ def get_in_house_guest_list(
                     "guest_name": booking.guest_name,
                     "guest_mobile": booking.guest_mobile,
                     "room_number": br.room.number if br.room else "N/A",
-                    "check_in": booking.check_in.isoformat(),
-                    "check_out": booking.check_out.isoformat(),
+                    "check_in": booking.check_in.isoformat() + "Z",
+                    "check_out": booking.check_out.isoformat() + "Z",
                     "adults": booking.adults,
                     "children": booking.children,
                     "booking_type": "Regular"
@@ -399,8 +399,8 @@ def get_in_house_guest_list(
                     "guest_name": pkg_booking.guest_name,
                     "guest_mobile": pkg_booking.guest_mobile,
                     "room_number": pbr.room.number if pbr.room else "N/A",
-                    "check_in": pkg_booking.check_in.isoformat(),
-                    "check_out": pkg_booking.check_out.isoformat(),
+                    "check_in": pkg_booking.check_in.isoformat() + "Z",
+                    "check_out": pkg_booking.check_out.isoformat() + "Z",
                     "adults": pkg_booking.adults,
                     "children": pkg_booking.children,
                     "booking_type": "Package"
@@ -469,7 +469,7 @@ def get_daily_sales_summary(
                     food_sales += item_total
     
     return {
-        "date": report_date.isoformat(),
+        "date": report_date.isoformat() + "Z",
         "food_sales": float(food_sales),
         "beverage_sales": float(beverage_sales),
         "alcohol_sales": float(alcohol_sales),
@@ -567,8 +567,8 @@ def get_kot_analysis(
         result.append({
             "kot_number": f"KOT-{order.id}",
             "room_number": order.room.number if order.room else "Dine-in",
-            "order_time": order_time.isoformat() if order_time else None,
-            "service_time": service_time.isoformat() if service_time else None,
+            "order_time": order_time.isoformat() + "Z" if order_time else None,
+            "service_time": service_time.isoformat() + "Z" if service_time else None,
             "time_taken_minutes": round(time_taken, 2),
             "items_count": len(order.items),
             "status": order.status
@@ -611,7 +611,7 @@ def get_void_cancellation_report(
         result.append({
             "order_id": order.id,
             "room_number": order.room.number if order.room else "Dine-in",
-            "order_time": order.created_at.isoformat() if order.created_at else None,
+            "order_time": order.created_at.isoformat() + "Z" if order.created_at else None,
             "amount": order.amount,
             "status": order.status,
             "employee_name": order.employee.name if order.employee else "N/A",
@@ -658,7 +658,7 @@ def get_discount_complimentary_report(
         result.append({
             "order_id": order.id,
             "room_number": order.room.number if order.room else "Dine-in",
-            "order_time": order.created_at.isoformat() if order.created_at else None,
+            "order_time": order.created_at.isoformat() + "Z" if order.created_at else None,
             "original_amount": getattr(order, 'original_amount', order.amount),
             "discount_amount": getattr(order, 'discount_amount', 0),
             "final_amount": order.amount,
@@ -701,7 +701,7 @@ def get_nc_report(
         result.append({
             "order_id": order.id,
             "employee_name": order.employee.name if order.employee else "Owner/Staff",
-            "order_time": order.created_at.isoformat() if order.created_at else None,
+            "order_time": order.created_at.isoformat() + "Z" if order.created_at else None,
             "items": [
                 {
                     "item_name": item.food_item.name if item.food_item else "N/A",
@@ -874,7 +874,7 @@ def get_expiry_aging_report(
                     "item_code": item.item_code,
                     "batch_number": getattr(transaction, 'batch_number', 'N/A'),
                     "quantity": float(transaction.quantity) if hasattr(transaction, 'quantity') else 0,
-                    "expiry_date": expiry_date.isoformat() if expiry_date else None,
+                    "expiry_date": expiry_date.isoformat() + "Z" if expiry_date else None,
                     "days_until_expiry": days_until_expiry,
                     "location": item.location,
                     "urgency": "Expired" if days_until_expiry < 0 else ("Critical" if days_until_expiry <= 1 else "High")
@@ -920,7 +920,7 @@ def get_stock_movement_register(
             "from_location": getattr(trans, 'from_location', 'N/A'),
             "to_location": getattr(trans, 'to_location', 'N/A'),
             "reference": getattr(trans, 'reference', 'N/A'),  # Purchase ID, Requisition ID, etc.
-            "created_at": trans.created_at.isoformat() if trans.created_at else None,
+            "created_at": trans.created_at.isoformat() + "Z" if trans.created_at else None,
             "created_by": getattr(trans, 'created_by', 'N/A')
         })
     
@@ -962,7 +962,7 @@ def get_waste_spoilage_report(
                 "unit": waste.item.unit if waste.item else "N/A",
                 "waste_value": float(waste_value),
                 "reason": waste.reason_code,
-                "waste_date": waste.created_at.isoformat() if waste.created_at else None,
+                "waste_date": waste.created_at.isoformat() + "Z" if waste.created_at else None,
                 "reported_by": getattr(waste, 'reported_by', 'N/A')
             })
         
@@ -1014,7 +1014,7 @@ def get_purchase_register(
                 "purchase_number": purchase.purchase_number,
                 "invoice_number": purchase.invoice_number,
                 "vendor_name": purchase.vendor.name if purchase.vendor else "N/A",
-                "purchase_date": purchase.purchase_date.isoformat() if purchase.purchase_date else None,
+                "purchase_date": purchase.purchase_date.isoformat() + "Z" if purchase.purchase_date else None,
                 "sub_total": float(purchase.sub_total or 0),
                 "cgst": float(purchase.cgst or 0),
                 "sgst": float(purchase.sgst or 0),
@@ -1161,8 +1161,8 @@ def get_laundry_cost_report(
     
     return {
         "period": {
-            "start_date": start_date.isoformat() if start_date else None,
-            "end_date": end_date.isoformat() if end_date else None
+            "start_date": start_date.isoformat() + "Z" if start_date else None,
+            "end_date": end_date.isoformat() + "Z" if end_date else None
         },
         "linen_sent": float(sent_count),
         "linen_returned": float(returned_count),
@@ -1209,7 +1209,7 @@ def get_minibar_consumption_report(
                 if actual > limit:
                     result.append({
                         "room_number": verification.room_number,
-                        "checkout_date": verification.checkout.checkout_date.isoformat() if verification.checkout and verification.checkout.checkout_date else None,
+                        "checkout_date": verification.checkout.checkout_date.isoformat() + "Z" if verification.checkout and verification.checkout.checkout_date else None,
                         "item_id": item_id,
                         "consumed": actual - limit,
                         "chargeable": charge > 0,
@@ -1396,9 +1396,9 @@ def get_staff_attendance_report(
         result.append({
             "employee_name": log.employee.name if log.employee else "N/A",
             "employee_id": log.employee_id,
-            "date": log.date.isoformat(),
-            "check_in_time": log.check_in_time.isoformat() if log.check_in_time else None,
-            "check_out_time": log.check_out_time.isoformat() if log.check_out_time else None,
+            "date": log.date.isoformat() + "Z",
+            "check_in_time": log.check_in_time.isoformat() + "Z" if log.check_in_time else None,
+            "check_out_time": log.check_out_time.isoformat() + "Z" if log.check_out_time else None,
             "hours_worked": round(hours_worked, 2),
             "location": log.location
         })
@@ -1559,7 +1559,7 @@ def get_management_dashboard(
     food_cost_percentage = (food_cost / food_revenue * 100) if food_revenue > 0 else 0
     
     return {
-        "date": report_date.isoformat(),
+        "date": report_date.isoformat() + "Z",
         "kpis": {
             "adr": round(float(adr), 2),
             "revpar": round(float(revpar), 2),

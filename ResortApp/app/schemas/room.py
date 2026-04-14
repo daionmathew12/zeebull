@@ -26,6 +26,8 @@ class RoomOut(RoomBase):
     price: Optional[float] = 0.0
     adults_capacity: Optional[int] = 2
     children_capacity: Optional[int] = 0
+    room_type_image_url: Optional[str] = None
+    room_type_extra_images: Optional[str] = None
     
     # Amenities (from RoomType)
     air_conditioning: bool = False

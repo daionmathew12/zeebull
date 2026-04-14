@@ -449,7 +449,7 @@ def get_comprehensive_report(
                 "start_date": start_date,
                 "end_date": end_date
             },
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.utcnow().isoformat() + "Z",
             "data": {}
         }
         
@@ -466,7 +466,7 @@ def get_comprehensive_report(
                 "package_booking_id": c.package_booking_id,
                 "guest_name": c.guest_name,
                 "room_number": c.room_number,
-                "checkout_date": c.checkout_date.isoformat() if c.checkout_date else None,
+                "checkout_date": c.checkout_date.isoformat() + "Z" if c.checkout_date else None,
                 "room_total": float(c.room_total or 0),
                 "food_total": float(c.food_total or 0),
                 "service_total": float(c.service_total or 0),
@@ -493,8 +493,8 @@ def get_comprehensive_report(
                 "guest_name": b.guest_name,
                 "guest_mobile": b.guest_mobile,
                 "guest_email": b.guest_email,
-                "check_in": b.check_in.isoformat() if b.check_in else None,
-                "check_out": b.check_out.isoformat() if b.check_out else None,
+                "check_in": b.check_in.isoformat() + "Z" if b.check_in else None,
+                "check_out": b.check_out.isoformat() + "Z" if b.check_out else None,
                 "status": b.status,
                 "total_amount": float(b.total_amount or 0),
                 "advance_deposit": float(b.advance_deposit or 0),
@@ -518,8 +518,8 @@ def get_comprehensive_report(
                 "guest_name": pb.guest_name,
                 "guest_mobile": pb.guest_mobile,
                 "guest_email": pb.guest_email,
-                "check_in": pb.check_in.isoformat() if pb.check_in else None,
-                "check_out": pb.check_out.isoformat() if pb.check_out else None,
+                "check_in": pb.check_in.isoformat() + "Z" if pb.check_in else None,
+                "check_out": pb.check_out.isoformat() + "Z" if pb.check_out else None,
                 "status": pb.status,
                 "total_amount": float(pb.total_amount or 0),
                 "advance_deposit": float(pb.advance_deposit or 0),
@@ -548,7 +548,7 @@ def get_comprehensive_report(
                 "status": fo.status,
                 "billing_status": fo.billing_status,
                 "order_type": fo.order_type,
-                "created_at": fo.created_at.isoformat() if fo.created_at else None,
+                "created_at": fo.created_at.isoformat() + "Z" if fo.created_at else None,
                 "items": [{
                     "food_item_id": item.food_item_id,
                     "food_item_name": item.food_item.name if item.food_item else None,
@@ -580,8 +580,8 @@ def get_comprehensive_report(
                 "employee_name": s.employee.name if s.employee else None,
                 "status": s.status,
                 "billing_status": s.billing_status,
-                "assigned_at": s.assigned_at.isoformat() if s.assigned_at else None,
-                "completed_at": s.completed_at.isoformat() if s.completed_at else None
+                "assigned_at": s.assigned_at.isoformat() + "Z" if s.assigned_at else None,
+                "completed_at": s.completed_at.isoformat() + "Z" if s.completed_at else None
             } for s in services]
         except Exception as e:
             print(f"Error fetching services: {str(e)}")
@@ -608,7 +608,7 @@ def get_comprehensive_report(
                 "category": e.category,
                 "amount": float(e.amount or 0),
                 "description": e.description,
-                "date": e.date.isoformat() if e.date else None,
+                "date": e.date.isoformat() + "Z" if e.date else None,
                 "employee_id": e.employee_id,
                 "employee_name": e.employee.name if e.employee else None
             } for e in expenses]
@@ -647,7 +647,7 @@ def get_comprehensive_report(
                     "purchase_number": p.purchase_number,
                     "vendor_id": p.vendor_id,
                     "vendor_name": p.vendor.name if p.vendor else "Unknown",
-                    "purchase_date": p.purchase_date.isoformat() if p.purchase_date else None,
+                    "purchase_date": p.purchase_date.isoformat() + "Z" if p.purchase_date else None,
                     "total_amount": float(p.total_amount or 0),
                     "status": p.status,
                     "details": [] # Temporarily empty to rule out details error
@@ -695,7 +695,7 @@ def get_comprehensive_report(
                 "total_amount": float(t.total_amount or 0),
                 "reference_number": t.reference_number,
                 "notes": t.notes,
-                "created_at": t.created_at.isoformat() if t.created_at else None
+                "created_at": t.created_at.isoformat() + "Z" if t.created_at else None
             } for t in transactions]
         except Exception as e:
             print(f"Error fetching inventory transactions: {str(e)}")
@@ -714,7 +714,7 @@ def get_comprehensive_report(
             result["data"]["journal_entries"] = [{
                 "id": je.id,
                 "entry_number": je.entry_number,
-                "entry_date": je.entry_date.isoformat() if je.entry_date else None,
+                "entry_date": je.entry_date.isoformat() + "Z" if je.entry_date else None,
                 "description": je.description,
                 "reference_type": je.reference_type,
                 "reference_id": je.reference_id,
@@ -744,7 +744,7 @@ def get_comprehensive_report(
                 "name": e.name,
                 "role": e.role,
                 "salary": float(e.salary or 0),
-                "join_date": e.join_date.isoformat() if e.join_date else None,
+                "join_date": e.join_date.isoformat() + "Z" if e.join_date else None,
                 "user_id": e.user_id
             } for e in employees]
         except Exception as e:
@@ -773,7 +773,7 @@ def get_comprehensive_report(
                 "id": a.id,
                 "employee_id": a.employee_id,
                 "employee_name": a.employee.name if a.employee else None,
-                "date": a.date.isoformat() if a.date else None,
+                "date": a.date.isoformat() + "Z" if a.date else None,
                 "status": a.status
             } for a in attendances]
         except Exception as e:
@@ -802,8 +802,8 @@ def get_comprehensive_report(
                 "id": l.id,
                 "employee_id": l.employee_id,
                 "employee_name": l.employee.name if l.employee else None,
-                "from_date": l.from_date.isoformat() if l.from_date else None,
-                "to_date": l.to_date.isoformat() if l.to_date else None,
+                "from_date": l.from_date.isoformat() + "Z" if l.from_date else None,
+                "to_date": l.to_date.isoformat() + "Z" if l.to_date else None,
                 "reason": l.reason,
                 "leave_type": l.leave_type,
                 "status": l.status
@@ -834,7 +834,7 @@ def get_comprehensive_report(
                 "id": wl.id,
                 "employee_id": wl.employee_id,
                 "employee_name": wl.employee.name if wl.employee else None,
-                "date": wl.date.isoformat() if wl.date else None,
+                "date": wl.date.isoformat() + "Z" if wl.date else None,
                 "check_in_time": wl.check_in_time.strftime("%H:%M:%S") if wl.check_in_time else None,
                 "check_out_time": wl.check_out_time.strftime("%H:%M:%S") if wl.check_out_time else None,
                 "location": wl.location
@@ -1296,7 +1296,7 @@ def get_automatic_accounting_report(
                 "net_profit": net_profit,
                 "profit_margin": (net_profit / total_revenue * 100) if total_revenue > 0 else 0,
             },
-            "calculated_at": datetime.utcnow().isoformat(),
+            "calculated_at": datetime.utcnow().isoformat() + "Z",
         }
     except Exception as e:
         import traceback

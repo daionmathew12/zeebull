@@ -18,6 +18,7 @@ from app.models.settings import SystemSetting
 from app.models.user import User
 from app.utils.auth import get_current_user, get_db
 from app.utils.branch_scope import get_branch_id
+from app.utils.timezone import get_system_timezone
 
 import shutil
 import json
@@ -110,7 +111,7 @@ def _list_employees_impl(db: Session, current_user: User, branch_id: int, skip: 
     
     # Calculate status logic
     import pytz
-    ist = pytz.timezone('Asia/Kolkata')
+    ist = get_system_timezone()
     now_ist = datetime.now(ist)
     today = now_ist.date()
     yesterday = today - timedelta(days=1)
@@ -245,7 +246,7 @@ def get_employee_status_overview(db: Session = Depends(get_db), current_user: Us
     - on_unpaid_leave: approved unpaid leave
     """
     import pytz
-    ist = pytz.timezone('Asia/Kolkata')
+    ist = get_system_timezone()
     now_ist = datetime.now(ist)
     today = now_ist.date()
     yesterday = today - timedelta(days=1)

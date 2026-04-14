@@ -1,3 +1,4 @@
+from app.utils.timezone import get_system_timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -130,7 +131,7 @@ def log_working_hours(log: WorkingLogCreate, db: Session = Depends(get_db), curr
 def clock_in(clock_in_data: ClockInCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
     try:
         # Use Indian Standard Time (IST)
-        ist = pytz.timezone('Asia/Kolkata')
+        ist = get_system_timezone()
         now = datetime.now(ist)
         
         # Check if there's an open clock-in for this employee today
@@ -167,7 +168,7 @@ def clock_in(clock_in_data: ClockInCreate, db: Session = Depends(get_db), curren
 @router.post("/clock-out", response_model=WorkingLogRecord)
 def clock_out(clock_out_data: ClockOutCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
     # Use Indian Standard Time (IST)
-    ist = pytz.timezone('Asia/Kolkata')
+    ist = get_system_timezone()
     now = datetime.now(ist)
     
     # Find the last open clock-in for this employee in this branch
@@ -298,7 +299,7 @@ def approve_working_log_tasks(log_id: int, db: Session = Depends(get_db), curren
         
     log.is_tasks_approved = 1 # Approved
     log.tasks_approved_by_id = current_user.id
-    log.tasks_approved_at = datetime.now(pytz.timezone('Asia/Kolkata'))
+    log.tasks_approved_at = datetime.now(get_system_timezone())
     
     db.commit()
     db.refresh(log)
@@ -490,7 +491,7 @@ def update_holidays(holidays: List[HolidayItem], db: Session = Depends(get_db), 
 @router.get("/status/today", response_model=TodayStatus)
 def get_today_status(db: Session = Depends(get_db), current_user: Any = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
     """Returns the count of employees on leave and active today."""
-    ist = pytz.timezone('Asia/Kolkata')
+    ist = get_system_timezone()
     now_ist = datetime.now(ist)
     today = now_ist.date()
     yesterday = today - timedelta(days=1)

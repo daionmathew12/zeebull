@@ -16,6 +16,8 @@ export const isZeebullDeployment = () => {
   return (
     hostname === "34.71.114.198" ||
     hostname === "34.162.60.52" ||
+    hostname === "zeebull.com" ||
+    hostname === "www.zeebull.com" ||
     path.startsWith("/zeebulladmin") ||
     path.startsWith("/zeebull") ||
     path === "/"

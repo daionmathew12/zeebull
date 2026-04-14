@@ -18,6 +18,17 @@ export default function LoginPage() {
       if (response.data && response.data.access_token) {
         localStorage.setItem("token", response.data.access_token);
 
+        // Fetch System Timezone globally to enforce system UI localization
+        try {
+          const settingsRes = await api.get("settings/");
+          const tzSetting = settingsRes.data.find(s => s.key === "timezone");
+          if (tzSetting && tzSetting.value) {
+            localStorage.setItem("SYSTEM_TIMEZONE", tzSetting.value);
+          }
+        } catch (settingsError) {
+          console.error("Failed to sync system timezone on login:", settingsError);
+        }
+
         try {
           const decoded = jwtDecode(response.data.access_token);
           const permissions = decoded.permissions || [];

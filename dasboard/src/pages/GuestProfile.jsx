@@ -33,6 +33,9 @@ const GuestProfile = () => {
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [mobile, setMobile] = useState('');
+    const [bookingId, setBookingId] = useState('');
+    const [roomNumber, setRoomNumber] = useState('');
+    const [stayDate, setStayDate] = useState('');
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -51,8 +54,8 @@ const GuestProfile = () => {
     }, []);
 
     const triggerSearch = async (searchParams) => {
-        if (!searchParams.email && !searchParams.mobile && !searchParams.name) {
-            setError('Please provide a name, email, or mobile number to search.');
+        if (!searchParams.email && !searchParams.mobile && !searchParams.name && !searchParams.bookingId && !searchParams.roomNumber) {
+            setError('Please provide at least one search criteria.');
             return;
         }
         setLoading(true);
@@ -65,6 +68,9 @@ const GuestProfile = () => {
                     ...(searchParams.name && { guest_name: searchParams.name }),
                     ...(searchParams.email && { guest_email: searchParams.email }),
                     ...(searchParams.mobile && { guest_mobile: searchParams.mobile }),
+                    ...(searchParams.bookingId && { booking_id: searchParams.bookingId }),
+                    ...(searchParams.roomNumber && { room_number: searchParams.roomNumber }),
+                    ...(searchParams.stayDate && { stay_date: searchParams.stayDate }),
                 }
             });
             setProfile(response.data);
@@ -77,14 +83,18 @@ const GuestProfile = () => {
 
     const handleSearch = async (e) => {
         e.preventDefault();
-        triggerSearch({ name, email, mobile });
+        triggerSearch({ name, email, mobile, bookingId, roomNumber, stayDate });
     };
 
     const handleSuggestionClick = (suggestion) => {
         // Populate the form fields
-        setName(suggestion.guest_name);
-        setEmail(suggestion.guest_email);
-        setMobile(suggestion.guest_mobile);
+        setName(suggestion.guest_name || '');
+        setEmail(suggestion.guest_email || '');
+        setMobile(suggestion.guest_mobile || '');
+        setBookingId('');
+        setRoomNumber('');
+        setStayDate('');
+        
         // Immediately trigger the search
         triggerSearch({
             name: suggestion.guest_name,
@@ -132,43 +142,73 @@ const GuestProfile = () => {
                 </div>
 
                 {/* Search Form */}
-                <div className="max-w-2xl mx-auto bg-white p-6 rounded-xl shadow-md mb-8">
-                    <form onSubmit={handleSearch} className="flex flex-col sm:flex-row items-center gap-4">
-                        <input
-                            type="text"
-                            placeholder="Guest Name"
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                        />
-                        <input
-                            type="email"
-                            placeholder="Guest Email"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                            list="guest-emails"
-                        />
-                        <datalist id="guest-emails">
-                            {suggestions.map((s, i) => (
-                                <option key={i} value={s.guest_email}>{s.guest_name} ({s.guest_mobile})</option>
-                            ))}
-                        </datalist>
-                        <input
-                            type="tel"
-                            placeholder="Guest Mobile"
-                            value={mobile}
-                            onChange={(e) => setMobile(e.target.value)}
-                            className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                        />
-                        <button
-                            type="submit"
-                            className="w-full sm:w-auto bg-indigo-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-indigo-700 transition flex items-center justify-center"
-                            disabled={loading}
-                        >
-                            <Search size={18} className="mr-2" />
-                            {loading ? 'Searching...' : 'Search'}
-                        </button>
+                <div className="max-w-4xl mx-auto bg-white p-6 rounded-xl shadow-md mb-8">
+                    <form onSubmit={handleSearch} className="flex flex-col gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                            <input
+                                type="text"
+                                placeholder="Guest Name"
+                                value={name}
+                                onChange={(e) => setName(e.target.value)}
+                                className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                            <input
+                                type="email"
+                                placeholder="Guest Email"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                list="guest-emails"
+                            />
+                            <datalist id="guest-emails">
+                                {suggestions.map((s, i) => (
+                                    <option key={i} value={s.guest_email}>{s.guest_name} ({s.guest_mobile})</option>
+                                ))}
+                            </datalist>
+                            <input
+                                type="tel"
+                                placeholder="Guest Mobile"
+                                value={mobile}
+                                onChange={(e) => setMobile(e.target.value)}
+                                className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                            
+                            <input
+                                type="text"
+                                placeholder="Booking ID (e.g. BK-00001)"
+                                value={bookingId}
+                                onChange={(e) => setBookingId(e.target.value)}
+                                className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                            
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    placeholder="Room No."
+                                    value={roomNumber}
+                                    onChange={(e) => setRoomNumber(e.target.value)}
+                                    className="w-1/2 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                />
+                                <input
+                                    type="date"
+                                    placeholder="Stay Date"
+                                    value={stayDate}
+                                    title="Stay Date (Required with Room No.)"
+                                    onChange={(e) => setStayDate(e.target.value)}
+                                    className="w-1/2 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                />
+                            </div>
+                        </div>
+                        <div className="flex justify-end">
+                            <button
+                                type="submit"
+                                className="w-full sm:w-auto bg-indigo-600 text-white px-8 py-2.5 rounded-lg font-semibold hover:bg-indigo-700 transition flex items-center justify-center shadow-md hover:shadow-lg"
+                                disabled={loading}
+                            >
+                                <Search size={18} className="mr-2" />
+                                {loading ? 'Searching...' : 'Search Profiles'}
+                            </button>
+                        </div>
                     </form>
                 </div>
 

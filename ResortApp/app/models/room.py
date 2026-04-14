@@ -167,6 +167,12 @@ class Room(Base):
     def mini_bar(self): return self.room_type.mini_bar if self.room_type else False
 
     @property
+    def room_type_image_url(self): return self.room_type.image_url if self.room_type else None
+
+    @property
+    def room_type_extra_images(self): return self.room_type.extra_images if self.room_type else None
+
+    @property
     def adults_capacity(self): return self.room_type.adults_capacity if self.room_type else 2
 
     @property

@@ -34,7 +34,7 @@ def reconcile_stock(
     from sqlalchemy import func
     
     report = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.utcnow().isoformat() + "Z",
         "total_items_checked": 0,
         "discrepancies_found": 0,
         "discrepancies_fixed": 0,
@@ -195,7 +195,7 @@ def stock_audit(
                     "location_id": ls.location_id,
                     "location_name": ls.location.name if ls.location else f"Location {ls.location_id}",
                     "quantity": float(ls.quantity),
-                    "last_updated": ls.last_updated.isoformat() if ls.last_updated else None
+                    "last_updated": ls.last_updated.isoformat() + "Z" if ls.last_updated else None
                 }
                 for ls in location_stocks
             ],
@@ -206,14 +206,14 @@ def stock_audit(
                     "quantity": float(txn.quantity),
                     "reference": txn.reference_number,
                     "notes": txn.notes,
-                    "created_at": txn.created_at.isoformat() if txn.created_at else None
+                    "created_at": txn.created_at.isoformat() + "Z" if txn.created_at else None
                 }
                 for txn in transactions[:10]  # Last 10 transactions
             ]
         })
     
     return {
-        "audit_date": datetime.utcnow().isoformat(),
+        "audit_date": datetime.utcnow().isoformat() + "Z",
         "items_audited": len(audit_results),
         "results": audit_results
     }

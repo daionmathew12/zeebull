@@ -577,7 +577,7 @@ const BackgroundAnimation = ({ theme }) => {
                     }
                 }
 
-                @media (max-width: 640px) {
+                @media (max-width: 768px) {
                     :root {
                         --visible-cards: 1;
                         --carousel-gap: 1rem;
@@ -885,8 +885,14 @@ const BackgroundAnimation = ({ theme }) => {
                 @media (max-width: 1024px) {
                     .taj-section-header {
                         grid-template-columns: 1fr;
-                        gap: 1.5rem;
+                        gap: 1.2rem;
                         text-align: left;
+                        border-bottom: 1px solid rgba(200,151,30,0.1);
+                        padding-bottom: 2rem;
+                    }
+                    .taj-section-header__right {
+                        text-align: left !important;
+                        font-size: 0.85rem;
                     }
                 }
                 .taj-section-header__left {
@@ -1474,21 +1480,26 @@ export default function App() {
 
     const getSignatureCardStyle = useCallback((offset) => {
         const abs = Math.abs(offset);
-        const horizontalDistance = abs === 1
-            ? 'clamp(160px, 24vw, 260px)'
-            : 'clamp(260px, 34vw, 380px)';
+        const isMobile = windowWidth < 768;
+        
+        const horizontalDistance = isMobile
+            ? (abs === 1 ? '70px' : '120px')
+            : (abs === 1 ? 'clamp(160px, 24vw, 260px)' : 'clamp(260px, 34vw, 380px)');
+            
         const translateX = offset === 0
             ? '0px'
             : offset > 0
                 ? horizontalDistance
                 : `calc(-1 * ${horizontalDistance})`;
+                
         const translateY = abs === 0
             ? '0px'
-            : abs === 1
-                ? 'clamp(16px, 4vw, 32px)'
-                : 'clamp(28px, 6vw, 52px)';
+            : (isMobile 
+                ? (abs === 1 ? '10px' : '20px')
+                : (abs === 1 ? 'clamp(16px, 4vw, 32px)' : 'clamp(28px, 6vw, 52px)'));
+                
         const scale = abs === 0 ? 1 : abs === 1 ? 0.9 : 0.78;
-        const opacity = abs === 0 ? 1 : abs === 1 ? 0.92 : 0.82;
+        const opacity = abs === 0 ? 1 : abs === 1 ? (isMobile ? 0.5 : 0.92) : (isMobile ? 0.2 : 0.82);
         const zIndex = abs === 0 ? 50 : abs === 1 ? 40 : 30;
         const boxShadow = abs === 0
             ? '0 25px 45px rgba(12, 61, 38, 0.28)'
@@ -1994,14 +2005,42 @@ export default function App() {
             filteredRooms = filteredRooms.filter(room => roomAvailability[room.id] === true);
         }
 
-        // Group by type/category: only keep the first occurrence of each type for display
-        const uniqueTypes = new Set();
-        const onePerType = filteredRooms.filter(room => {
-            if (!uniqueTypes.has(room.type)) {
-                uniqueTypes.add(room.type);
-                return true;
+        // Group by type/category: Aggregate images from all rooms of the same type and the type itself
+        const groupedByType = {};
+        filteredRooms.forEach(room => {
+            if (!groupedByType[room.type]) {
+                const aggregatedImages = new Set();
+                // Add Room Type images first
+                if (room.room_type_image_url) aggregatedImages.add(room.room_type_image_url);
+                if (room.room_type_extra_images) {
+                    try {
+                        const extras = JSON.parse(room.room_type_extra_images);
+                        if (Array.isArray(extras)) extras.forEach(img => img && aggregatedImages.add(img));
+                    } catch (e) { }
+                }
+
+                groupedByType[room.type] = {
+                    ...room,
+                    aggregated_images_set: aggregatedImages
+                };
             }
-            return false;
+
+            // Add images from this specific room
+            if (room.image_url) groupedByType[room.type].aggregated_images_set.add(room.image_url);
+            if (room.extra_images) {
+                try {
+                    const extras = JSON.parse(room.extra_images);
+                    if (Array.isArray(extras)) extras.forEach(img => img && groupedByType[room.type].aggregated_images_set.add(img));
+                } catch (e) { }
+            }
+        });
+
+        const onePerType = Object.values(groupedByType).map(room => {
+            const finalImages = Array.from(room.aggregated_images_set);
+            return {
+                ...room,
+                aggregated_images: finalImages
+            };
         });
 
         setRooms(onePerType);
@@ -3271,7 +3310,7 @@ export default function App() {
                                                         {/* Tall image container — sharp corners */}
                                                         <div style={{
                                                             position: 'relative',
-                                                            height: '420px',
+                                                            height: windowWidth < 768 ? '320px' : '420px',
                                                             overflow: 'hidden',
                                                             background: 'var(--obsidian)',
                                                             display: 'flex',
@@ -3415,20 +3454,7 @@ export default function App() {
                                             const isBooked = bookingData.check_in && bookingData.check_out && !roomAvailability[room.id];
                                             const hasDateFilter = !!(bookingData.check_in && bookingData.check_out);
 
-                                            const roomImages = [];
-                                            if (room.image_url) roomImages.push(room.image_url);
-                                            if (room.extra_images) {
-                                                try {
-                                                    const extras = JSON.parse(room.extra_images);
-                                                    if (Array.isArray(extras)) {
-                                                        extras.forEach(img => {
-                                                            if (img && !roomImages.includes(img)) roomImages.push(img);
-                                                        });
-                                                    }
-                                                } catch (e) {
-                                                    console.error("Error parsing extra images:", e);
-                                                }
-                                            }
+                                            const roomImages = room.aggregated_images || [];
 
                                             const imgIndex = roomImageIndex[room.id] || 0;
                                             const currentImage = roomImages.length > 0 ? roomImages[imgIndex] : null;
@@ -3862,7 +3888,7 @@ export default function App() {
                                     <span className="taj-section-header__eyebrow">Premium Services</span>
                                     <h2 className="taj-section-header__title">World-Class<br />Amenities</h2>
                                 </div>
-                                <div className="taj-section-header__right" style={{ textAlign: 'right', fontSize: '0.92rem', color: '#6b6b75', lineHeight: '1.8' }}>
+                                <div className="taj-section-header__right">
                                     Every service is conceived as a personal gesture of care — from bespoke spa rituals to curated dining experiences. Our team anticipates your needs before you voice them.
                                 </div>
                             </div>
@@ -3898,11 +3924,11 @@ export default function App() {
                                             display: 'flex',
                                             gap: '2.5rem',
                                             transition: isServiceHovered ? 'none' : 'transform 1.2s cubic-bezier(0.19, 1, 0.22, 1)',
-                                            transform: `translateX(calc(-${serviceCarouselIndex} * (100% / 3 + 2.5rem / 3)))`
+                                            transform: `translateX(calc(-${serviceCarouselIndex} * (100% / ${itemsPerSlide} + 2.5rem / ${itemsPerSlide})))`
                                         }}>
                                             {[...services, ...services, ...services].map((service, idx) => {
-                                                const isCenter = idx === (serviceCarouselIndex + 1);
-                                                const isActive = (idx >= serviceCarouselIndex && idx <= serviceCarouselIndex + 2);
+                                                const isCenter = itemsPerSlide >= 3 ? idx === (serviceCarouselIndex + 1) : idx === serviceCarouselIndex;
+                                                const isActive = (idx >= serviceCarouselIndex && idx < serviceCarouselIndex + itemsPerSlide);
 
                                                 return (
                                                     <div
@@ -3911,8 +3937,8 @@ export default function App() {
                                                         style={{
                                                             position: 'relative',
                                                             cursor: 'pointer',
-                                                            flex: '0 0 calc((100% - 5rem) / 3)',
-                                                            maxWidth: 'calc((100% - 5rem) / 3)',
+                                                            flex: `0 0 calc((100% - ${(itemsPerSlide - 1) * 2.5}rem) / ${itemsPerSlide})`,
+                                                            maxWidth: `calc((100% - ${(itemsPerSlide - 1) * 2.5}rem) / ${itemsPerSlide})`,
                                                             transition: 'all 1s cubic-bezier(0.19, 1, 0.22, 1)',
                                                             transform: isCenter ? 'scale(1.15)' : 'scale(1)',
                                                             zIndex: isCenter ? 5 : 1,
@@ -3925,7 +3951,7 @@ export default function App() {
                                                         {/* Tall image — sharp edges */}
                                                         <div style={{
                                                             position: 'relative',
-                                                            height: isCenter ? '430px' : '380px',
+                                                            height: windowWidth < 768 ? '320px' : (isCenter ? '430px' : '380px'),
                                                             overflow: 'hidden',
                                                             background: 'var(--obsidian)',
                                                             boxShadow: isCenter ? '0 30px 60px rgba(0,0,0,0.35)' : '0 10px 30px rgba(0,0,0,0.1)',
@@ -4110,7 +4136,7 @@ export default function App() {
                                     <span className="taj-section-header__eyebrow">Captured Moments</span>
                                     <h2 className="taj-section-header__title">Explore the<br />Timeless Beauty</h2>
                                 </div>
-                                <div className="taj-section-header__right" style={{ textAlign: 'right', fontSize: '0.92rem', color: '#6b6b75', lineHeight: '1.8' }}>
+                                <div className="taj-section-header__right">
                                     Witness the charm of our resort's stunning views and unforgettable experiences — each frame a testament to the serene elegance that defines our forest retreat.
                                 </div>
                             </div>
@@ -4127,11 +4153,11 @@ export default function App() {
                                             display: 'flex',
                                             gap: '2.5rem',
                                             transition: isGalleryHovered ? 'none' : 'transform 1.2s cubic-bezier(0.19, 1, 0.22, 1)',
-                                            transform: `translateX(calc(-${galleryIndex} * (100% / 3 + 2.5rem / 3)))`
+                                            transform: `translateX(calc(-${galleryIndex} * (100% / ${itemsPerSlide} + 2.5rem / ${itemsPerSlide})))`
                                         }}>
                                             {[...galleryImages, ...galleryImages, ...galleryImages].map((image, idx) => {
-                                                const isCenter = idx === (galleryIndex + 1);
-                                                const isActive = (idx >= galleryIndex && idx <= galleryIndex + 2);
+                                                const isCenter = itemsPerSlide >= 3 ? idx === (galleryIndex + 1) : idx === galleryIndex;
+                                                const isActive = (idx >= galleryIndex && idx < galleryIndex + itemsPerSlide);
                                                 return (
                                                     <div
                                                         key={`${image.id}-${idx}`}
@@ -4139,8 +4165,8 @@ export default function App() {
                                                         style={{
                                                             position: 'relative',
                                                             cursor: 'pointer',
-                                                            flex: '0 0 calc((100% - 5rem) / 3)',
-                                                            maxWidth: 'calc((100% - 5rem) / 3)',
+                                                            flex: `0 0 calc((100% - ${(itemsPerSlide - 1) * 2.5}rem) / ${itemsPerSlide})`,
+                                                            maxWidth: `calc((100% - ${(itemsPerSlide - 1) * 2.5}rem) / ${itemsPerSlide})`,
                                                             transition: 'all 1s cubic-bezier(0.19, 1, 0.22, 1)',
                                                             transform: isCenter ? 'scale(1.15)' : 'scale(1)',
                                                             zIndex: isCenter ? 5 : 1,
@@ -4152,7 +4178,7 @@ export default function App() {
                                                         }}
                                                     >
                                                         {/* Image Area */}
-                                                        <div style={{ position: 'relative', height: '380px', overflow: 'hidden', background: '#f5f5f5' }}>
+                                                        <div style={{ position: 'relative', height: windowWidth < 768 ? '300px' : '380px', overflow: 'hidden', background: '#f5f5f5' }}>
                                                             <img
                                                                 src={getImageUrl(image.image_url)}
                                                                 alt={image.caption || 'Gallery Image'}
@@ -4286,7 +4312,7 @@ export default function App() {
                                             <span className="taj-section-header__eyebrow">Local Discovery</span>
                                             <h2 className="taj-section-header__title">Nearby<br />Attractions</h2>
                                         </div>
-                                        <div className="taj-section-header__right" style={{ textAlign: 'right', fontSize: '0.92rem', color: '#6b6b75', lineHeight: '1.8' }}>
+                                        <div className="taj-section-header__right">
                                             Embark on a voyage of discovery through the cultural tapestry and natural wonders that envelop our retreat. From ancient temples to hidden waterfalls, the soul of the region awaits.
                                         </div>
                                     </div>
@@ -4325,8 +4351,8 @@ export default function App() {
                                             }}>
                                                 {[...nearbyAttractions.filter(a => a.is_active), ...nearbyAttractions.filter(a => a.is_active), ...nearbyAttractions.filter(a => a.is_active)].map((attraction, index) => {
                                                     const counts = nearbyAttractions.filter(a => a.is_active).length;
-                                                    const isCenter = index === (attractionCarouselIndex + 1);
-                                                    const isActive = (index >= attractionCarouselIndex && index <= attractionCarouselIndex + 2);
+                                                    const isCenter = itemsPerSlide >= 3 ? index === (attractionCarouselIndex + 1) : index === attractionCarouselIndex;
+                                                    const isActive = (index >= attractionCarouselIndex && index < attractionCarouselIndex + itemsPerSlide);
 
                                                     return (
                                                         <div
@@ -4349,7 +4375,7 @@ export default function App() {
                                                             {/* Image container */}
                                                             <div style={{
                                                                 position: 'relative',
-                                                                height: '480px',
+                                                                height: windowWidth < 768 ? '350px' : '480px',
                                                                 overflow: 'hidden',
                                                                 background: '#ffffff',
                                                                 boxShadow: isCenter ? '0 30px 60px rgba(10,10,15,0.35)' : '0 10px 30px rgba(0,0,0,0.1)',
@@ -4471,9 +4497,9 @@ export default function App() {
                                         <div
                                             key={`${review.id}-${index}`}
                                             style={{
-                                                flex: '0 0 400px',
+                                                flex: windowWidth < 480 ? '0 0 85vw' : '0 0 400px',
                                                 background: '#ffffff',
-                                                padding: '2.5rem',
+                                                padding: windowWidth < 480 ? '1.5rem' : '2.5rem',
                                                 boxShadow: '0 12px 32px rgba(10,10,15,0.06)',
                                                 borderTop: '3px solid var(--gold-warm)'
                                             }}
@@ -4738,7 +4764,7 @@ export default function App() {
                                                                 className={`rounded-lg border-2 cursor-pointer transition-all duration-200 overflow-hidden ${bookingData.room_ids.includes(room.id) ? `${theme.buttonBg} ${theme.buttonText} border-transparent` : `${theme.bgCard} ${theme.textPrimary} ${theme.border} hover:border-[#c99c4e]`}`}
                                                             >
                                                                 <img
-                                                                    src={getImageUrl(room.image_url)}
+                                                                    src={getImageUrl(room.aggregated_images?.[0] || room.image_url)}
                                                                     alt={room.type}
                                                                     className="w-full h-20 object-cover"
                                                                     onError={(e) => { e.target.src = ITEM_PLACEHOLDER; }}

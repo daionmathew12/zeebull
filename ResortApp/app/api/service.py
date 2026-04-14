@@ -4,7 +4,7 @@ import os
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _UPLOAD_ROOT = os.path.join(_BASE_DIR, "uploads")
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import select, text
+from sqlalchemy import select, text, func
 from typing import List, Optional
 from datetime import datetime
 import shutil
@@ -689,7 +689,7 @@ def assign_service(
                 "charges": result.service.charges if result.service else 0,
                 "is_visible_to_guest": result.service.is_visible_to_guest if result.service else False,
                 "average_completion_time": getattr(result.service, 'average_completion_time', None) if result.service else None,
-                "created_at": result.service.created_at.isoformat() if result.service and result.service.created_at else None,
+                "created_at": result.service.created_at.isoformat() + "Z" if result.service and result.service.created_at else None,
                 "branch_id": getattr(result.service, "branch_id", None) if result.service else None,
                 "images": [],
                 "inventory_items": []
@@ -703,7 +703,7 @@ def assign_service(
                 "id": result.room.id if result.room else None,
                 "number": result.room.number if result.room else "Unknown"
             },
-            "assigned_at": result.assigned_at.isoformat() if result.assigned_at else None,
+            "assigned_at": result.assigned_at.isoformat() + "Z" if result.assigned_at else None,
             "status": result.status.value if hasattr(result.status, 'value') else str(result.status),
             "billing_status": result.billing_status if hasattr(result, 'billing_status') else "unbilled",
             "inventory_items_used": _load_assigned_inventory_items(db, result.id)

@@ -697,10 +697,18 @@ export default function FoodOrders() {
   // Update request status
   const handleUpdateRequestStatus = async (requestId, newStatus) => {
     try {
+      let billingStatus = null;
+      if (newStatus === "completed") {
+        const choice = window.prompt("Is this order Paid or Unpaid? (Type 'paid' or 'unpaid')", "unpaid");
+        if (choice === null) return; // Cancelled
+        billingStatus = choice.toLowerCase() === "paid" ? "paid" : "unpaid";
+      }
+
       await api.put(`/service-requests/${requestId}`, {
-        status: newStatus
+        status: newStatus,
+        billing_status: billingStatus
       });
-      toast.success("Request status updated successfully!");
+      toast.success(`Request status updated to ${newStatus}${billingStatus ? ` (${billingStatus})` : ""} successfully!`);
       fetchFoodOrderRequests();
       fetchAll();
     } catch (error) {

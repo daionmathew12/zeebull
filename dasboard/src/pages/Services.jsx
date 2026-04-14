@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { getMediaBaseUrl } from "../utils/env";
 import { getImageUrl } from "../utils/imageUtils";
-import { formatDateIST, formatDateTimeIST } from "../utils/dateUtils";
+import { formatDateIST, formatDateTimeIST, formatTimeIST, ensureUTC } from "../utils/dateUtils";
 import BannerMessage from "../components/BannerMessage";
 
 // Reusable card component for a premium look
@@ -1573,14 +1573,9 @@ const Services = () => {
         descLower.includes("room service");
 
       if (isFoodRequest && (billingStatus === null || billingStatus === undefined || billingStatus === "")) {
-        // If it's a specific food order or cleaning service, it's already paid, skip modal
-        if (request.food_order_id || request.request_type === "delivery" || descLower.includes("cleaning") || request.request_type?.toLowerCase().includes("cleaning")) {
-          billingStatus = "paid";
-          console.log("[DEBUG] Food/Cleaning request detected, auto-paid.");
-        } else {
-          setPaymentModal({ requestId, newStatus });
-          return;
-        }
+        // ALWAYS show payment modal for food requests if status is not provided
+        setPaymentModal({ requestId, newStatus });
+        return;
       }
 
       if (linkedAssigned) {
@@ -1680,9 +1675,11 @@ const Services = () => {
           // For Consumables logic
           used_qty: 0,
           missing_qty: 0,
+          is_returned: item.is_rentable || item.track_laundry_cycle || false,
 
           // For Asset logic
           is_damaged: false,
+          is_returned: item.track_laundry_cycle || false,
           damage_notes: ""
         }));
 
@@ -1761,6 +1758,7 @@ const Services = () => {
         used_qty: Number(item.used_qty || 0),
         missing_qty: Number(item.missing_qty || 0),
         damage_qty: Number(item.damage_qty || 0),
+        is_returned: !!item.is_returned,
         is_rentable: !!item.is_rentable,
         is_fixed_asset: !!item.is_fixed_asset,
         return_location_id: item.return_location_id,
@@ -4713,6 +4711,7 @@ const Services = () => {
                                   <th className="py-3 px-4 text-center w-1/6">Stock / Free</th>
                                   <th className="py-3 px-4 text-center w-1/6">Remaining</th>
                                   <th className="py-3 px-4 text-center w-1/6">Consumed</th>
+                                  <th className="py-3 px-4 text-center w-1/12">Return?</th>
                                   <th className="py-3 px-4 text-left w-1/6">Return To</th>
                                   <th className="py-3 px-4 text-right w-1/12">Charge</th>
                                 </tr>
@@ -4791,6 +4790,16 @@ const Services = () => {
                                           </div>
                                         ) : (
                                           <span className="text-gray-400">-</span>
+                                        )}
+                                      </td>
+                                      <td className="py-3 px-4 text-center">
+                                        {availableQty > 0 && (
+                                          <input
+                                            type="checkbox"
+                                            checked={item.is_returned || false}
+                                            onChange={(e) => handleUpdateInventoryVerification(originalIdx, 'is_returned', e.target.checked)}
+                                            className="rounded text-blue-600 focus:ring-blue-500"
+                                          />
                                         )}
                                       </td>
                                       <td className="py-3 px-4">
@@ -4933,15 +4942,27 @@ const Services = () => {
                                           {/* For Good items -> Laundry or Stock */}
                                           {good > 0 && (
                                             <div className="bg-green-50/50 p-2 rounded border border-green-100">
-                                              <div className="flex items-center gap-2 mb-1">
-                                                <input
-                                                  type="checkbox"
-                                                  checked={item.is_laundry || false}
-                                                  onChange={(e) => handleUpdateInventoryVerification(originalIdx, 'is_laundry', e.target.checked)}
-                                                  className="rounded text-green-600 focus:ring-green-500"
-                                                  id={`laundry-${idx}`}
-                                                />
-                                                <label htmlFor={`laundry-${idx}`} className="text-[10px] text-green-800 font-bold uppercase cursor-pointer">Mark Laundry</label>
+                                              <div className="flex flex-col gap-2 mb-1">
+                                                <div className="flex items-center gap-2">
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={item.is_returned || false}
+                                                    onChange={(e) => handleUpdateInventoryVerification(originalIdx, 'is_returned', e.target.checked)}
+                                                    className="rounded text-blue-600 focus:ring-blue-500"
+                                                    id={`return-${idx}`}
+                                                  />
+                                                  <label htmlFor={`return-${idx}`} className="text-[10px] text-blue-800 font-bold uppercase cursor-pointer">Return Stock</label>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={item.is_laundry || false}
+                                                    onChange={(e) => handleUpdateInventoryVerification(originalIdx, 'is_laundry', e.target.checked)}
+                                                    className="rounded text-green-600 focus:ring-green-500"
+                                                    id={`laundry-${idx}`}
+                                                  />
+                                                  <label htmlFor={`laundry-${idx}`} className="text-[10px] text-green-800 font-bold uppercase cursor-pointer">Mark Laundry</label>
+                                                </div>
                                               </div>
 
                                               <select
@@ -5436,28 +5457,20 @@ const Services = () => {
                         <div className="flex flex-col">
                           <span className="text-[9px] font-bold text-gray-500 uppercase">Assigned</span>
                           <span className="text-xs font-semibold text-gray-700">
-                            {selectedActivity.date ? (() => {
-                              const dStr = String(selectedActivity.date);
-                              return new Date(dStr.includes('Z') || dStr.includes('+') ? dStr : dStr + 'Z').toLocaleTimeString();
-                            })() : '-'}
+                            {selectedActivity.date ? formatTimeIST(selectedActivity.date) : '-'}
                           </span>
                         </div>
                         <div className="flex flex-col">
                           <span className="text-[9px] font-bold text-gray-500 uppercase">Started</span>
                           <span className="text-xs font-semibold text-gray-700">
-                            {selectedActivity.original?.started_at ? (() => {
-                              const dStr = String(selectedActivity.original.started_at);
-                              return new Date(dStr.includes('Z') || dStr.includes('+') ? dStr : dStr + 'Z').toLocaleTimeString();
-                            })() : (selectedActivity.status !== 'pending' ? 'Ongoing' : '-')}
+                            {selectedActivity.original?.started_at ? formatTimeIST(selectedActivity.original.started_at) : (selectedActivity.status !== 'pending' ? 'Ongoing' : '-')}
                           </span>
                         </div>
                         <div className="flex flex-col">
                           <span className="text-[9px] font-bold text-gray-500 uppercase">Completed</span>
                           <span className="text-xs font-semibold text-gray-700">
-                            {(selectedActivity.original?.completed_at || selectedActivity.original?.last_used_at) ? (() => {
-                              const dStr = String(selectedActivity.original.completed_at || selectedActivity.original.last_used_at);
-                              return new Date(dStr.includes('Z') || dStr.includes('+') ? dStr : dStr + 'Z').toLocaleTimeString();
-                            })() : '-'}
+                            {(selectedActivity.original?.completed_at || selectedActivity.original?.last_used_at) ? 
+                              formatTimeIST(selectedActivity.original.completed_at || selectedActivity.original.last_used_at) : '-'}
                           </span>
                         </div>
                       </div>
@@ -5470,8 +5483,8 @@ const Services = () => {
                               const endStr = String(selectedActivity.original.completed_at || selectedActivity.original.last_used_at);
                               const startStr = String(selectedActivity.original.started_at || selectedActivity.date);
                               
-                              const end = new Date(endStr.includes('Z') || endStr.includes('+') ? endStr : endStr + 'Z');
-                              const start = new Date(startStr.includes('Z') || startStr.includes('+') ? startStr : startStr + 'Z');
+                              const end = new Date(ensureUTC(endStr));
+                              const start = new Date(ensureUTC(startStr));
                               
                               const diff = end - start;
                               const mins = Math.max(0, Math.floor(diff / (1000 * 60)));

@@ -352,6 +352,7 @@ class PurchaseMasterOut(PurchaseMasterBase):
     vendor_name: Optional[str] = None
     vendor_gst: Optional[str] = None
     destination_location_name: Optional[str] = None
+    bill_file_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     details: List[PurchaseDetailOut] = []

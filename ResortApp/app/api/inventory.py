@@ -4046,11 +4046,11 @@ def update_transfer_status_endpoint(
         raise HTTPException(status_code=404, detail="Transfer not found")
 
     if status == "in_transit":
-        if transfer.source_branch_id != branch_id:
+        if branch_id is not None and transfer.source_branch_id != branch_id:
             raise HTTPException(status_code=403, detail="Only source branch can mark as in-transit")
     
     if status == "received":
-        if transfer.destination_branch_id != branch_id:
+        if branch_id is not None and transfer.destination_branch_id != branch_id:
             raise HTTPException(status_code=403, detail="Only destination branch can mark as received")
         if not location_id:
             raise HTTPException(status_code=400, detail="location_id is required for receipt")

@@ -45,6 +45,9 @@ export default function Settings() {
             const response = await api.get("settings/");
             const settingsMap = {};
             response.data.forEach(s => { settingsMap[s.key] = s.value; });
+            if (settingsMap.timezone) {
+                localStorage.setItem("SYSTEM_TIMEZONE", settingsMap.timezone);
+            }
             setSettings(prev => ({ ...prev, ...settingsMap }));
         } catch (error) {
             console.error("Error fetching settings:", error);
@@ -62,7 +65,9 @@ export default function Settings() {
                 value: settings.timezone,
                 description: "System Timezone"
             });
-            alert("Timezone saved successfully");
+            localStorage.setItem("SYSTEM_TIMEZONE", settings.timezone);
+            alert("Timezone saved successfully. Application will now refresh to apply changes.");
+            window.location.reload();
         } catch (error) {
             console.error("Error saving timezone:", error);
             alert("Failed to save Timezone");

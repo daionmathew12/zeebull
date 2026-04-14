@@ -5342,17 +5342,6 @@ const Bookings = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                 {allRooms.length > 0 ? (
                   allRooms.map((room) => {
-                    const getImageUrl = (imageUrl) => {
-                      if (!imageUrl)
-                        return "https://placehold.co/400x300/e2e8f0/a0aec0?text=No+Image";
-                      if (imageUrl.startsWith("http")) return imageUrl;
-                      const baseUrl =
-                        API.defaults.baseURL?.replace(/\/$/, "") || "";
-                      const path = imageUrl.startsWith("/")
-                        ? imageUrl
-                        : `/${imageUrl}`;
-                      return `${baseUrl}${path}`;
-                    };
 
                     return (
                       <div
@@ -5499,17 +5488,6 @@ const Bookings = () => {
                   allRooms
                     .filter((r) => r.status === "Available")
                     .map((room) => {
-                      const getImageUrl = (imageUrl) => {
-                        if (!imageUrl)
-                          return "https://placehold.co/400x300/e2e8f0/a0aec0?text=No+Image";
-                        if (imageUrl.startsWith("http")) return imageUrl;
-                        const baseUrl =
-                          API.defaults.baseURL?.replace(/\/$/, "") || "";
-                        const path = imageUrl.startsWith("/")
-                          ? imageUrl
-                          : `/${imageUrl}`;
-                        return `${baseUrl}${path}`;
-                      };
 
                       return (
                         <div

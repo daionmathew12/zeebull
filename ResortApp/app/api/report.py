@@ -81,13 +81,88 @@ def get_guest_profile(
     guest_email: Optional[str] = Query(None, description="Guest's email address"),
     guest_mobile: Optional[str] = Query(None, description="Guest's mobile number"),
     guest_name: Optional[str] = Query(None, description="Guest's name (case-insensitive search)"),
+    booking_id: Optional[str] = Query(None, description="Search by booking ID (e.g. BK-000012 or 12)"),
+    room_number: Optional[str] = Query(None, description="Search by room number"),
+    stay_date: Optional[date] = Query(None, description="Search by stay date"),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
     """Generates a complete profile for a guest, including all bookings, orders, and services."""
-    if not guest_email and not guest_mobile and not guest_name:
-        raise HTTPException(status_code=400, detail="Please provide an email, mobile, or name to search.")
-    return _get_guest_profile_data(db, guest_email, guest_mobile, guest_name)
+    if not any([guest_email, guest_mobile, guest_name, booking_id, room_number]):
+        raise HTTPException(status_code=400, detail="Please provide an email, mobile, name, booking ID, or room number to search.")
+
+    resolved_name = guest_name
+    resolved_email = guest_email
+    resolved_mobile = guest_mobile
+
+    if booking_id or room_number:
+        # Try to resolve a booking to get the guest details
+        target_booking = None
+        target_pkg_booking = None
+
+        if booking_id:
+            # Handle display IDs like BK-00001 or raw IDs
+            bid_str = str(booking_id).strip().upper()
+            numeric_id = bid_str.replace("BK-", "").replace("PK-", "")
+            try:
+                numeric_val = int(numeric_id)
+                if "PK-" in bid_str:
+                    target_pkg_booking = db.query(models.PackageBooking).filter(models.PackageBooking.id == numeric_val).first()
+                elif "BK-" in bid_str:
+                    target_booking = db.query(models.Booking).filter(models.Booking.id == numeric_val).first()
+                else:
+                    # check both
+                    target_booking = db.query(models.Booking).filter(models.Booking.id == numeric_val).first()
+                    target_pkg_booking = db.query(models.PackageBooking).filter(models.PackageBooking.id == numeric_val).first()
+            except ValueError:
+                pass
+
+        if room_number and not target_booking and not target_pkg_booking:
+            search_date = stay_date or date.today()
+            # Find regular booking
+            target_booking = (
+                db.query(models.Booking)
+                .join(models.booking.BookingRoom)
+                .join(models.Room)
+                .filter(models.Room.number.ilike(f"%{room_number}%"))
+                .filter(models.Booking.check_in <= search_date)
+                .filter(models.Booking.check_out >= search_date)
+                .order_by(models.Booking.id.desc())
+                .first()
+            )
+            # Find package booking
+            if not target_booking:
+                target_pkg_booking = (
+                    db.query(models.PackageBooking)
+                    .join(models.PackageBookingRoom)
+                    .join(models.Room)
+                    .filter(models.Room.number.ilike(f"%{room_number}%"))
+                    .filter(models.PackageBooking.check_in <= search_date)
+                    .filter(models.PackageBooking.check_out >= search_date)
+                    .order_by(models.PackageBooking.id.desc())
+                    .first()
+                )
+            
+            # Fallback if no stay_date provided and not currently checked in - find latest for that room
+            if not target_booking and not target_pkg_booking and not stay_date:
+                target_booking = (
+                    db.query(models.Booking)
+                    .join(models.booking.BookingRoom)
+                    .join(models.Room)
+                    .filter(models.Room.number.ilike(f"%{room_number}%"))
+                    .order_by(models.Booking.id.desc())
+                    .first()
+                )
+
+        found = target_booking or target_pkg_booking
+        if found:
+            resolved_name = found.guest_name or resolved_name
+            resolved_email = found.guest_email or resolved_email
+            resolved_mobile = found.guest_mobile or resolved_mobile
+        else:
+            raise HTTPException(status_code=404, detail="No booking or guest found matching the provided ID/Room criteria.")
+
+    return _get_guest_profile_data(db, resolved_email, resolved_mobile, resolved_name)
 
 @router.get("/food-orders")
 def get_food_orders(
@@ -158,7 +233,7 @@ def get_food_orders(
             "amount": o.amount,
             "status": o.status,
             "item_count": len(o.items),
-            "created_at": o.created_at.isoformat() if o.created_at else None,
+            "created_at": o.created_at.isoformat() + "Z" if o.created_at else None,
         }
         for o in orders
     ]
@@ -339,7 +414,7 @@ def get_service_charges(
             "amount": s.service.charges if s.service else None,
             "status": s.status,
             "service_name": s.service.name if s.service else None,
-            "created_at": s.assigned_at.isoformat() if s.assigned_at else None,
+            "created_at": s.assigned_at.isoformat() + "Z" if s.assigned_at else None,
         }
         for s in assigned_services
     ]
@@ -372,7 +447,7 @@ def get_room_charges(
             "room_number": c.room_number,
             "description": "Room booking charge",
             "amount": c.room_total,
-            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "created_at": c.created_at.isoformat() + "Z" if c.created_at else None,
         }
         for c in checkouts
     ]
@@ -407,7 +482,7 @@ def get_rent_records(
             "tenant_name": r.tenant_name,
             "room_number": r.room.number if r.room else None,
             "amount": r.amount,
-            "paid_date": r.paid_date.isoformat() if r.paid_date else None,
+            "paid_date": r.paid_date.isoformat() + "Z" if r.paid_date else None,
         }
         for r in rents
     ]
@@ -436,7 +511,7 @@ def get_all_expenses(
             "category": e.category,
             "description": e.description,
             "amount": e.amount,
-            "expense_date": e.date.isoformat() if e.date else None,
+            "expense_date": e.date.isoformat() + "Z" if e.date else None,
         }
         for e in expenses
     ]
@@ -517,7 +592,7 @@ def get_all_employees(
             "name": emp.name,
             "role": emp.role,
             "salary": emp.salary,
-            "hire_date": emp.join_date.isoformat() if emp.join_date else None,
+            "hire_date": emp.join_date.isoformat() + "Z" if emp.join_date else None,
         }
         for emp in employees
     ]

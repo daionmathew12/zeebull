@@ -2304,6 +2304,12 @@ def update_transfer_status(db: Session, transfer_id: int, status: str, location_
     old_status = transfer.status
     transfer.status = status
     
+    # Fetch related objects for accurate transaction logging
+    dest_branch_name = transfer.destination_branch.name if transfer.destination_branch else f"branch {transfer.destination_branch_id}"
+    src_branch_name = transfer.source_branch.name if transfer.source_branch else f"branch {transfer.source_branch_id}"
+    unit_price = transfer.item.unit_price if transfer.item and transfer.item.unit_price else 0.0
+    total_val = unit_price * transfer.quantity
+
     if status == "in_transit" and old_status == "pending":
         # Deduct from source branch / location
         update_location_stock(db, transfer.source_location_id, transfer.item_id, -transfer.quantity)
@@ -2313,8 +2319,10 @@ def update_transfer_status(db: Session, transfer_id: int, status: str, location_
             item_id=transfer.item_id,
             transaction_type="out",
             quantity=transfer.quantity,
+            unit_price=unit_price,
+            total_amount=total_val,
             reference_number=transfer.transfer_number,
-            notes=f"Inter-branch transfer to branch {transfer.destination_branch_id}",
+            notes=f"Inter-branch transfer to {dest_branch_name}",
             source_location_id=transfer.source_location_id,
             branch_id=transfer.source_branch_id
         )
@@ -2333,8 +2341,10 @@ def update_transfer_status(db: Session, transfer_id: int, status: str, location_
             item_id=transfer.item_id,
             transaction_type="in",
             quantity=transfer.quantity,
+            unit_price=unit_price,
+            total_amount=total_val,
             reference_number=transfer.transfer_number,
-            notes=f"Inter-branch transfer from branch {transfer.source_branch_id}",
+            notes=f"Inter-branch transfer received from {src_branch_name}",
             destination_location_id=location_id,
             branch_id=transfer.destination_branch_id
         )

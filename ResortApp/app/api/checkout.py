@@ -50,10 +50,10 @@ def create_checkout_request(
     Create a checkout request for inventory verification before checkout.
     """
     # Find the booking for this room
-    room = db.query(Room).filter(Room.number == room_number, Room.branch_id == branch_id).first()
-    if not room:
-        # Fallback for trimmed mismatch or different branch_id
-        room = db.query(Room).filter(func.trim(Room.number) == str(room_number).strip()).first()
+    room_query = db.query(Room).filter(func.trim(Room.number) == str(room_number).strip())
+    if branch_id is not None:
+        room_query = room_query.filter(Room.branch_id == branch_id)
+    room = room_query.first()
         
     if not room:
         raise HTTPException(status_code=404, detail=f"Room {room_number} not found")
@@ -176,9 +176,10 @@ def get_checkout_request(
     """
     Get checkout request status for a room.
     """
-    room = db.query(Room).filter(Room.number == room_number, Room.branch_id == branch_id).first()
-    if not room:
-        room = db.query(Room).filter(func.trim(Room.number) == str(room_number).strip()).first()
+    room = db.query(Room).filter(func.trim(Room.number) == str(room_number).strip())
+    if branch_id is not None:
+        room = room.filter(Room.branch_id == branch_id)
+    room = room.first()
         
     if not room:
         raise HTTPException(status_code=404, detail=f"Room {room_number} not found")
@@ -225,7 +226,7 @@ def get_checkout_request(
         
     # Find the specific request for the queried room
     for req in all_requests:
-        if req.room_number == room.number:
+        if str(req.room_number or "").strip() == str(room.number or "").strip():
             checkout_request = req
             break
             
@@ -249,9 +250,9 @@ def get_checkout_request(
         "status": aggregate_status,
         "inventory_checked": aggregate_inventory_checked,
         "inventory_checked_by": checkout_request.inventory_checked_by,
-        "inventory_checked_at": checkout_request.inventory_checked_at.isoformat() if checkout_request.inventory_checked_at else None,
+        "inventory_checked_at": checkout_request.inventory_checked_at.isoformat() + "Z" if checkout_request.inventory_checked_at else None,
         "inventory_notes": checkout_request.inventory_notes,
-        "requested_at": checkout_request.requested_at.isoformat() if checkout_request.requested_at else None,
+        "requested_at": checkout_request.requested_at.isoformat() + "Z" if checkout_request.requested_at else None,
         "requested_by": checkout_request.requested_by,
         "employee_id": checkout_request.employee_id,
         "employee_name": checkout_request.employee.name if checkout_request.employee else None
@@ -384,8 +385,7 @@ def get_checkout_request_inventory_details(
             
             # 1. Get items from LocationStock (Primary Source)
             location_stocks = db.query(LocationStock).filter(
-                LocationStock.location_id == location_id,
-                LocationStock.quantity > 0
+                LocationStock.location_id == location_id
             ).all()
 
             # 2. Get items assigned to this location via asset mappings
@@ -396,54 +396,68 @@ def get_checkout_request_inventory_details(
             
             # 3. Get items from asset registry
             asset_registry = db.query(AssetRegistry).filter(
-                AssetRegistry.current_location_id == location_id
+                AssetRegistry.current_location_id == location_id,
+                AssetRegistry.status.in_(["active", "in_stock", "In Stock"])
             ).all()
             
             # Combine all items for THIS room
             room_items_dict = {}
             
+            # Pre-calculate mapped quantities
+            mapped_counts = {}
+            for m in asset_mappings:
+                mapped_counts[m.item_id] = mapped_counts.get(m.item_id, 0) + (m.quantity or 1)
+
+            # Define common issue detail fetcher with buffer
+            # Use 24h buffer to catch room prep issues
+            booking_start = None
+            if checkout_request.booking:
+                booking_start = checkout_request.booking.checked_in_at or checkout_request.booking.check_in
+            elif checkout_request.package_booking:
+                booking_start = checkout_request.package_booking.checked_in_at or checkout_request.package_booking.check_in
+            
+            issue_start_date = None
+            if booking_start:
+                if isinstance(booking_start, str):
+                    try: booking_start = datetime.fromisoformat(booking_start.replace('Z', '+00:00'))
+                    except: booking_start = datetime.strptime(booking_start, '%Y-%m-%d')
+                
+                # Apply 24 hour buffer for room prep
+                if not isinstance(booking_start, datetime):
+                    booking_start = datetime.combine(booking_start, datetime.min.time())
+                
+                issue_start_date = booking_start - timedelta(hours=24)
+
             # Process LocationStock
             for stock in location_stocks:
                 item = stock.item
                 if not item: continue
                 
-                # Fetch category for metadata
                 category = inventory_crud.get_category_by_id(db, item.category_id)
                 
-                # Check for permanent mapping
-                permanently_mapped_qty = 0.0
-                permanent_mapping = db.query(AssetMapping).filter(
-                    AssetMapping.location_id == location_id,
-                    AssetMapping.item_id == item.id,
-                    AssetMapping.is_active == True
-                ).first()
-                if permanent_mapping:
-                    permanently_mapped_qty = float(permanent_mapping.quantity or 1)
-                
-                # Get relevant stock issues for this booking
-                booking_start = None
-                if checkout_request.booking:
-                    booking_start = checkout_request.booking.checked_in_at or checkout_request.booking.check_in
-                elif checkout_request.package_booking:
-                    booking_start = checkout_request.package_booking.checked_in_at or checkout_request.package_booking.check_in
-                
+                # Get relevant stock issues
                 issue_details_query = db.query(StockIssueDetail).join(StockIssue).filter(
                     StockIssue.destination_location_id == location_id,
                     StockIssueDetail.item_id == item.id
                 )
-                if booking_start:
-                    issue_details_query = issue_details_query.filter(StockIssue.issue_date >= booking_start)
+                if issue_start_date:
+                    issue_details_query = issue_details_query.filter(StockIssue.issue_date >= issue_start_date)
+                
                 issue_details = issue_details_query.order_by(StockIssue.issue_date.desc()).all()
                 
+                # Split logic
                 current_stock_qty = float(stock.quantity)
-                issued_stock_qty = max(0, current_stock_qty - permanently_mapped_qty)
+                permanently_mapped_qty = float(mapped_counts.get(item.id, 0))
                 
                 good_issues = [d for d in issue_details if not getattr(d, 'is_damaged', False)]
                 good_rented_issues = [d for d in good_issues if (d.rental_price and d.rental_price > 0)]
                 total_rented_need = sum(float(d.issued_quantity) for d in good_rented_issues)
                 
-                rented_stock_qty = min(issued_stock_qty, total_rented_need)
-                standard_stock_qty = max(0, issued_stock_qty - rented_stock_qty)
+                # Determine quantities
+                base_standard = min(current_stock_qty, permanently_mapped_qty)
+                remaining = current_stock_qty - base_standard
+                rented_stock_qty = min(remaining, total_rented_need)
+                standard_stock_qty = base_standard + (remaining - rented_stock_qty)
                 
                 is_asset_type = ((category and category.is_asset_fixed) or item.is_asset_fixed or item.track_laundry_cycle or (not item.is_sellable_to_guest and not item.is_perishable))
 
@@ -512,16 +526,34 @@ def get_checkout_request_inventory_details(
                         "complimentary_limit": item.complimentary_limit or 0
                     }
 
-                if permanently_mapped_qty > 0:
-                    key = f"asset_mapped_{item.id}_{room.number}"
-                    room_items_dict[key] = {
+                # Process batches based on calculated split
+                if is_asset_type:
+                    if rented_stock_qty > 0: process_batch_internal(rented_stock_qty, good_rented_issues, "_rented", True, room_number=room.number)
+                    if standard_stock_qty > 0: process_batch_internal(standard_stock_qty, good_issues, "", False, room_number=room.number)
+                else:
+                    payable_good_issues = [d for d in good_issues if getattr(d, 'is_payable', False)]
+                    comp_good_issues = [d for d in good_issues if not getattr(d, 'is_payable', False)]
+                    total_payable_need = sum(float(d.issued_quantity) for d in payable_good_issues)
+                    payable_in_stock = min(standard_stock_qty + rented_stock_qty, total_payable_need)
+                    comp_in_stock = max(0, (standard_stock_qty + rented_stock_qty) - payable_in_stock)
+                    if payable_in_stock > 0: process_batch_internal(payable_in_stock, payable_good_issues, "_payable", True, force_payable_suffix=True, room_number=room.number)
+                    if comp_in_stock > 0: process_batch_internal(comp_in_stock, comp_good_issues, "", False, room_number=room.number)
+
+            # 4. Process Asset Mapping INDEPENDENTLY
+            for mapping in asset_mappings:
+                item = mapping.item
+                if not item: continue
+                stock_key = f"item_{item.id}_{room.number}"
+                if stock_key not in room_items_dict and f"item_{item.id}_{room.number}_rented" not in room_items_dict:
+                    # Add as fixed asset
+                    room_items_dict[stock_key] = {
                         "id": item.id,
                         "item_id": item.id,
                         "item_name": item.name + " (Fixed)",
                         "room_number": room.number,
-                        "current_stock": permanently_mapped_qty,
-                        "allocated_stock": permanently_mapped_qty,
-                        "complimentary_qty": permanently_mapped_qty,
+                        "current_stock": mapping.quantity or 1,
+                        "allocated_stock": mapping.quantity or 1,
+                        "complimentary_qty": mapping.quantity or 1,
                         "unit": item.unit,
                         "charge_per_unit": item.selling_price or item.unit_price or 0,
                         "replacement_cost": item.selling_price or item.unit_price or 0,
@@ -530,27 +562,16 @@ def get_checkout_request_inventory_details(
                         "is_rentable": False,
                         "is_payable": False
                     }
-                
-                if is_asset_type:
-                    if rented_stock_qty > 0: process_batch_internal(rented_stock_qty, good_rented_issues, "_rented", True, room_number=room.number)
-                    if standard_stock_qty > 0: process_batch_internal(standard_stock_qty, good_issues, "", False, room_number=room.number)
-                else:
-                    payable_good_issues = [d for d in good_issues if getattr(d, 'is_payable', False)]
-                    comp_good_issues = [d for d in good_issues if not getattr(d, 'is_payable', False)]
-                    total_payable_need = sum(float(d.issued_quantity) for d in payable_good_issues)
-                    payable_in_stock = min(issued_stock_qty, total_payable_need)
-                    comp_in_stock = max(0, issued_stock_qty - payable_in_stock)
-                    if payable_in_stock > 0: process_batch_internal(payable_in_stock, payable_good_issues, "_payable", True, force_payable_suffix=True, room_number=room.number)
-                    if comp_in_stock > 0: process_batch_internal(comp_in_stock, comp_good_issues, "", False, room_number=room.number)
 
-            # Process Asset Registry
+            # 5. Process Asset Registry
             for asset in asset_registry:
                 item = asset.item
                 if item:
                     key = f"registry_{asset.id}_{room.number}"
                     room_items_dict[key] = {
                         "id": item.id, "item_id": item.id, "item_name": item.name, "room_number": room.number,
-                        "current_stock": 1, "allocated_stock": 1, "is_fixed_asset": True, "replacement_cost": item.unit_price or 0
+                        "current_stock": 1, "allocated_stock": 1, "is_fixed_asset": True, "replacement_cost": item.unit_price or 0,
+                        "serial_number": asset.serial_number, "asset_tag": asset.asset_tag_id
                     }
 
             items_list = list(room_items_dict.values())
@@ -568,6 +589,8 @@ def get_checkout_request_inventory_details(
 
         except Exception as e:
             debug_log(f"Error processing room {room.number}: {str(e)}")
+            import traceback
+            debug_log(traceback.format_exc())
             continue
 
     return {
@@ -626,9 +649,11 @@ async def handleCompleteCheckoutRequest(
             # Identify Target Room for this item
             target_room_number = str(getattr(item, 'room_number', None) or checkout_request.room_number).strip()
             
-            room_obj = db.query(Room).filter(Room.number == target_room_number, Room.branch_id == branch_id).first()
-            if not room_obj:
-                room_obj = db.query(Room).filter(func.trim(Room.number) == target_room_number, Room.branch_id == branch_id).first()
+            room_query = db.query(Room).filter(func.trim(Room.number) == target_room_number)
+            if branch_id is not None:
+                room_query = room_query.filter(Room.branch_id == branch_id)
+            room_obj = room_query.first()
+            
             if not room_obj:
                 # Last resort: global search by number without branch (as done in asset_damages loop)
                 room_obj = db.query(Room).filter(func.trim(Room.number) == target_room_number).first()
@@ -662,16 +687,30 @@ async def handleCompleteCheckoutRequest(
                 if existing_mapping:
                     is_mapped_asset = True
 
-            # RECONCILIATION LOGIC
+            # 1. FIND STOCK SOURCES (LocationStock AND AssetMapping)
             room_stock_record = db.query(LocationStock).filter(
                 LocationStock.location_id == room_loc_id,
                 LocationStock.item_id == item.item_id
             ).first()
+            
+            mapping_record = db.query(AssetMapping).filter(
+                AssetMapping.location_id == room_loc_id,
+                AssetMapping.item_id == item.item_id,
+                AssetMapping.is_active == True
+            ).first()
 
+            # 2. CALCULATE ALLOCATED STOCK (The total units we expect in the room)
             allocated_stock = float(item.allocated_stock or 0.0)
             if allocated_stock == 0:
+                # Sum from all available sources in the DB
+                db_allocated = 0.0
                 if room_stock_record:
-                    allocated_stock = float(room_stock_record.quantity)
+                    db_allocated += float(room_stock_record.quantity)
+                if mapping_record:
+                    db_allocated += float(mapping_record.quantity or 0)
+                
+                if db_allocated > 0:
+                    allocated_stock = db_allocated
                 else:
                     # Fallback: Check StockIssueDetail if room_stock record is missing
                     # IMPROVED: Only sum issues from the current booking period
@@ -719,11 +758,41 @@ async def handleCompleteCheckoutRequest(
             unused_qty = max(0, effective_allocated - total_lost)
             
             # Now perform stock deductions for room
-            if total_lost > 0 and room_stock_record:
-                room_stock_record.quantity = max(0, float(room_stock_record.quantity) - total_lost)
-                room_stock_record.last_updated = datetime.utcnow()
+            if total_lost > 0:
+                remaining_lost = total_lost
+                
+                # Priority 1: Deduct from LocationStock
+                if room_stock_record and remaining_lost > 0:
+                    deduct = min(remaining_lost, float(room_stock_record.quantity))
+                    room_stock_record.quantity = max(0, float(room_stock_record.quantity) - deduct)
+                    room_stock_record.last_updated = datetime.utcnow()
+                    remaining_lost -= deduct
+                
+                # Priority 2: Deduct from AssetMapping
+                if mapping_record and remaining_lost > 0:
+                    deduct = min(remaining_lost, float(mapping_record.quantity or 0))
+                    new_qty = max(0, float(mapping_record.quantity or 0) - deduct)
+                    if new_qty <= 0:
+                        mapping_record.is_active = False
+                    else:
+                        mapping_record.quantity = new_qty
+                    remaining_lost -= deduct
+                
+                # Log the consumption transaction for visibility in "All Transactions"
+                if used_qty > 0:
+                    db.add(InventoryTransaction(
+                        item_id=item.item_id,
+                        source_location_id=room_loc_id,
+                        quantity=-float(used_qty),
+                        transaction_type="Usage",
+                        reference_number=f"CHK-{request_id}",
+                        notes=f"Consumed in Room {target_room_number} during checkout verification",
+                        created_by=current_user.id,
+                        branch_id=branch_id,
+                        created_at=datetime.utcnow()
+                    ))
 
-            if unused_qty > 0:
+            if unused_qty > 0 and (item.is_returned or item.is_laundry):
                 # Deduct unused from room stock as well (it's moving out)
                 if room_stock_record:
                     room_stock_record.quantity = max(0, float(room_stock_record.quantity) - unused_qty)
@@ -994,14 +1063,25 @@ async def handleCompleteCheckoutRequest(
             
             unused_qty = max(0, effective_allocated - total_lost)
             
-            if total_lost > 0 and room_stock_record:
-                room_stock_record.quantity = max(0, float(room_stock_record.quantity) - total_lost)
-                room_stock_record.last_updated = datetime.utcnow()
-
             if unused_qty > 0:
-                if room_stock_record:
-                    room_stock_record.quantity = max(0, float(room_stock_record.quantity) - unused_qty)
+                remaining_unused = unused_qty
+                
+                # Deduct from LocationStock
+                if room_stock_record and remaining_unused > 0:
+                    deduct = min(remaining_unused, float(room_stock_record.quantity))
+                    room_stock_record.quantity = max(0, float(room_stock_record.quantity) - deduct)
                     room_stock_record.last_updated = datetime.utcnow()
+                    remaining_unused -= deduct
+                
+                # Deduct from AssetMapping
+                if mapping_record and remaining_unused > 0:
+                    deduct = min(remaining_unused, float(mapping_record.quantity or 0))
+                    new_qty = max(0, float(mapping_record.quantity or 0) - deduct)
+                    if new_qty <= 0:
+                        mapping_record.is_active = False
+                    else:
+                        mapping_record.quantity = new_qty
+                    remaining_unused -= deduct
                 
                 target_return_loc_id = item.return_location_id
                 if not target_return_loc_id:
@@ -2076,7 +2156,7 @@ def get_checkout_details(checkout_id: int, db: Session = Depends(get_db), curren
                     "room_number": next((r.number for r in rooms if r.id == order.room_id), None),
                     "amount": order.amount,
                     "status": order.status,
-                    "created_at": order.created_at.isoformat() if order.created_at else None,
+                    "created_at": order.created_at.isoformat() + "Z" if order.created_at else None,
                     "items": [
                         {
                             "item_name": item.food_item.name if item.food_item else "Unknown",
@@ -2109,7 +2189,7 @@ def get_checkout_details(checkout_id: int, db: Session = Depends(get_db), curren
                     "service_name": ass.service.name if ass.service else "Unknown",
                     "charges": ass.service.charges if ass.service else 0,
                     "status": ass.status,
-                    "created_at": ass.assigned_at.isoformat() if ass.assigned_at else None
+                    "created_at": ass.assigned_at.isoformat() + "Z" if ass.assigned_at else None
                 })
     
     # Reconstruct bill_details if missing
@@ -2226,7 +2306,7 @@ def get_checkout_details(checkout_id: int, db: Session = Depends(get_db), curren
         "grand_total": checkout.grand_total,
         "payment_method": checkout.payment_method,
         "payment_status": checkout.payment_status,
-        "created_at": checkout.created_at.isoformat() if checkout.created_at else None,
+        "created_at": checkout.created_at.isoformat() + "Z" if checkout.created_at else None,
         "guest_name": checkout.guest_name,
         "room_number": checkout.room_number,
         "room_numbers": room_numbers,
@@ -2720,7 +2800,7 @@ def _calculate_bill_for_single_room(db: Session, room_number: str, branch_id: in
                 "is_paid": True,
                 "payment_status": f"PAID ({item.order.payment_method or 'cash'})",
                 "payment_method": item.order.payment_method,
-                "payment_time": item.order.payment_time.isoformat() if item.order.payment_time else None,
+                "payment_time": item.order.payment_time.isoformat() + "Z" if item.order.payment_time else None,
                 "gst_amount": item.order.gst_amount,
                 "total_with_gst": item.order.total_with_gst
             })
@@ -3593,7 +3673,7 @@ def _calculate_bill_for_entire_booking(db: Session, room_number: str, branch_id:
                 "is_paid": True,
                 "payment_status": f"PAID ({item.order.payment_method or 'cash'})",
                 "payment_method": item.order.payment_method,
-                "payment_time": item.order.payment_time.isoformat() if item.order.payment_time else None,
+                "payment_time": item.order.payment_time.isoformat() + "Z" if item.order.payment_time else None,
                 "gst_amount": item.order.gst_amount,
                 "total_with_gst": item.order.total_with_gst
             })

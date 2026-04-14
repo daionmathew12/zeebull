@@ -68,7 +68,7 @@ def get_activity_logs(
             "user_email": user.email if user else None,
             "branch_id": log.branch_id,
             "details": log.details,
-            "timestamp": log.timestamp.isoformat() if log.timestamp else None
+            "timestamp": log.timestamp.isoformat() + "Z" if log.timestamp else None
         })
     
     return {
