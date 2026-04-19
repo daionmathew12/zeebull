@@ -340,6 +340,13 @@ app.include_router(account.router, prefix="/api", tags=["Accounts"])
 app.include_router(gst_reports.router, prefix="/api", tags=["GST Reports"])
 app.include_router(reports_module.router, prefix="/api", tags=["Reports Module"])
 app.include_router(attendance.router, prefix="/api", tags=["Attendance"])
+app.include_router(notification.router, prefix="/api/notifications", tags=["Notifications"])
+app.include_router(activity_logs.router, prefix="/api/activity-logs", tags=["Activity Logs"])
+
+# Channel Manager
+from app.api import channel_manager
+app.include_router(channel_manager.router, prefix="/api/channel-manager", tags=["Channel Manager"])
+
 
 # Notification system re-enabled
 app.include_router(notification.router, prefix="/api", tags=["Notifications"])

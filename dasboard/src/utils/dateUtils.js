@@ -2,22 +2,31 @@
  * Date and Time Utilities for India/Kerala (IST - UTC+5:30)
  */
 
-// IST timezone constant (defaults to Asia/Kolkata if not configured)
-export const IST_TIMEZONE = localStorage.getItem("SYSTEM_TIMEZONE") || "Asia/Kolkata";
+// IST timezone constant
+const IST_TIMEZONE = 'Asia/Kolkata';
 
 /**
- * Ensures a date string has a timezone indicator. 
- * If it's an ISO string missing one, appends 'Z' to treat as UTC.
+ * Helper to ensure we have a valid Date object, treating naive ISO strings as UTC
+ * @param {string|Date} dateSource - Input date
+ * @returns {Date}
  */
-export const ensureUTC = (dateString) => {
-  if (typeof dateString !== 'string') return dateString;
-  if (!dateString.includes('T')) return dateString;
+const ensureDate = (dateSource) => {
+  if (!dateSource) return null;
+  if (dateSource instanceof Date) return dateSource;
   
-  // If it contains T but no Z and no + offset after the T
-  if (!dateString.endsWith('Z') && !dateString.includes('+', dateString.indexOf('T'))) {
-    return dateString + 'Z';
+  if (typeof dateSource === 'string') {
+    // If it's an ISO-like string (has T) but lacks timezone info (Z or +/-05:30)
+    // we append 'Z' so the browser treats it as UTC (standard for our backend naive datetimes)
+    const hasT = dateSource.includes('T');
+    const hasTZ = dateSource.includes('Z') || /[+-]\d{2}(:?\d{2})?$/.test(dateSource);
+    
+    if (hasT && !hasTZ) {
+      return new Date(dateSource + 'Z');
+    }
+    return new Date(dateSource);
   }
-  return dateString;
+  
+  return new Date(dateSource);
 };
 
 /**
@@ -29,9 +38,9 @@ export const ensureUTC = (dateString) => {
 export const formatDateIST = (dateString, options = {}) => {
   if (!dateString) return '-';
   
-  const date = typeof dateString === 'string' ? new Date(ensureUTC(dateString)) : dateString;
+  const date = ensureDate(dateString);
   
-  if (isNaN(date.getTime())) return '-';
+  if (!date || isNaN(date.getTime())) return '-';
   
   const defaultOptions = {
     timeZone: IST_TIMEZONE,
@@ -53,9 +62,9 @@ export const formatDateIST = (dateString, options = {}) => {
 export const formatDateTimeIST = (dateString, options = {}) => {
   if (!dateString) return '-';
   
-  const date = typeof dateString === 'string' ? new Date(ensureUTC(dateString)) : dateString;
+  const date = ensureDate(dateString);
   
-  if (isNaN(date.getTime())) return '-';
+  if (!date || isNaN(date.getTime())) return '-';
   
   const defaultOptions = {
     timeZone: IST_TIMEZONE,
@@ -79,9 +88,9 @@ export const formatDateTimeIST = (dateString, options = {}) => {
 export const formatTimeIST = (dateString) => {
   if (!dateString) return '-';
   
-  const date = typeof dateString === 'string' ? new Date(ensureUTC(dateString)) : dateString;
+  const date = ensureDate(dateString);
   
-  if (isNaN(date.getTime())) return '-';
+  if (!date || isNaN(date.getTime())) return '-';
   
   return new Intl.DateTimeFormat('en-IN', {
     timeZone: IST_TIMEZONE,
@@ -125,9 +134,9 @@ export const getCurrentDateTimeIST = () => {
 export const toISTISO = (dateString) => {
   if (!dateString) return null;
   
-  const date = typeof dateString === 'string' ? new Date(ensureUTC(dateString)) : dateString;
+  const date = ensureDate(dateString);
   
-  if (isNaN(date.getTime())) return null;
+  if (!date || isNaN(date.getTime())) return null;
   
   // Get IST time
   const istString = date.toLocaleString('en-US', { timeZone: IST_TIMEZONE });
@@ -203,9 +212,9 @@ export const formatDateTimeLong = (dateString) => {
 export const getRelativeTime = (dateString) => {
   if (!dateString) return '-';
   
-  const date = typeof dateString === 'string' ? new Date(ensureUTC(dateString)) : dateString;
+  const date = ensureDate(dateString);
   
-  if (isNaN(date.getTime())) return '-';
+  if (!date || isNaN(date.getTime())) return '-';
   
   const now = new Date();
   const nowIST = new Date(now.toLocaleString('en-US', { timeZone: IST_TIMEZONE }));
@@ -230,7 +239,6 @@ export default {
   formatDateIST,
   formatDateTimeIST,
   formatTimeIST,
-  ensureUTC,
   getCurrentDateIST,
   getCurrentDateTimeIST,
   toISTISO,

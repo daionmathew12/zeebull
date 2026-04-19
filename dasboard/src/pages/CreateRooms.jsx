@@ -337,6 +337,7 @@ const RoomTypeModal = ({ onClose, type, isEditing, onSubmit, branches, isEnterpr
     total_inventory: type?.total_inventory || 0,
     capacity: type?.adults_capacity || 2,
     children_capacity: type?.children_capacity || 0,
+    channel_manager_id: type?.channel_manager_id || "",
     description: type?.description || "",
     
     // Amenities dynamically generated
@@ -438,6 +439,7 @@ const RoomTypeModal = ({ onClose, type, isEditing, onSubmit, branches, isEnterpr
     data.append("total_inventory", formData.total_inventory || 0);
     data.append("capacity", formData.capacity || 2);
     data.append("children_capacity", formData.children_capacity ?? 0);
+    if (formData.channel_manager_id) data.append("channel_manager_id", formData.channel_manager_id);
     if (formData.description) data.append("description", formData.description);
 
     // Boolean features
@@ -594,6 +596,20 @@ const RoomTypeModal = ({ onClose, type, isEditing, onSubmit, branches, isEnterpr
                      <p className="text-[10px] text-gray-500 mt-2 font-medium flex items-center gap-1">
                        <i className="fas fa-circle-exclamation text-indigo-400 text-[8px]"></i> Visible on booking engine.
                      </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-black text-indigo-400 uppercase tracking-tighter mb-1.5 ml-1">Channel Manager Code (Aiosell)</label>
+                    <div className="relative group">
+                      <i className="fas fa-link absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-indigo-500 transition-colors"></i>
+                      <input 
+                        name="channel_manager_id" 
+                        value={formData.channel_manager_id} 
+                        onChange={handleChange} 
+                        className="w-full pl-10 pr-4 py-3 border-2 border-gray-100 rounded-2xl focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all font-bold text-gray-800 bg-white/50 focus:bg-white" 
+                        placeholder="e.g. DELUXE, PREMIUM" 
+                      />
+                    </div>
                   </div>
                 </div>
               </div>

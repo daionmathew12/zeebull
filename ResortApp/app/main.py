@@ -322,6 +322,11 @@ app.include_router(branch.router, prefix="/api", tags=["Branches"])
 app.include_router(service_request.router, prefix="/api", tags=["Service Requests"])
 app.include_router(account.router, prefix="/api", tags=["Accounts"])
 app.include_router(gst_reports.router, prefix="/api", tags=["GST Reports"])
+
+# Channel Manager
+from app.api import channel_manager
+app.include_router(channel_manager.router, prefix="/api/channel-manager", tags=["Channel Manager"])
+
 app.include_router(notification.router, prefix="/api/notifications", tags=["Notifications"])
 app.include_router(activity_logs.router, prefix="/api/activity-logs", tags=["Activity Logs"])
 app.include_router(calendar.router, prefix="/api/calendar", tags=["Pricing Calendar"])

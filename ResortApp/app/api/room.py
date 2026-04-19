@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 import os
 # Absolute project root path (ResortApp/)
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -87,7 +87,9 @@ def create_room_type(
     images: List[UploadFile] = File(None),
     db: Session = Depends(get_db), 
     current_user: User = Depends(require_permission("rooms:create")),
-    scoped_branch_id: Optional[int] = Depends(get_branch_id)
+    scoped_branch_id: Optional[int] = Depends(get_branch_id),
+    *,
+    background_tasks: BackgroundTasks
 ):
     effective_branch_id = scoped_branch_id if scoped_branch_id is not None else branch_id
     
@@ -153,6 +155,15 @@ def create_room_type(
     db.add(db_room_type)
     db.commit()
     db.refresh(db_room_type)
+
+    if background_tasks:
+        try:
+            from app.core.aiosell_triggers import trigger_inventory_push, trigger_rates_push
+            background_tasks.add_task(trigger_inventory_push, db_room_type.id)
+            background_tasks.add_task(trigger_rates_push, db_room_type.id)
+        except Exception as e:
+            print(f"Failed to queue Aiosell sync: {e}")
+
     return db_room_type
 
 @router.put("/types/{type_id}", response_model=RoomTypeOut)
@@ -199,6 +210,8 @@ def update_room_type(
     mini_bar: Optional[bool] = Form(None),
     existing_images: Optional[str] = Form(None),
     images: List[UploadFile] = File(None),
+    *,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db), 
     current_user: User = Depends(require_permission("rooms:edit"))
 ):
@@ -214,7 +227,7 @@ def update_room_type(
     if total_inventory is not None: db_room_type.total_inventory = total_inventory
     if capacity is not None: db_room_type.adults_capacity = capacity
     if children_capacity is not None: db_room_type.children_capacity = children_capacity
-    if channel_manager_id is not None: db_room_type.channel_manager_id = channel_manager_id
+    if channel_manager_id is not None and channel_manager_id != "": db_room_type.channel_manager_id = channel_manager_id
     if air_conditioning is not None: db_room_type.air_conditioning = air_conditioning
     if wifi is not None: db_room_type.wifi = wifi
     if bathroom is not None: db_room_type.bathroom = bathroom
@@ -291,6 +304,15 @@ def update_room_type(
 
     db.commit()
     db.refresh(db_room_type)
+    
+    if background_tasks:
+        try:
+            from app.core.aiosell_triggers import trigger_rates_push, trigger_inventory_push
+            background_tasks.add_task(trigger_rates_push, db_room_type.id)
+            background_tasks.add_task(trigger_inventory_push, db_room_type.id)
+        except Exception as e:
+            print(f"Failed to queue Aiosell sync: {e}")
+            
     return db_room_type
 
 @router.delete("/types/{type_id}")
@@ -520,6 +542,8 @@ def create_room(
     room_type_id: int = Form(...),
     status: str = Form("Available"),
     images: List[UploadFile] = File(None),
+    *,
+    background_tasks: BackgroundTasks,
     branch_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("rooms:create")),
@@ -609,6 +633,13 @@ def create_room(
         except Exception as loc_error:
             # Don't fail room creation if location creation fails
             print(f"Warning: Could not create location for room {number}: {str(loc_error)}")
+            
+        if background_tasks:
+            try:
+                from app.core.aiosell_triggers import trigger_inventory_push
+                trigger_inventory_push(db, background_tasks, db_room.room_type_id)
+            except Exception as e:
+                print(f"Failed to queue Aiosell inventory push: {e}")
         
         return db_room
     except Exception as e:
@@ -736,7 +767,7 @@ def get_rooms_slash(db: Session = Depends(get_db), skip: int = 0, limit: int = 2
 
 # ---------------- DELETE ----------------
 @router.delete("/{room_id}")
-def delete_room(room_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_permission("rooms:delete")), branch_id: int = Depends(get_branch_id)):
+def delete_room(room_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user: User = Depends(require_permission("rooms:delete")), branch_id: int = Depends(get_branch_id)):
 
     db_room = db.query(Room).filter(Room.id == room_id, Room.branch_id == branch_id).first()
 
@@ -749,8 +780,9 @@ def delete_room(room_id: int, db: Session = Depends(get_db), current_user: User 
         if os.path.exists(image_path):
             os.remove(image_path)
 
-    # Capture location ID before deleting room
+    # Capture location ID and type before deleting room
     inv_loc_id = db_room.inventory_location_id
+    room_type_id = db_room.room_type_id
 
     db.delete(db_room)
     db.flush() # Ensure room deletion is processed mostly (FK constrains)
@@ -767,6 +799,14 @@ def delete_room(room_id: int, db: Session = Depends(get_db), current_user: User 
             print(f"Warning: Could not delete associated location {inv_loc_id}: {e}")
 
     db.commit()
+    
+    if background_tasks and room_type_id:
+        try:
+            from app.core.aiosell_triggers import trigger_inventory_push
+            trigger_inventory_push(db, background_tasks, room_type_id)
+        except Exception as e:
+            print(f"Failed to queue Aiosell inventory push: {e}")
+            
     return {"message": "Room deleted successfully"}
 
 
@@ -781,6 +821,7 @@ def update_room(
     images: List[UploadFile] = File(None),
     existing_images: str = Form(None), # JSON list of image URLs to keep
     db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks = None,
     current_user: User = Depends(require_permission("rooms:edit")),
     branch_id: int = Depends(get_branch_id)
 ):
@@ -859,6 +900,14 @@ def update_room(
 
     db.commit()
     db.refresh(db_room)
+    
+    if background_tasks:
+        try:
+            from app.core.aiosell_triggers import trigger_inventory_push
+            trigger_inventory_push(db, background_tasks, db_room.room_type_id)
+        except Exception as e:
+            print(f"Failed to queue Aiosell inventory push: {e}")
+            
     return db_room
 
 @router.get("/stats")

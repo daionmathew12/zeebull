@@ -1,5 +1,5 @@
 # booking.py
-from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Query, Form
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Query, Form, BackgroundTasks
 import os
 # Absolute project root path (ResortApp/)
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -686,7 +686,14 @@ def calculate_price_api(request: PriceCalculationRequest, db: Session = Depends(
 # POST a new booking
 # -------------------------------
 @router.post("", response_model=BookingOut)
-def create_booking(booking: BookingCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+def create_booking(
+    booking: BookingCreate, 
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user), 
+    branch_id: int = Depends(get_branch_id),
+    *,
+    background_tasks: BackgroundTasks
+):
 
     print(f"DEBUG: create_booking called with: {booking}")
     
@@ -904,15 +911,23 @@ def create_booking(booking: BookingCreate, db: Session = Depends(get_db), curren
     
     booking_full.total_amount = total_amt
     db.commit()
+    db.commit()
+    
+    if background_tasks and booking_full.room_type_id:
+        try:
+            from app.core.aiosell_triggers import trigger_inventory_push
+            background_tasks.add_task(trigger_inventory_push, booking_full.room_type_id)
+        except Exception as e:
+            print(f"Failed to queue Aiosell inventory push: {e}")
 
     return booking_full
 
 @router.post("/guest", response_model=BookingOut, summary="Create a booking as a guest")
-def create_guest_booking(booking: BookingCreate, db: Session = Depends(get_db), branch_id_query: int = Query(1, alias="branch_id")):
+def create_guest_booking(booking: BookingCreate, background_tasks: BackgroundTasks = None, db: Session = Depends(get_db), branch_id_query: int = Query(1, alias="branch_id")):
     try:
         # Similar to create_booking but for public access
         booking.branch_id = booking.branch_id if booking.branch_id is not None else branch_id_query
-        return create_booking(booking, db, current_user=None, branch_id=booking.branch_id)
+        return create_booking(booking, background_tasks=background_tasks, db=db, current_user=None, branch_id=booking.branch_id)
     except HTTPException:
         # Re-raise HTTP exceptions (like validation errors) as-is
         raise
@@ -941,7 +956,9 @@ def check_in_booking(
     amenityAllocation: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    branch_id: int = Depends(get_branch_id)
+    branch_id: int = Depends(get_branch_id),
+    *,
+    background_tasks: BackgroundTasks
 ):
     print(f"[DEBUG] REGULAR CHECK-IN REQUEST: Booking ID: {booking_id}")
     print(f"[DEBUG] Amenity Allocation: {amenityAllocation}")
@@ -1293,13 +1310,28 @@ def check_in_booking(
     
     db.commit()
     db.refresh(booking)
+
+    if background_tasks and booking.room_type_id:
+        try:
+            from app.core.aiosell_triggers import trigger_inventory_push
+            background_tasks.add_task(trigger_inventory_push, booking.room_type_id)
+        except Exception as e:
+            print(f"Failed to queue Aiosell inventory push: {e}")
+
     return booking
 
 # -------------------------------
 # Cancel a booking
 # -------------------------------
 @router.put("/{booking_id}/cancel", response_model=BookingOut)
-def cancel_booking(booking_id: Union[str, int], db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+def cancel_booking(
+    booking_id: Union[str, int], 
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user), 
+    branch_id: int = Depends(get_branch_id),
+    *,
+    background_tasks: BackgroundTasks
+):
     # Parse display ID (BK-000001) or accept numeric ID
     numeric_id, booking_type = parse_display_id(str(booking_id))
     if numeric_id is None:
@@ -1320,10 +1352,26 @@ def cancel_booking(booking_id: Union[str, int], db: Session = Depends(get_db), c
     booking.status = "cancelled"
     db.commit()
     db.refresh(booking)
+
+    if background_tasks and booking.room_type_id:
+        try:
+            from app.core.aiosell_triggers import trigger_inventory_push
+            background_tasks.add_task(trigger_inventory_push, booking.room_type_id)
+        except Exception as e:
+            print(f"Failed to queue Aiosell inventory push on cancellation: {e}")
+
     return booking
     
 @router.put("/{booking_id}/extend", response_model=BookingOut)
-def extend_checkout(booking_id: Union[str, int], new_checkout: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+def extend_checkout(
+    booking_id: Union[str, int], 
+    new_checkout: str, 
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user), 
+    branch_id: int = Depends(get_branch_id),
+    *,
+    background_tasks: BackgroundTasks
+):
     """
     Extend the checkout date for a booking.
     Validates that the new checkout date is after the current checkout date
@@ -1435,6 +1483,14 @@ def extend_checkout(booking_id: Union[str, int], new_checkout: str, db: Session 
     booking_with_rooms = db.query(Booking).options(
         joinedload(Booking.booking_rooms).joinedload(BookingRoom.room)
     ).filter(Booking.id == booking_id).first()
+
+    # Trigger Aiosell sync on extension
+    if background_tasks and booking.room_type_id:
+        try:
+            from app.core.aiosell_triggers import trigger_inventory_push
+            background_tasks.add_task(trigger_inventory_push, booking.room_type_id)
+        except Exception as e:
+            print(f"Failed to queue Aiosell inventory push on extension: {e}")
 
     return BookingOut(
         id=booking_with_rooms.id,
