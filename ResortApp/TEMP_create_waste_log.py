@@ -1,7 +1,7 @@
 def create_waste_log(db: Session, data: dict, reported_by: int):
     from app.models.inventory import WasteLog, InventoryTransaction, InventoryItem
     from app.models.food import FoodItem
-    from datetime import datetime
+    from datetime import timezone, datetime
     
     is_food = data.get("is_food_item", False)
     
@@ -28,7 +28,7 @@ def create_waste_log(db: Session, data: dict, reported_by: int):
             photo_path=data.get("photo_path"),
             notes=data.get("notes"),
             reported_by=reported_by,
-            waste_date=data.get("waste_date", datetime.utcnow()),
+            waste_date=data.get("waste_date", datetime.now(timezone.utc)),
         )
         db.add(waste_log)
         
@@ -60,7 +60,7 @@ def create_waste_log(db: Session, data: dict, reported_by: int):
             photo_path=data.get("photo_path"),
             notes=data.get("notes"),
             reported_by=reported_by,
-            waste_date=data.get("waste_date", datetime.utcnow()),
+            waste_date=data.get("waste_date", datetime.now(timezone.utc)),
         )
         db.add(waste_log)
         

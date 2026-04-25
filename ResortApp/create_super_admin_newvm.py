@@ -1,6 +1,6 @@
 import psycopg2
 from passlib.hash import bcrypt
-from datetime import datetime
+from datetime import timezone, datetime
 import json
 
 def create_superadmin():
@@ -22,7 +22,7 @@ def create_superadmin():
             print("Creating branch...")
             cur.execute(
                 "INSERT INTO branches (name, code, is_active, created_at) VALUES (%s, %s, %s, %s) RETURNING id",
-                ("Main Branch", "MAIN", True, datetime.utcnow())
+                ("Main Branch", "MAIN", True, datetime.now(timezone.utc))
             )
             branch_id = cur.fetchone()[0]
             print(f"  Branch created: ID {branch_id}")

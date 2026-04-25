@@ -4,7 +4,7 @@ from app.models.checkout import Checkout
 from app.schemas.checkout import CheckoutCreate
 
 def create_checkout(db: Session, data: CheckoutCreate):
-    checkout = Checkout(**data.dict())
+    checkout = Checkout(**data.model_dump())
     db.add(checkout)
     db.commit()
     db.refresh(checkout)

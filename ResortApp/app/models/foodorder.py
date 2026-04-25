@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, Float, String, ForeignKey, DateTime, Boolean
 from sqlalchemy.orm import relationship, backref
-from datetime import datetime
+from datetime import timezone, datetime
 from app.database import Base
 
 class FoodOrder(Base):
@@ -23,8 +23,8 @@ class FoodOrder(Base):
     is_deleted = Column(Boolean, default=False, nullable=False)  # Soft delete flag
     created_by_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"), nullable=True)
     prepared_by_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow) # This is UTC, we should handle IST conversion in CRUD if needed or move to IST here.
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc)) # This is UTC, we should handle IST conversion in CRUD if needed or move to IST here.
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 
@@ -45,7 +45,7 @@ class FoodOrderItem(Base):
     order_id = Column(Integer, ForeignKey("food_orders.id"))
     food_item_id = Column(Integer, ForeignKey("food_items.id"))
     quantity = Column(Integer)
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 
@@ -56,3 +56,19 @@ class FoodOrderItem(Base):
     @property
     def food_item_name(self):
         return self.food_item.name if self.food_item else None
+
+    @property
+    def price(self):
+        return getattr(self, '_price', 0.0)
+
+    @price.setter
+    def price(self, value):
+        self._price = value
+
+    @property
+    def subtotal(self):
+        return getattr(self, '_subtotal', 0.0)
+
+    @subtotal.setter
+    def subtotal(self, value):
+        self._subtotal = value

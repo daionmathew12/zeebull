@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:orchid_employee/data/services/api_service.dart';
 import 'package:orchid_employee/presentation/widgets/skeleton_loaders.dart';
+import 'package:orchid_employee/presentation/widgets/onyx_glass_card.dart';
+import 'package:orchid_employee/presentation/widgets/onyx_glass_dialog.dart';
 import 'package:orchid_employee/core/constants/api_constants.dart';
+import 'package:orchid_employee/core/constants/app_colors.dart';
 import 'package:intl/intl.dart';
 import 'package:dio/dio.dart';
+import 'dart:ui';
 
 class ManagerServiceAssignmentScreen extends StatefulWidget {
   const ManagerServiceAssignmentScreen({super.key});
@@ -110,11 +114,15 @@ class _ManagerServiceAssignmentScreenState extends State<ManagerServiceAssignmen
       }
     } catch (e) {
       if (mounted) {
+        String errorMsg = "Error loading data: $e";
+        if (e is DioException) {
+          errorMsg = "API Error (${e.response?.statusCode}): ${e.requestOptions.uri}\nDetail: ${e.message}";
+        }
         setState(() {
-          _error = "Error loading data: $e";
+          _error = errorMsg;
           _isLoading = false;
         });
-        print("Data load error: $e");
+        print("Data load error: $errorMsg");
       }
     }
   }
@@ -195,21 +203,30 @@ class _ManagerServiceAssignmentScreenState extends State<ManagerServiceAssignmen
     final descCtrl = TextEditingController();
     final priceCtrl = TextEditingController();
     
-    showDialog(context: context, builder: (ctx) => AlertDialog(
-        title: const Text("Add New Service"),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Service Name")),
-            TextField(controller: descCtrl, decoration: const InputDecoration(labelText: "Description")),
-            TextField(controller: priceCtrl, decoration: const InputDecoration(labelText: "Charges (₹)"), keyboardType: TextInputType.number),
-        ]),
+    showDialog(context: context, builder: (ctx) => OnyxGlassDialog(
+        title: "NEW SERVICE DEFINITION",
+        children: [
+            _buildGlassInput(nameCtrl, "SERVICE NAME", Icons.spa_outlined),
+            const SizedBox(height: 16),
+            _buildGlassInput(descCtrl, "DESCRIPTION", Icons.description_outlined),
+            const SizedBox(height: 16),
+            _buildGlassInput(priceCtrl, "CHARGES (₹)", Icons.payments_outlined, type: TextInputType.number),
+        ],
         actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
-            ElevatedButton(onPressed: () {
+            TextButton(
+              onPressed: () => Navigator.pop(ctx), 
+              child: const Text("CANCEL", style: TextStyle(color: Colors.white24, fontWeight: FontWeight.w900, letterSpacing: 1)),
+            ),
+            ElevatedButton(
+              onPressed: () {
                 if(nameCtrl.text.isNotEmpty && priceCtrl.text.isNotEmpty) {
                     Navigator.pop(ctx);
                     _createService(nameCtrl.text, descCtrl.text, double.tryParse(priceCtrl.text) ?? 0);
                 }
-            }, child: const Text("Create")),
+              }, 
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent, foregroundColor: AppColors.onyx),
+              child: const Text("CREATE SERVICE", style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 0.5)),
+            ),
         ],
     ));
   }
@@ -219,275 +236,201 @@ class _ManagerServiceAssignmentScreenState extends State<ManagerServiceAssignmen
     int? selectedRoom;
     int? selectedEmp;
     List<Map<String, dynamic>> extraItems = [];
-    Map<int, int> requiredItemSources = {}; // item_id -> location_id
-    Map<int, List<Map<String, dynamic>>> itemLocationOptions = {}; // item_id -> list of locations with stock
+    Map<int, int> requiredItemSources = {}; 
+    Map<int, List<Map<String, dynamic>>> itemLocationOptions = {}; 
     bool isLoadingStock = false;
 
     showDialog(context: context, builder: (ctx) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-        title: const Text("Assign Service"),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-                DropdownButtonFormField<int>(
-                    decoration: const InputDecoration(labelText: "Select Service"),
-                    items: _availableServices.map<DropdownMenuItem<int>>((s) => DropdownMenuItem(value: s['id'], child: Text(s['name']))).toList(),
-                    onChanged: (v) async {
-                        setState(() {
-                             selectedService = v;
-                             requiredItemSources.clear();
-                             itemLocationOptions.clear();
-                             isLoadingStock = true;
-                        });
+        builder: (context, setState) => OnyxGlassDialog(
+        title: "RESOURCE ASSIGNMENT",
+        children: [
+            _buildGlassDropdown<int>(
+                label: "SELECT SERVICE",
+                value: selectedService,
+                items: _availableServices.map<DropdownMenuItem<int>>((s) => DropdownMenuItem(value: s['id'], child: Text(s['name'].toString().toUpperCase(), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)))).toList(),
+                onChanged: (v) async {
+                    setState(() {
+                         selectedService = v;
+                         requiredItemSources.clear();
+                         itemLocationOptions.clear();
+                         isLoadingStock = true;
+                    });
 
-                        if (v != null) {
-                           final service = _availableServices.firstWhere((s) => s['id'] == v, orElse: () => null);
-                           final items = service?['inventory_items'] as List? ?? [];
-                           
-                           for (var item in items) {
-                             final stocks = await _fetchItemStock(item['id']);
-                             if (mounted) {
-                               setState(() {
-                                 itemLocationOptions[item['id']] = stocks;
-                                 // Auto-pick best location
-                                 if (stocks.isNotEmpty) {
-                                   stocks.sort((a, b) => (b['quantity'] ?? 0).compareTo(a['quantity'] ?? 0));
-                                   requiredItemSources[item['id']] = stocks.first['location_id'];
-                                 }
-                               });
+                    if (v != null) {
+                       final service = _availableServices.firstWhere((s) => s['id'] == v, orElse: () => null);
+                       final items = service?['inventory_items'] as List? ?? [];
+                       
+                       for (var item in items) {
+                         final stocks = await _fetchItemStock(item['id']);
+                         if (mounted) {
+                           setState(() {
+                             itemLocationOptions[item['id']] = stocks;
+                             if (stocks.isNotEmpty) {
+                               stocks.sort((a, b) => (b['quantity'] ?? 0).compareTo(a['quantity'] ?? 0));
+                               requiredItemSources[item['id']] = stocks.first['location_id'];
                              }
-                           }
-                        }
-                        
-                        if (mounted) setState(() => isLoadingStock = false);
-                    },
-                ),
-                if (isLoadingStock)
-                   const Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator())
-                else if (selectedService != null) ...[
-                   Builder(
-                     builder: (context) {
-                       final service = _availableServices.firstWhere((s) => s['id'] == selectedService, orElse: () => null);
-                       final items = service?['inventory_items'] as List?;
-                       
-                       if (items == null || items.isEmpty) return const SizedBox.shrink();
-                       
-                       return Container(
-                         width: double.maxFinite,
-                         margin: const EdgeInsets.only(top: 10),
-                         padding: const EdgeInsets.all(12),
-                         decoration: BoxDecoration(
-                           color: Colors.blue.withOpacity(0.05),
-                           borderRadius: BorderRadius.circular(8),
-                           border: Border.all(color: Colors.blue.withOpacity(0.2))
-                         ),
-                         child: Column(
-                           crossAxisAlignment: CrossAxisAlignment.start,
-                           children: [
-                             Row(
-                               children: [
-                                 const Icon(Icons.inventory_2_outlined, size: 16, color: Colors.blue),
-                                 const SizedBox(width: 8),
-                                 Text(
-                                   "Inventory Items Needed:", 
-                                   style: TextStyle(
-                                     fontWeight: FontWeight.bold, 
-                                     fontSize: 13,
-                                     color: Colors.blue[800],
-                                   )
-                                 ),
-                               ],
-                             ),
-                             const SizedBox(height: 8),
-                             ...items.map((item) {
-                                 final itemId = item['id'];
-                                 final stocks = itemLocationOptions[itemId] ?? [];
-                                 
-                                 // Prepare dropdown items: include stocks if available, else show all locations (fallback)
-                                 List<DropdownMenuItem<int>> dropdownItems = [];
-                                 
-                                 if (stocks.isNotEmpty) {
-                                     dropdownItems = stocks.map((s) => DropdownMenuItem<int>(
-                                         value: s['location_id'],
-                                         child: Text("${s['location_name']} (${s['quantity']} avail)"),
-                                     )).toList();
-                                 } else {
-                                     // Fallback to all locations if no stock info or stock 0? 
-                                     // Better to show all locations but indicate 0 avail if not in list?
-                                     // For simplicity, if we fetched stocks and it's empty, it means 0 everywhere.
-                                     // Getting all locations:
-                                     dropdownItems = _locations.map((l) {
-                                         // check cache for qty
-                                         final s = stocks.firstWhere((st) => st['location_id'] == l['id'], orElse: () => {});
-                                         final qty = s['quantity'] ?? 0;
-                                         return DropdownMenuItem<int>(
-                                            value: l['id'],
-                                            child: Text("${l['name']} ($qty avail)"),
-                                         );
-                                     }).toList();
-                                 }
-
-                                 return Padding(
-                                   padding: const EdgeInsets.only(bottom: 12),
-                                   child: Column(
-                                     crossAxisAlignment: CrossAxisAlignment.start,
-                                     children: [
-                                       Row(
-                                         children: [
-                                           Expanded(
-                                             child: Text(
-                                               "${item['name']} (${item['item_code'] ?? 'N/A'})",
-                                               style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-                                             ),
-                                           ),
-                                           Text(
-                                             "${item['quantity']} ${item['unit']} @ ₹${item['unit_price']}/${item['unit']}",
-                                             style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                                           ),
-                                         ],
-                                       ),
-                                       const SizedBox(height: 6),
-                                       DropdownButtonFormField<int>(
-                                         decoration: const InputDecoration(
-                                           labelText: "Source Location",
-                                           isDense: true,
-                                           contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                                           border: OutlineInputBorder(),
-                                           fillColor: Colors.white,
-                                           filled: true,
-                                         ),
-                                         value: requiredItemSources[itemId],
-                                         items: dropdownItems,
-                                         onChanged: (v) => setState(() => requiredItemSources[itemId] = v!),
-                                         validator: (val) => val == null ? 'Required' : null,
-                                       ),
-                                     ],
-                                   ),
-                                 );
-                             }),
-                             const SizedBox(height: 4),
-                           ],
-                         ),
-                       );
-                     }
-                   ),
-                ],
-                const SizedBox(height: 10),
-                
-                // Extra Inventory Section
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey.withOpacity(0.2)),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                           });
+                         }
+                       }
+                    }
+                    if (mounted) setState(() => isLoadingStock = false);
+                },
+            ),
+            if (isLoadingStock)
+               Padding(padding: const EdgeInsets.all(24), child: CircularProgressIndicator(color: AppColors.accent, strokeWidth: 2))
+            else if (selectedService != null) ...[
+                Builder(
+                  builder: (context) {
+                    final service = _availableServices.firstWhere((s) => s['id'] == selectedService, orElse: () => null);
+                    final items = service?['inventory_items'] as List?;
+                    
+                    if (items == null || items.isEmpty) return const SizedBox.shrink();
+                    
+                    return Container(
+                      margin: const EdgeInsets.only(top: 16),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.05),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.white.withOpacity(0.05))
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text("Extra Inventory Item (Optional)", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey[700])),
-                          IconButton(
-                            icon: const Icon(Icons.add_circle, color: Colors.teal),
-                            onPressed: () {
-                              _showAddExtraItemDialog(context, (item) {
-                                setState(() {
-                                  extraItems.add(item);
-                                });
-                              });
-                            },
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                          )
+                          Row(
+                            children: [
+                              Icon(Icons.inventory_2_outlined, size: 14, color: AppColors.accent),
+                              const SizedBox(width: 8),
+                              Text("REQUIRED RESOURCES", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 9, color: AppColors.accent, letterSpacing: 1)),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          ...items.map((item) {
+                              final itemId = item['id'];
+                              final stocks = itemLocationOptions[itemId] ?? [];
+                              List<DropdownMenuItem<int>> dItems = stocks.map((s) => DropdownMenuItem<int>(
+                                  value: s['location_id'],
+                                  child: Text("${s['location_name'].toString().toUpperCase()} (${s['quantity']} AVAIL)", style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold)),
+                              )).toList();
+
+                              if (dItems.isEmpty) {
+                                  dItems = _locations.map((l) => DropdownMenuItem<int>(
+                                      value: l['id'],
+                                      child: Text("${l['name'].toString().toUpperCase()} (0 AVAIL)", style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold)),
+                                  )).toList();
+                              }
+
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(item['name'].toString().toUpperCase(), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: Colors.white)),
+                                        Text("${item['quantity']} ${item['unit'].toString().toUpperCase()}", style: TextStyle(fontSize: 10, color: Colors.white.withOpacity(0.4), fontWeight: FontWeight.bold)),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    _buildGlassDropdown<int>(
+                                      label: "SOURCE LOCATION",
+                                      value: requiredItemSources[itemId],
+                                      items: dItems,
+                                      onChanged: (v) => setState(() => requiredItemSources[itemId] = v!),
+                                    ),
+                                  ],
+                                ),
+                              );
+                          }),
                         ],
                       ),
-                      if (extraItems.isNotEmpty) const SizedBox(height: 8),
-                      ...extraItems.asMap().entries.map((entry) {
-                         final idx = entry.key;
-                         final item = entry.value;
-                         return Container(
-                           margin: const EdgeInsets.only(bottom: 6),
-                           padding: const EdgeInsets.all(8),
-                           decoration: BoxDecoration(
-                             color: Colors.teal.withOpacity(0.05),
-                             borderRadius: BorderRadius.circular(6)
-                           ),
-                           child: Row(
-                             children: [
-                               Expanded(child: Column(
-                                 crossAxisAlignment: CrossAxisAlignment.start,
-                                 children: [
-                                   Text("${item['name']} - ${item['qty']} ${item['unit']}", style: const TextStyle(fontWeight: FontWeight.w500)),
-                                   if (item['location_name'] != null)
-                                     Text("From: ${item['location_name']}", style: TextStyle(fontSize: 11, color: Colors.grey[600])),
-                                 ],
-                               )),
-                               InkWell(
-                                 onTap: () => setState(() => extraItems.removeAt(idx)),
-                                 child: const Icon(Icons.close, size: 16, color: Colors.red),
-                               )
-                             ],
-                           ),
-                         );
-                      }),
-                      if (extraItems.isEmpty) 
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 8.0),
-                          child: Text("No extra items added", style: TextStyle(color: Colors.grey, fontSize: 12, fontStyle: FontStyle.italic)),
-                        ),
+                    );
+                  }
+                ),
+            ],
+            
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.02),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white.withOpacity(0.05)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text("COMPLEMENTARY ITEMS", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 9, color: Colors.white.withOpacity(0.4), letterSpacing: 1)),
+                      IconButton(
+                        icon: Icon(Icons.add_circle_outline, color: AppColors.accent, size: 18),
+                        onPressed: () => _showAddExtraItemDialog(context, (item) => setState(() => extraItems.add(item))),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      )
                     ],
                   ),
-                ),
+                  if (extraItems.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    ...extraItems.asMap().entries.map((entry) => Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(color: Colors.white.withOpacity(0.03), borderRadius: BorderRadius.circular(12)),
+                        child: Row(
+                          children: [
+                            Expanded(child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(entry.value['name'].toString().toUpperCase(), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: Colors.white)),
+                                Text("QTY: ${entry.value['qty']} • ${entry.value['location_name'].toString().toUpperCase()}", style: TextStyle(fontSize: 9, color: Colors.white.withOpacity(0.3), fontWeight: FontWeight.bold)),
+                              ],
+                            )),
+                            IconButton(onPressed: () => setState(() => extraItems.removeAt(entry.key)), icon: const Icon(Icons.close, size: 14, color: Colors.redAccent)),
+                          ],
+                        ),
+                    )),
+                  ],
+                ],
+              ),
+            ),
 
-                const SizedBox(height: 10),
-                DropdownButtonFormField<int>(
-                    decoration: const InputDecoration(labelText: "Select Room"),
-                    items: _rooms.map<DropdownMenuItem<int>>((r) => DropdownMenuItem(value: r['id'], child: Text("Room ${r['number'] ?? r['room_number']}"))).toList(),
-                    onChanged: (v) => setState(() => selectedRoom = v),
-                ),
-                const SizedBox(height: 10),
-                DropdownButtonFormField<int>(
-                    decoration: const InputDecoration(labelText: "Select Staff"),
-                    items: _employees.map<DropdownMenuItem<int>>((e) => DropdownMenuItem(value: e['id'], child: Text(e['name']))).toList(),
-                    onChanged: (v) => setState(() => selectedEmp = v),
-                ),
-            ]),
-          ),
-        ),
+            const SizedBox(height: 16),
+            _buildGlassDropdown<int>(
+                label: "TARGET ROOM",
+                value: selectedRoom,
+                items: _rooms.map<DropdownMenuItem<int>>((r) => DropdownMenuItem(value: r['id'], child: Text("ROOM ${r['number'] ?? r['room_number']}", style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)))).toList(),
+                onChanged: (v) => setState(() => selectedRoom = v),
+            ),
+            const SizedBox(height: 16),
+            _buildGlassDropdown<int>(
+                label: "RESPONSIBLE STAFF",
+                value: selectedEmp,
+                items: _employees.map<DropdownMenuItem<int>>((e) => DropdownMenuItem(value: e['id'], child: Text(e['name'].toString().toUpperCase(), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)))).toList(),
+                onChanged: (v) => setState(() => selectedEmp = v),
+            ),
+        ],
         actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
-            ElevatedButton(onPressed: () {
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("CANCEL", style: TextStyle(color: Colors.white24, fontWeight: FontWeight.w900, letterSpacing: 1))),
+            ElevatedButton(
+              onPressed: () {
                 if(selectedService != null && selectedRoom != null && selectedEmp != null) {
                     final service = _availableServices.firstWhere((s) => s['id'] == selectedService, orElse: () => null);
                     final items = service?['inventory_items'] as List? ?? [];
-                    // Validation: All required items must have a location
-                    bool missingLocation = false;
-                    for (var item in items) {
-                      if (!requiredItemSources.containsKey(item['id'])) {
-                        missingLocation = true;
-                        break;
-                      }
-                    }
-                    
-                    if (missingLocation) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please select source location for all required items"), backgroundColor: Colors.orange));
+                    if (items.any((item) => !requiredItemSources.containsKey(item['id']))) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Missing source locations"), backgroundColor: Colors.orange));
                       return;
                     }
-
                     Navigator.pop(ctx);
-                    
-                    final standardSelections = requiredItemSources.entries.map((e) => {
-                       'item_id': e.key,
-                       'location_id': e.value,
-                    }).toList();
-
-                    _assignService(selectedService!, selectedRoom!, selectedEmp!, extraItems, itemSourceSelections: standardSelections);
-                } else {
-                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please fill all required fields"), backgroundColor: Colors.orange));
+                    final stdSelections = requiredItemSources.entries.map((e) => {'item_id': e.key, 'location_id': e.value}).toList();
+                    _assignService(selectedService!, selectedRoom!, selectedEmp!, extraItems, itemSourceSelections: stdSelections);
                 }
-            }, child: const Text("Assign")),
+              }, 
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent, foregroundColor: AppColors.onyx),
+              child: const Text("CONFIRM ASSIGNMENT", style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 0.5)),
+            ),
         ],
     )));
   }
@@ -496,79 +439,69 @@ class _ManagerServiceAssignmentScreenState extends State<ManagerServiceAssignmen
     int? selectedItemId;
     int? selectedLocationId;
     final qtyCtrl = TextEditingController(text: "1");
-    List<Map<String, dynamic>> locationOptions = []; // Stocks for selected item
+    List<Map<String, dynamic>> locationOptions = []; 
     bool isLoadingStock = false;
     
     showDialog(
       context: context, 
       builder: (ctx) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          title: const Text("Add Extra Item"),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DropdownButtonFormField<int>(
-                decoration: const InputDecoration(labelText: "Select Item"),
-                items: _inventoryItems.map<DropdownMenuItem<int>>((i) => DropdownMenuItem(
-                  value: i['id'], 
-                  child: Text("${i['name']} (${i['unit'] ?? 'pcs'})", overflow: TextOverflow.ellipsis)
-                )).toList(),
-                onChanged: (v) async {
-                   setState(() {
-                     selectedItemId = v;
-                     selectedLocationId = null;
-                     locationOptions = [];
-                     isLoadingStock = true;
-                   });
-                   
-                   if (v != null) {
-                     final stocks = await _fetchItemStock(v);
-                     if (mounted) {
-                       setState(() {
-                         locationOptions = stocks;
-                         if (stocks.isNotEmpty) {
-                           stocks.sort((a, b) => (b['quantity'] ?? 0).compareTo(a['quantity'] ?? 0));
-                           selectedLocationId = stocks.first['location_id'];
-                         }
-                       });
-                     }
+        builder: (context, setState) => OnyxGlassDialog(
+          title: "ADD COMPLEMENTARY ITEM",
+          children: [
+            _buildGlassDropdown<int>(
+              label: "SELECT ITEM",
+              value: selectedItemId,
+              items: _inventoryItems.map<DropdownMenuItem<int>>((i) => DropdownMenuItem(
+                value: i['id'], 
+                child: Text("${i['name'].toString().toUpperCase()} (${i['unit'] ?? 'PCS'})", style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)
+              )).toList(),
+              onChanged: (v) async {
+                 setState(() {
+                   selectedItemId = v;
+                   selectedLocationId = null;
+                   locationOptions = [];
+                   isLoadingStock = true;
+                 });
+                 
+                 if (v != null) {
+                   final stocks = await _fetchItemStock(v);
+                   if (mounted) {
+                     setState(() {
+                       locationOptions = stocks;
+                       if (stocks.isNotEmpty) {
+                         stocks.sort((a, b) => (b['quantity'] ?? 0).compareTo(a['quantity'] ?? 0));
+                         selectedLocationId = stocks.first['location_id'];
+                       }
+                     });
                    }
-                   if (mounted) setState(() => isLoadingStock = false);
-                },
-                isExpanded: true,
+                 }
+                 if (mounted) setState(() => isLoadingStock = false);
+              },
+            ),
+            const SizedBox(height: 16),
+            if (isLoadingStock)
+               Padding(padding: const EdgeInsets.all(10), child: CircularProgressIndicator(color: AppColors.accent, strokeWidth: 2))
+            else
+               _buildGlassDropdown<int>(
+                label: "FROM LOCATION",
+                value: selectedLocationId,
+                items: locationOptions.isEmpty 
+                  ? _locations.map<DropdownMenuItem<int>>((l) => DropdownMenuItem(value: l['id'], child: Text("${l['name'].toString().toUpperCase()} (0 AVAIL)", style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)))).toList()
+                  : locationOptions.map<DropdownMenuItem<int>>((l) => DropdownMenuItem(
+                      value: l['location_id'], 
+                      child: Text("${l['location_name'].toString().toUpperCase()} (${l['quantity']} AVAIL)", style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)
+                    )).toList(),
+                onChanged: (v) => setState(() => selectedLocationId = v),
               ),
-              const SizedBox(height: 12),
-              if (isLoadingStock)
-                 const Center(child: Padding(padding: EdgeInsets.all(10), child: CircularProgressIndicator()))
-              else
-                 DropdownButtonFormField<int>(
-                  decoration: const InputDecoration(labelText: "From Location"),
-                  value: selectedLocationId,
-                  items: locationOptions.isEmpty 
-                    ? _locations.map<DropdownMenuItem<int>>((l) => DropdownMenuItem(value: l['id'], child: Text("${l['name']} (0 avail)"))).toList()
-                    : locationOptions.map<DropdownMenuItem<int>>((l) => DropdownMenuItem(
-                        value: l['location_id'], 
-                        child: Text("${l['location_name']} (${l['quantity']} avail)", overflow: TextOverflow.ellipsis)
-                      )).toList(),
-                  onChanged: (v) => setState(() => selectedLocationId = v),
-                  isExpanded: true,
-                ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: qtyCtrl,
-                decoration: const InputDecoration(labelText: "Quantity"),
-                keyboardType: TextInputType.number,
-              ),
-            ],
-          ),
+            const SizedBox(height: 16),
+            _buildGlassInput(qtyCtrl, "QUANTITY", Icons.add_shopping_cart, type: TextInputType.number),
+          ],
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("CANCEL", style: TextStyle(color: Colors.white24, fontWeight: FontWeight.w900, letterSpacing: 1))),
             ElevatedButton(
               onPressed: () {
                 if(selectedItemId != null && qtyCtrl.text.isNotEmpty && selectedLocationId != null) {
                   final item = _inventoryItems.firstWhere((i) => i['id'] == selectedItemId);
-                  
-                  // Find location name
                   String locName = "Unknown";
                   if (locationOptions.isNotEmpty) {
                     final l = locationOptions.firstWhere((l) => l['location_id'] == selectedLocationId, orElse: () => {});
@@ -587,11 +520,10 @@ class _ManagerServiceAssignmentScreenState extends State<ManagerServiceAssignmen
                     'location_name': locName
                   });
                   Navigator.pop(ctx);
-                } else if (selectedLocationId == null) {
-                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please select a location")));
                 }
               },
-              child: const Text("Add"),
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent, foregroundColor: AppColors.onyx),
+              child: const Text("ADD ITEM", style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 0.5)),
             )
           ],
         )
@@ -599,55 +531,205 @@ class _ManagerServiceAssignmentScreenState extends State<ManagerServiceAssignmen
     );
   }
 
+  Widget _buildGlassInput(TextEditingController controller, String label, IconData icon, {TextInputType type = TextInputType.text}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+      ),
+      child: TextField(
+        controller: controller,
+        keyboardType: type,
+        style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1),
+          prefixIcon: Icon(icon, color: AppColors.accent, size: 18),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGlassDropdown<T>({required String label, required T? value, required List<DropdownMenuItem<T>> items, required ValueChanged<T?> onChanged}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButtonFormField<T>(
+          value: value,
+          items: items,
+          onChanged: onChanged,
+          dropdownColor: AppColors.onyx.withOpacity(0.95),
+          style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+          decoration: InputDecoration(
+            labelText: label,
+            labelStyle: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1),
+            border: InputBorder.none,
+          ),
+        ),
+      ),
+    );
+  }
+
+
   // --- UI BUILDERS ---
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Service Management", style: TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.teal,
-        foregroundColor: Colors.white,
-        bottom: TabBar(
-            controller: _tabController,
-            isScrollable: true,
-            labelColor: Colors.white,
-            unselectedLabelColor: Colors.white70,
-            indicatorColor: Colors.white,
-            tabs: const [
-                Tab(text: "Dashboard"),
-                Tab(text: "Services"),
-                Tab(text: "Assign & Manage"),
-                Tab(text: "Items Used"),
-                Tab(text: "Service Requests"),
-            ],
-        ),
-      ),
-      body: _isLoading ? const ListSkeleton() : 
-            _error != null ? Center(child: Text(_error!)) :
-            TabBarView(
-                controller: _tabController,
-                children: [
-                    _buildDashboard(),
-                    _buildServicesList(),
-                    _buildAssignmentsList(),
-                    _buildItemsUsed(),
-                    _buildRequestsList(),
-                ],
+      backgroundColor: AppColors.onyx,
+      body: Stack(
+        children: [
+          // Background Gradient
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: AppColors.primaryGradient,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
             ),
+          ),
+
+          // Ambient Glows
+          Positioned(
+            top: -100,
+            right: -50,
+            child: Container(
+              width: 300, 
+              height: 300,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.accent.withOpacity(0.1),
+              ),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 100, sigmaY: 100),
+                child: Container(color: Colors.transparent),
+              ),
+            ),
+          ),
+
+          SafeArea(
+            child: Column(
+              children: [
+                // Custom Header
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        onPressed: () {
+                          if (Navigator.canPop(context)) {
+                            Navigator.pop(context);
+                          } else {
+                            Scaffold.of(context).openDrawer();
+                          }
+                        },
+                        icon: Icon(
+                          Navigator.canPop(context) ? Icons.arrow_back_ios_new : Icons.menu_rounded,
+                          color: Colors.white,
+                          size: Navigator.canPop(context) ? 18 : 22,
+                        ),
+                        style: IconButton.styleFrom(backgroundColor: Colors.white.withOpacity(0.05)),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              "RESOURCE ALLOCATION",
+                              style: TextStyle(color: AppColors.accent, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 2),
+                            ),
+                            Text(
+                              "SERVICE ASSIGNMENT", 
+                              style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: 0.5),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: _loadData,
+                        icon: Icon(Icons.refresh, color: AppColors.accent, size: 20),
+                        style: IconButton.styleFrom(backgroundColor: AppColors.accent.withOpacity(0.05)),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Modern TabBar
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: TabBar(
+                    controller: _tabController,
+                    isScrollable: true,
+                    indicator: BoxDecoration(
+                      color: AppColors.accent.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.accent.withOpacity(0.2)),
+                    ),
+                    labelColor: AppColors.accent,
+                    unselectedLabelColor: Colors.white24,
+                    labelStyle: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11, letterSpacing: 1),
+                    dividerColor: Colors.transparent,
+                    tabAlignment: TabAlignment.start,
+                    tabs: const [
+                      Tab(text: "OVERVIEW"),
+                      Tab(text: "SERVICES"),
+                      Tab(text: "ASSIGNMENTS"),
+                      Tab(text: "USAGE"),
+                      Tab(text: "REQUESTS"),
+                    ],
+                  ),
+                ),
+
+                Expanded(
+                  child: _isLoading ? const ListSkeleton() : 
+                        _error != null ? Center(child: Text(_error!, style: const TextStyle(color: Colors.white38))) :
+                        TabBarView(
+                            controller: _tabController,
+                            children: [
+                                _buildDashboard(),
+                                _buildServicesList(),
+                                _buildAssignmentsList(),
+                                _buildItemsUsed(),
+                                _buildRequestsList(),
+                            ],
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
             if(_tabController.index == 1) _showAddServiceDialog();
             else if(_tabController.index == 2) _showAssignDialog();
         },
-        backgroundColor: Colors.teal,
-        child: const Icon(Icons.add),
+        backgroundColor: AppColors.accent,
+        foregroundColor: AppColors.onyx,
+        elevation: 8,
+        child: const Icon(Icons.add, size: 28),
       ),
     );
+
   }
 
   Widget _buildDashboard() {
-    // Top 5 recent activities from _assignedServices (Assignment) and _serviceRequests (Tasks)
+    // Top 10 recent activities 
     final allActivities = [
         ..._assignedServices.map((e) => {
             'type': 'assignment', 
@@ -674,140 +756,168 @@ class _ManagerServiceAssignmentScreenState extends State<ManagerServiceAssignmen
     final recent = allActivities.take(10).toList();
 
     return SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
-                Expanded(child: _statCard("Total Services", "${_dashboardStats['total_services']}", Colors.blue)),
-                const SizedBox(width: 10),
-                Expanded(child: _statCard("Assignments", "${_dashboardStats['total_assignments']}", Colors.green)),
+                Expanded(child: _statCard("SERVICES", "${_dashboardStats['total_services']}", Colors.blueAccent)),
+                const SizedBox(width: 12),
+                Expanded(child: _statCard("ASSIGNMENTS", "${_dashboardStats['total_assignments']}", Colors.greenAccent)),
             ]),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             Row(children: [
-                Expanded(child: _statCard("Revenue", "₹${_dashboardStats['total_revenue']}", Colors.purple)),
-                const SizedBox(width: 10),
-                Expanded(child: _statCard("Items Used", "${_dashboardStats['items_used_count']}", Colors.orange)),
+                Expanded(child: _statCard("REVENUE", "₹${_dashboardStats['total_revenue']}", Colors.purpleAccent)),
+                const SizedBox(width: 12),
+                Expanded(child: _statCard("ITEMS USED", "${_dashboardStats['items_used_count']}", Colors.orangeAccent)),
             ]),
-            const SizedBox(height: 25),
-            const Text("Recent Activity", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-            const SizedBox(height: 10),
+            const SizedBox(height: 32),
+            const Text(
+              "CENTRAL ACTIVITY LOG", 
+              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: Colors.white, letterSpacing: 2),
+            ),
+            const SizedBox(height: 16),
             if (recent.isEmpty) 
-               const Center(child: Padding(padding: EdgeInsets.all(20), child: Text("No recent activity", style: TextStyle(color: Colors.grey))))
+               Center(child: Padding(padding: const EdgeInsets.all(40), child: Text("NO RECENT ACTIVITY", style: TextStyle(color: Colors.white12, fontWeight: FontWeight.w900, letterSpacing: 1, fontSize: 10))))
             else
-               ...recent.map((a) => Card(
-                   margin: const EdgeInsets.only(bottom: 8),
-                   elevation: 1,
-                   child: ListTile(
-                       leading: CircleAvatar(
-                          backgroundColor: a['type'] == 'assignment' ? Colors.blue.shade100 : Colors.teal.shade100,
-                          child: Icon(a['type'] == 'assignment' ? Icons.spa : Icons.task_alt, 
-                                     color: a['type'] == 'assignment' ? Colors.blue : Colors.teal, size: 20)
+               ...recent.map((a) => Container(
+                   margin: const EdgeInsets.only(bottom: 12),
+                   child: OnyxGlassCard(
+                       padding: const EdgeInsets.all(8),
+                       child: ListTile(
+                           dense: true,
+                           leading: Container(
+                              width: 44, height: 44,
+                              decoration: BoxDecoration(
+                                color: (a['type'] == 'assignment' ? Colors.blueAccent : Colors.tealAccent).withOpacity(0.05), 
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: (a['type'] == 'assignment' ? Colors.blueAccent : Colors.tealAccent).withOpacity(0.2)),
+                              ),
+                              alignment: Alignment.center,
+                              child: Icon(a['type'] == 'assignment' ? Icons.spa : Icons.task_alt, 
+                                         color: a['type'] == 'assignment' ? Colors.blueAccent : Colors.tealAccent, size: 20)
+                           ),
+                           title: Text(a['title'].toString().toUpperCase(), style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.white, fontSize: 12, letterSpacing: 0.5)),
+                           subtitle: Text("ROOM ${a['room'] ?? '?'} • ${_formatDate(a['date']).toUpperCase()}", style: TextStyle(fontSize: 9, color: Colors.white.withOpacity(0.3), fontWeight: FontWeight.w900)),
+                           trailing: _buildSmallStatusChip(a['status']),
                        ),
-                       title: Text(a['title']),
-                       subtitle: Text("Room ${a['room'] ?? '?'} • ${_formatDate(a['date'])}"),
-                       trailing: _buildSmallStatusChip(a['status']),
                    ),
                )).toList(),
-            const SizedBox(height: 20),
+            const SizedBox(height: 24),
         ]),
     );
   }
 
-  String _formatDate(String? dateStr) {
-      if (dateStr == null) return "";
-      try {
-          return DateFormat('MMM dd, hh:mm a').format(DateTime.parse(dateStr));
-      } catch (e) {
-          return "";
-      }
-  }
-
   Widget _buildSmallStatusChip(String status) {
-     Color color = Colors.grey;
-     if(status == 'completed') color = Colors.green;
-     if(status == 'pending') color = Colors.orange;
-     if(status == 'assigned' || status == 'in_progress') color = Colors.blue;
+     Color color = Colors.white24;
+     if(status == 'completed') color = Colors.greenAccent;
+     if(status == 'pending') color = Colors.orangeAccent;
+     if(status == 'assigned' || status == 'in_progress') color = Colors.blueAccent;
      
      return Container(
-       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-       decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
-       child: Text(status.toUpperCase(), style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.bold)),
+       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+       decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(6), border: Border.all(color: color.withOpacity(0.2))),
+       child: Text(status.toUpperCase(), style: TextStyle(fontSize: 8, color: color, fontWeight: FontWeight.w900, letterSpacing: 1)),
      );
   }
 
   Widget _statCard(String title, String value, Color color) {
-    return Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(12)),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, style: const TextStyle(color: Colors.white70, fontSize: 13)),
-            const SizedBox(height: 8),
-            Text(value, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-        ]),
+    return OnyxGlassCard(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start, 
+        children: [
+          Text(title, style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
+          const SizedBox(height: 8),
+          Text(value, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
+        ]
+      ),
     );
   }
 
+
   Widget _buildServicesList() {
+    if (_availableServices.isEmpty) return _buildEmptyState("SERVICES", Icons.spa_outlined);
+
     return ListView.builder(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         itemCount: _availableServices.length,
         itemBuilder: (ctx, i) {
             final s = _availableServices[i];
-            return Card(
+            return Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              child: OnyxGlassCard(
+                padding: const EdgeInsets.all(12),
                 child: ListTile(
-                    leading: const CircleAvatar(backgroundColor: Colors.teal, child: Icon(Icons.spa, color: Colors.white)),
-                    title: Text(s['name']),
-                    subtitle: Text("₹${s['charges']}"),
+                    dense: true,
+                    leading: Container(
+                      width: 44, height: 44,
+                      decoration: BoxDecoration(color: AppColors.accent.withOpacity(0.1), borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.accent.withOpacity(0.2))),
+                      alignment: Alignment.center,
+                      child: Icon(Icons.spa, color: AppColors.accent, size: 20),
+                    ),
+                    title: Text(s['name'].toString().toUpperCase(), style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.white, fontSize: 13, letterSpacing: 0.5)),
+                    subtitle: Text("BASE CHARGE: ₹${s['charges']}", style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 1)),
                 ),
+              ),
             );
         },
     );
   }
 
   Widget _buildAssignmentsList() {
-    return Scaffold(
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showAssignDialog,
-        backgroundColor: Colors.teal,
-        child: const Icon(Icons.add),
-      ),
-      body: _assignedServices.isEmpty 
-          ? const Center(child: Text("No active assignments")) 
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _assignedServices.length,
-              itemBuilder: (ctx, i) {
-                  final a = _assignedServices[i];
-                  // Handle potential nulls gracefully
-                  final serviceName = a['service'] != null ? a['service']['name'] : 'Unknown Service';
-                  final roomObj = a['room'];
-                  final roomNum = roomObj != null ? (roomObj['room_number'] ?? roomObj['number'] ?? '?') : '?';
-                  final empName = a['employee'] != null ? a['employee']['name'] : 'Unassigned';
-                  final status = a['status']?.toString() ?? 'pending';
+    if (_assignedServices.isEmpty) return _buildEmptyState("ACTIVE ASSIGNMENTS", Icons.assignment_ind_outlined);
 
-                  return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      child: ListTile(
-                          title: Text(serviceName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                          subtitle: Text("Room: $roomNum • Staff: $empName"),
-                          trailing: PopupMenuButton<String>(
-                            onSelected: (val) => _updateAssignmentStatus(a['id'], val),
-                            itemBuilder: (context) => [
-                              const PopupMenuItem(value: 'in_progress', child: Text("Mark In Progress")),
-                              const PopupMenuItem(value: 'completed', child: Text("Mark Completed")),
-                              const PopupMenuItem(value: 'cancelled', child: Text("Cancel", style: TextStyle(color: Colors.red))),
-                              const PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete, color: Colors.red, size: 16), SizedBox(width: 8), Text("Delete", style: TextStyle(color: Colors.red))])),
-                            ],
-                            child: Chip(
-                                label: Text(status.toUpperCase()),
-                                backgroundColor: status == 'completed' ? Colors.green[100] : (status == 'in_progress' ? Colors.blue[100] : Colors.orange[100]),
-                            ),
-                          ),
+    return ListView.builder(
+        padding: const EdgeInsets.all(20),
+        itemCount: _assignedServices.length,
+        itemBuilder: (ctx, i) {
+            final a = _assignedServices[i];
+            final serviceName = (a['service'] != null ? a['service']['name'] : 'UNKNOWN SERVICE').toString().toUpperCase();
+            final roomObj = a['room'];
+            final roomNum = roomObj != null ? (roomObj['room_number'] ?? roomObj['number'] ?? '?') : '?';
+            final empName = (a['employee'] != null ? a['employee']['name'] : 'UNASSIGNED').toString().toUpperCase();
+            final status = a['status']?.toString() ?? 'pending';
+
+            return Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                child: OnyxGlassCard(
+                  padding: const EdgeInsets.all(8),
+                  child: ListTile(
+                      dense: true,
+                      title: Text(serviceName, style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.white, fontSize: 13, letterSpacing: 0.5)),
+                      subtitle: Text("ROOM: $roomNum • STAFF: $empName", style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                      trailing: PopupMenuButton<String>(
+                        onSelected: (val) => _updateAssignmentStatus(a['id'], val),
+                        color: AppColors.onyx.withOpacity(0.9),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Colors.white10)),
+                        itemBuilder: (context) => [
+                          _buildPopupItem('in_progress', 'IN PROGRESS', Icons.play_arrow, Colors.blueAccent),
+                          _buildPopupItem('completed', 'COMPLETED', Icons.check_circle, Colors.greenAccent),
+                          _buildPopupItem('cancelled', 'CANCEL', Icons.cancel, Colors.redAccent),
+                          const PopupMenuDivider(height: 1),
+                          _buildPopupItem('delete', 'DELETE', Icons.delete, Colors.redAccent),
+                        ],
+                        child: _buildSmallStatusChip(status),
                       ),
-                  );
-              },
-          ),
+                  ),
+                ),
+            );
+        },
     );
   }
+
+  PopupMenuItem<String> _buildPopupItem(String value, String label, IconData icon, Color color) {
+    return PopupMenuItem(
+      value: value,
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 16),
+          const SizedBox(width: 12),
+          Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 10, letterSpacing: 1)),
+        ],
+      ),
+    );
+  }
+
 
   void _showAssignServiceModal() {
     int? selectedRoomId;
@@ -815,76 +925,58 @@ class _ManagerServiceAssignmentScreenState extends State<ManagerServiceAssignmen
     int? selectedEmployeeId;
     final notesController = TextEditingController();
 
-    showModalBottomSheet(
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModalState) {
-           return Padding(
-             padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom, left: 24, right: 24, top: 24),
-             child: Column(
-               mainAxisSize: MainAxisSize.min,
-               crossAxisAlignment: CrossAxisAlignment.start,
-               children: [
-                 const Text("Assign Service", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                 const SizedBox(height: 20),
-                 
-                 DropdownButtonFormField<int>(
-                   decoration: const InputDecoration(labelText: "Select Room", border: OutlineInputBorder()),
-                   value: selectedRoomId,
-                   items: _rooms.map<DropdownMenuItem<int>>((r) => DropdownMenuItem(value: r['id'], child: Text("Room ${r['room_number']}"))).toList(),
-                   onChanged: (v) => setModalState(() => selectedRoomId = v),
-                 ),
-                 const SizedBox(height: 16),
-                 
-                 DropdownButtonFormField<int>(
-                   decoration: const InputDecoration(labelText: "Service Type", border: OutlineInputBorder()),
-                   value: selectedServiceId,
-                   items: _availableServices.map<DropdownMenuItem<int>>((s) => DropdownMenuItem(value: s['id'], child: Text("${s['name']} (₹${s['charges'] ?? 0})"))).toList(),
-                   onChanged: (v) => setModalState(() => selectedServiceId = v),
-                 ),
-                 const SizedBox(height: 16),
-                 
-                 DropdownButtonFormField<int>(
-                   decoration: const InputDecoration(labelText: "Assign Staff", border: OutlineInputBorder()),
-                   value: selectedEmployeeId,
-                   items: _employees.map<DropdownMenuItem<int>>((e) => DropdownMenuItem(value: e['id'], child: Text(e['name']))).toList(),
-                   onChanged: (v) => setModalState(() => selectedEmployeeId = v),
-                 ),
-                 const SizedBox(height: 16),
-                 
-                 TextField(
-                   controller: notesController,
-                   decoration: const InputDecoration(labelText: "Notes (Optional)", border: OutlineInputBorder()),
-                 ),
-                 const SizedBox(height: 24),
-                 
-                 SizedBox(
-                   width: double.infinity,
-                   height: 50,
-                   child: ElevatedButton(
-                     onPressed: () async {
-                       if (selectedRoomId == null || selectedServiceId == null || selectedEmployeeId == null) {
-                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please select Room, Service and Staff")));
-                         return;
-                       }
-                       
-                       Navigator.pop(ctx);
-                       _submitAssignment(selectedRoomId!, selectedServiceId!, selectedEmployeeId!, notesController.text);
-                     },
-                     style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
-                     child: const Text("Assign Service"),
-                   ),
-                 ),
-                 const SizedBox(height: 24),
-               ],
-             ),
+           return OnyxGlassDialog(
+             title: "MOBILE ALLOCATION",
+             children: [
+               _buildGlassDropdown<int>(
+                 label: "SELECT TARGET ROOM",
+                 value: selectedRoomId,
+                 items: _rooms.map<DropdownMenuItem<int>>((r) => DropdownMenuItem(value: r['id'], child: Text("ROOM ${r['room_number']}", style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)))).toList(),
+                 onChanged: (v) => setModalState(() => selectedRoomId = v),
+               ),
+               const SizedBox(height: 16),
+               
+               _buildGlassDropdown<int>(
+                 label: "SERVICE TYPE",
+                 value: selectedServiceId,
+                 items: _availableServices.map<DropdownMenuItem<int>>((s) => DropdownMenuItem(value: s['id'], child: Text(s['name'].toString().toUpperCase(), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)))).toList(),
+                 onChanged: (v) => setModalState(() => selectedServiceId = v),
+               ),
+               const SizedBox(height: 16),
+               
+               _buildGlassDropdown<int>(
+                 label: "ASSIGN STAFF",
+                 value: selectedEmployeeId,
+                 items: _employees.map<DropdownMenuItem<int>>((e) => DropdownMenuItem(value: e['id'], child: Text(e['name'].toString().toUpperCase(), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)))).toList(),
+                 onChanged: (v) => setModalState(() => selectedEmployeeId = v),
+               ),
+               const SizedBox(height: 16),
+               
+               _buildGlassInput(notesController, "REMARKS (OPTIONAL)", Icons.note_add_outlined),
+             ],
+             actions: [
+               TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("CANCEL", style: TextStyle(color: Colors.white24, fontWeight: FontWeight.w900, letterSpacing: 1))),
+               ElevatedButton(
+                 onPressed: () {
+                   if (selectedRoomId != null && selectedServiceId != null && selectedEmployeeId != null) {
+                     Navigator.pop(ctx);
+                     _submitAssignment(selectedRoomId!, selectedServiceId!, selectedEmployeeId!, notesController.text);
+                   }
+                 },
+                 style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent, foregroundColor: AppColors.onyx),
+                 child: const Text("CONFIRM ASSIGNMENT", style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 0.5)),
+               ),
+             ],
            );
         },
       ),
     );
   }
+
 
   Future<void> _submitAssignment(int roomId, int serviceId, int empId, String notes) async {
       try {
@@ -951,93 +1043,72 @@ class _ManagerServiceAssignmentScreenState extends State<ManagerServiceAssignmen
            final proceed = await showDialog<bool>(
              context: context,
              builder: (ctx) => StatefulBuilder(
-               builder: (context, setDialogState) => AlertDialog(
-                 title: const Text("Complete Service"),
-                 content: SizedBox(
-                   width: double.maxFinite,
-                   child: SingleChildScrollView(
-                     child: Column(
-                       mainAxisSize: MainAxisSize.min,
-                       crossAxisAlignment: CrossAxisAlignment.start,
-                       children: [
-                         const Text("Service is finished.", style: TextStyle(fontWeight: FontWeight.bold)),
-                         const SizedBox(height: 8),
-                         const Text("Select return location if any items were not consumed:", style: TextStyle(fontSize: 12, color: Colors.grey)),
-                         const SizedBox(height: 8),
-                         DropdownButtonFormField<int>(
-                           isExpanded: true,
-                           decoration: const InputDecoration(
-                             border: OutlineInputBorder(),
-                             hintText: "Select Location (Optional)",
-                             isDense: true,
-                             contentPadding: EdgeInsets.all(12),
-                           ),
-                           items: [
-                             const DropdownMenuItem<int>(value: null, child: Text("All Consumed (No Returns)", style: TextStyle(color: Colors.grey))),
-                             ..._locations.map((l) => DropdownMenuItem<int>(
-                               value: l['id'], 
-                               child: Text(l['name'], overflow: TextOverflow.ellipsis)
-                             ))
-                           ],
-                           onChanged: (v) => setDialogState(() => selectedLocId = v),
-                         ),
-                         const SizedBox(height: 16),
-                         const Text("Items Used in Service:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.blueGrey)),
-                         const SizedBox(height: 8),
-                         ...items!.map((item) {
-                             return Padding(
-                               padding: const EdgeInsets.only(bottom: 12),
-                               child: Row(
-                                 children: [
-                                   Expanded(
-                                     flex: 2,
-                                     child: Column(
-                                       crossAxisAlignment: CrossAxisAlignment.start,
-                                       children: [
-                                         Text(item['name'] ?? 'Item', style: const TextStyle(fontWeight: FontWeight.w500)),
-                                         Text("Used: ${item['quantity'] ?? 1} ${item['unit'] ?? ''}", style: TextStyle(fontSize: 11, color: Colors.grey[600])),
-                                       ],
-                                     )
-                                   ),
-                                   const SizedBox(width: 10),
-                                   if (selectedLocId != null)
-                                     Expanded(
-                                       flex: 1,
-                                       child: TextField(
-                                           controller: qtyControllers[item['id']],
-                                           decoration: const InputDecoration(
-                                               labelText: "Return",
-                                               hintText: "0",
-                                               isDense: true,
-                                               border: OutlineInputBorder(),
-                                               contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 12)
-                                           ),
-                                           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                       )
-                                     )
-                                   else 
-                                     const Text("Consumed", style: TextStyle(fontSize: 11, color: Colors.grey, fontStyle: FontStyle.italic)),
-                                 ],
-                               ),
-                             );
-                         }),
-                         if (selectedLocId != null)
-                            const Text("Leave empty or 0 if fully consumed.", style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Colors.grey)),
-                       ],
-                     ),
+               builder: (context, setDialogState) => OnyxGlassDialog(
+                 title: "COMPLETE SERVICE",
+                 children: [
+                   const Text(
+                     "PERFORM FINAL VALIDATION AND RECORD ANY RETURNED RESOURCES.",
+                     textAlign: TextAlign.center,
+                     style: TextStyle(color: Colors.white24, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1),
                    ),
-                 ),
+                   const SizedBox(height: 24),
+                   _buildGlassDropdown<int>(
+                     label: "RETURN REPOSITORY (IF ANY)",
+                     value: selectedLocId,
+                     items: [
+                       const DropdownMenuItem<int>(value: null, child: Text("ALL CONSUMED / NO RETURNS", style: TextStyle(color: Colors.white24, fontSize: 11, fontWeight: FontWeight.bold))),
+                       ..._locations.map((l) => DropdownMenuItem<int>(
+                         value: l['id'], 
+                         child: Text(l['name'].toString().toUpperCase(), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold))
+                       ))
+                     ],
+                     onChanged: (v) => setDialogState(() => selectedLocId = v),
+                   ),
+                   const SizedBox(height: 24),
+                         Text("RESOURCE ALLOCATION SUMMARY", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 9, color: AppColors.accent, letterSpacing: 2)),
+                   const SizedBox(height: 12),
+                   ...items!.map((item) {
+                       return Container(
+                         margin: const EdgeInsets.only(bottom: 12),
+                         padding: const EdgeInsets.all(12),
+                         decoration: BoxDecoration(color: Colors.white.withOpacity(0.03), borderRadius: BorderRadius.circular(16)),
+                         child: Row(
+                           children: [
+                             Expanded(
+                               flex: 2,
+                               child: Column(
+                                 crossAxisAlignment: CrossAxisAlignment.start,
+                                 children: [
+                                   Text(item['name']?.toString().toUpperCase() ?? 'ITEM', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: Colors.white)),
+                                   Text("ISSUED: ${item['quantity'] ?? 1} ${item['unit']?.toString().toUpperCase() ?? ''}", style: TextStyle(fontSize: 9, color: Colors.white.withOpacity(0.3), fontWeight: FontWeight.bold)),
+                                 ],
+                               )
+                             ),
+                             const SizedBox(width: 10),
+                             if (selectedLocId != null)
+                               Expanded(
+                                 flex: 1,
+                                 child: _buildGlassInput(qtyControllers[item['id']]!, "RTN QTY", Icons.assignment_return_outlined, type: TextInputType.number),
+                               )
+                             else 
+                               const Text("CONSUMED", style: TextStyle(fontSize: 9, color: Colors.white24, fontWeight: FontWeight.w900, letterSpacing: 1)),
+                           ],
+                         ),
+                       );
+                   }),
+                 ],
                  actions: [
-                   TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancel")),
+                   TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("CANCEL", style: TextStyle(color: Colors.white24, fontWeight: FontWeight.w900, letterSpacing: 1))),
                    ElevatedButton(
                      onPressed: () => Navigator.pop(ctx, true), 
-                     style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
-                     child: const Text("Complete")
+                     style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent, foregroundColor: AppColors.onyx),
+                     child: const Text("VALIDATE & COMPLETE", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 11, letterSpacing: 0.5))
                    ),
                  ],
                )
              )
            );
+
 
            if (proceed == true) {
               Map<int, double>? itemReturns;
@@ -1067,12 +1138,22 @@ class _ManagerServiceAssignmentScreenState extends State<ManagerServiceAssignmen
   Future<void> _deleteAssignment(int id) async {
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Delete Assignment"),
-        content: const Text("Are you sure? This cannot be undone."),
+      builder: (ctx) => OnyxGlassDialog(
+        title: "DELETE ALLOCATION",
+        children: [
+          Text(
+            "ARE YOU CERTAIN YOU WANT TO PERMANENTLY REMOVE THIS RESOURCE ASSIGNMENT? THIS ACTION CANNOT BE REVERSED.",
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5, height: 1.5),
+          ),
+        ],
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancel")),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Delete", style: TextStyle(color: Colors.red))),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("CANCEL", style: TextStyle(color: Colors.white24, fontWeight: FontWeight.w900, letterSpacing: 1))),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true), 
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+            child: const Text("DELETE PERMANENTLY", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 10, letterSpacing: 0.5)),
+          ),
         ],
       ),
     );
@@ -1087,6 +1168,7 @@ class _ManagerServiceAssignmentScreenState extends State<ManagerServiceAssignmen
     }
   }
 
+
   Widget _buildItemsUsed() {
     // Flatten items from usage report
     List<dynamic> items = [];
@@ -1100,55 +1182,84 @@ class _ManagerServiceAssignmentScreenState extends State<ManagerServiceAssignmen
         }
     }
     
-    if(items.isEmpty) return const Center(child: Text("No Items Used"));
+    if(items.isEmpty) return _buildEmptyState("USAGE LOGS", Icons.inventory_2_outlined);
 
     return ListView.builder(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         itemCount: items.length,
         itemBuilder: (ctx, i) {
             final item = items[i];
-            return Card(
-                child: ListTile(
-                    title: Text(item['item_name'] ?? 'Item'),
-                    subtitle: Text("Qty: ${item['quantity_used']} • Room ${item['room_number']}"),
-                    trailing: Text(_formatDate(item['date']).split(',')[0]), // Just date
-                ),
+            return Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              child: OnyxGlassCard(
+                  padding: const EdgeInsets.all(12),
+                  child: ListTile(
+                      dense: true,
+                      title: Text(item['item_name']?.toString().toUpperCase() ?? 'ITEM', style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.white, fontSize: 13, letterSpacing: 0.5)),
+                      subtitle: Text("QTY: ${item['quantity_used']} • ROOM ${item['room_number']}", style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                      trailing: Text(_formatDate(item['date']).split(',')[0].toUpperCase(), style: TextStyle(fontSize: 10, color: AppColors.accent, fontWeight: FontWeight.w900)),
+                  ),
+              ),
             );
         },
     );
   }
 
   Widget _buildRequestsList() {
-    return _serviceRequests.isEmpty 
-        ? const Center(child: Text("No pending requests"))
-        : ListView.builder(
-        padding: const EdgeInsets.all(16),
+    if (_serviceRequests.isEmpty) return _buildEmptyState("SERVICE REQUESTS", Icons.notifications_none);
+
+    return ListView.builder(
+        padding: const EdgeInsets.all(20),
         itemCount: _serviceRequests.length,
         itemBuilder: (ctx, i) {
             final r = _serviceRequests[i];
             final status = r['status'] ?? 'pending';
             
-            return Card(
-                child: ListTile(
-                    title: Text("Room ${r['room_number'] ?? '?'}"),
-                    subtitle: Text(r['description'] ?? r['request_type'] ?? 'Request'),
-                    trailing: PopupMenuButton<String>(
-                        onSelected: (val) => _updateRequestStatus(r['id'], val),
-                        itemBuilder: (context) => [
-                            const PopupMenuItem(value: 'in_progress', child: Text("In Progress")),
-                            const PopupMenuItem(value: 'completed', child: Text("Mark Completed")),
-                            const PopupMenuItem(value: 'cancelled', child: Text("Reject/Cancel", style: TextStyle(color: Colors.red))),
-                        ],
-                        child: Chip(
-                            label: Text(status.toString().toUpperCase()),
-                            backgroundColor: status == 'completed' ? Colors.green[100] : (status == 'in_progress' ? Colors.blue[100] : Colors.orange[100]),
-                        ),
-                    ),
-                ),
+            return Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              child: OnyxGlassCard(
+                  padding: const EdgeInsets.all(8),
+                  child: ListTile(
+                      dense: true,
+                      leading: Container(
+                        width: 44, height: 44,
+                        decoration: BoxDecoration(color: Colors.orangeAccent.withOpacity(0.1), borderRadius: BorderRadius.circular(14), border: Border.all(color: Colors.orangeAccent.withOpacity(0.2))),
+                        alignment: Alignment.center,
+                        child: const Icon(Icons.bolt, color: Colors.orangeAccent, size: 20),
+                      ),
+                      title: Text("ROOM ${r['room_number'] ?? '?'}", style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.white, fontSize: 13, letterSpacing: 0.5)),
+                      subtitle: Text((r['description'] ?? r['request_type'] ?? 'REQUEST').toString().toUpperCase(), style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                      trailing: PopupMenuButton<String>(
+                          onSelected: (val) => _updateRequestStatus(r['id'], val),
+                          color: AppColors.onyx.withOpacity(0.9),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Colors.white10)),
+                          itemBuilder: (context) => [
+                              _buildPopupItem('in_progress', 'IN PROGRESS', Icons.play_arrow, Colors.blueAccent),
+                              _buildPopupItem('completed', 'COMPLETED', Icons.check_circle, Colors.greenAccent),
+                              _buildPopupItem('cancelled', 'REJECT/CANCEL', Icons.cancel, Colors.redAccent),
+                          ],
+                          child: _buildSmallStatusChip(status),
+                      ),
+                  ),
+              ),
             );
         },
     );
   }
+
+  Widget _buildEmptyState(String msg, IconData icon) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center, 
+        children: [
+          Icon(icon, size: 64, color: Colors.white10), 
+          const SizedBox(height: 16), 
+          Text("NO $msg FOUND", style: TextStyle(color: Colors.white.withOpacity(0.15), fontWeight: FontWeight.w900, letterSpacing: 2, fontSize: 12))
+        ]
+      )
+    );
+  }
+
 
   Future<void> _updateRequestStatus(int id, String status) async {
       if (status == 'completed') {
@@ -1161,22 +1272,28 @@ class _ManagerServiceAssignmentScreenState extends State<ManagerServiceAssignmen
            if (isFoodOrder) {
                final paymentStatus = await showDialog<String>(
                    context: context,
-                   builder: (context) => AlertDialog(
-                       title: const Text("Complete Delivery"),
-                       content: const Text("Is this order Paid or Unpaid?"),
+                   builder: (context) => OnyxGlassDialog(
+                       title: "ORDER VALIDATION",
+                       children: [
+                         const Text(
+                           "CONFIRM THE SETTLEMENT STATUS FOR THIS DELIVERY REQUEST.",
+                           textAlign: TextAlign.center,
+                           style: TextStyle(color: Colors.white24, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1),
+                         ),
+                       ],
                        actions: [
                            TextButton(
                                onPressed: () => Navigator.pop(context, null),
-                               child: const Text("Cancel"),
+                               child: const Text("CANCEL", style: TextStyle(color: Colors.white24, fontWeight: FontWeight.w900, letterSpacing: 1)),
                            ),
                            TextButton(
                                onPressed: () => Navigator.pop(context, 'unpaid'),
-                               child: const Text("Unpaid", style: TextStyle(color: Colors.orange)),
+                               child: const Text("MARK UNPAID", style: TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.w900, fontSize: 11, letterSpacing: 0.5)),
                            ),
                            ElevatedButton(
                                onPressed: () => Navigator.pop(context, 'paid'),
-                               style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-                               child: const Text("Paid"),
+                               style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent, foregroundColor: AppColors.onyx),
+                               child: const Text("MARK PAID", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 11, letterSpacing: 0.5)),
                            ),
                        ],
                    ),
@@ -1213,88 +1330,66 @@ class _ManagerServiceAssignmentScreenState extends State<ManagerServiceAssignmen
                  final proceed = await showDialog<bool>(
                    context: context,
                    builder: (ctx) => StatefulBuilder(
-                     builder: (context, setDialogState) => AlertDialog(
-                       title: const Text("Complete Task"),
-                       content: SizedBox(
-                         width: double.maxFinite,
-                         child: SingleChildScrollView(
-                           child: Column(
-                             mainAxisSize: MainAxisSize.min,
-                             crossAxisAlignment: CrossAxisAlignment.start,
-                             children: [
-                                 const Text("Task finished.", style: TextStyle(fontWeight: FontWeight.bold)),
-                                 const SizedBox(height: 8),
-                                 const Text("Select return location if any items were not consumed:", style: TextStyle(fontSize: 12, color: Colors.grey)),
-                                 const SizedBox(height: 8),
-                                 DropdownButtonFormField<int>(
-                                   isExpanded: true,
-                                   decoration: const InputDecoration(
-                                     border: OutlineInputBorder(),
-                                     hintText: "Select Location (Optional)",
-                                     isDense: true,
-                                     contentPadding: EdgeInsets.all(12),
+                     builder: (context, setDialogState) => OnyxGlassDialog(
+                       title: "VALIDATE TASK COMPLETION",
+                       children: [
+                         const Text(
+                           "INDICATE IF ANY ALLOCATED RESOURCES ARE BEING RETURNED TO REPOSITORY.",
+                           textAlign: TextAlign.center,
+                           style: TextStyle(color: Colors.white24, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1),
+                         ),
+                         const SizedBox(height: 24),
+                         _buildGlassDropdown<int>(
+                           label: "RETURN LOCATION",
+                           value: selectedLocId,
+                           items: [
+                             const DropdownMenuItem<int>(value: null, child: Text("ALL CONSUMED / NO RETURNS", style: TextStyle(color: Colors.white24, fontSize: 11, fontWeight: FontWeight.bold))),
+                             ..._locations.map((l) => DropdownMenuItem<int>(
+                               value: l['id'], 
+                               child: Text(l['name'].toString().toUpperCase(), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold))
+                             ))
+                           ],
+                           onChanged: (v) => setDialogState(() => selectedLocId = v),
+                         ),
+                         const SizedBox(height: 24),
+                         Text("ALLOCATED RESOURCES", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 9, color: AppColors.accent, letterSpacing: 2)),
+                         const SizedBox(height: 12),
+                         ...items.map((item) {
+                             return Container(
+                               margin: const EdgeInsets.only(bottom: 12),
+                               padding: const EdgeInsets.all(12),
+                               decoration: BoxDecoration(color: Colors.white.withOpacity(0.03), borderRadius: BorderRadius.circular(16)),
+                               child: Row(
+                                 children: [
+                                   Expanded(
+                                     flex: 2,
+                                     child: Column(
+                                       crossAxisAlignment: CrossAxisAlignment.start,
+                                       children: [
+                                         Text(item['name'].toString().toUpperCase(), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: Colors.white)),
+                                         Text("ISSUED: ${item['quantity']} ${item['unit'].toString().toUpperCase()}", style: TextStyle(fontSize: 9, color: Colors.white.withOpacity(0.3), fontWeight: FontWeight.bold)),
+                                       ],
+                                     )
                                    ),
-                                   items: [
-                                     const DropdownMenuItem<int>(value: null, child: Text("All Consumed (No Returns)", style: TextStyle(color: Colors.grey))),
-                                     ..._locations.map((l) => DropdownMenuItem<int>(
-                                       value: l['id'], 
-                                       child: Text(l['name'], overflow: TextOverflow.ellipsis)
-                                     ))
-                                   ],
-                                   onChanged: (v) => setDialogState(() => selectedLocId = v),
-                                 ),
-                                 const SizedBox(height: 16),
-                                 const Text("Items Used in Service:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.blueGrey)),
-                                 const SizedBox(height: 8),
-                                 ...items.map((item) {
-                                     return Padding(
-                                       padding: const EdgeInsets.only(bottom: 12),
-                                       child: Row(
-                                         children: [
-                                           Expanded(
-                                             flex: 2,
-                                             child: Column(
-                                               crossAxisAlignment: CrossAxisAlignment.start,
-                                               children: [
-                                                 Text(item['name'], style: const TextStyle(fontWeight: FontWeight.w500)),
-                                                 Text("Used: ${item['quantity']} ${item['unit']}", style: TextStyle(fontSize: 11, color: Colors.grey[600])),
-                                               ],
-                                             )
-                                           ),
-                                           const SizedBox(width: 10),
-                                           if (selectedLocId != null)
-                                              Expanded(
-                                                flex: 1,
-                                                child: TextField(
-                                                    controller: qtyControllers[item['id']],
-                                                    decoration: const InputDecoration(
-                                                        labelText: "Return",
-                                                        hintText: "0",
-                                                        isDense: true,
-                                                        border: OutlineInputBorder(),
-                                                        contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 12)
-                                                    ),
-                                                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                                )
-                                              )
-                                           else
-                                              const Text("Consumed", style: TextStyle(fontSize: 11, color: Colors.grey, fontStyle: FontStyle.italic)),
-                                         ],
-                                       ),
-                                     );
-                                 }),
-                                 if (selectedLocId != null)
-                                    const Text("Leave empty or 0 if fully consumed.", style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Colors.grey)),
-                             ],
-                           ),
-                         )
-                       ),
+                                   const SizedBox(width: 10),
+                                   if (selectedLocId != null)
+                                      Expanded(
+                                        flex: 1,
+                                        child: _buildGlassInput(qtyControllers[item['id']]!, "RTN QTY", Icons.assignment_return_outlined, type: TextInputType.number),
+                                      )
+                                   else
+                                      const Text("CONSUMED", style: TextStyle(fontSize: 9, color: Colors.white24, fontWeight: FontWeight.w900, letterSpacing: 1)),
+                                 ],
+                               ),
+                             );
+                         }),
+                       ],
                        actions: [
-                         TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancel")),
+                         TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("CANCEL", style: TextStyle(color: Colors.white24, fontWeight: FontWeight.w900, letterSpacing: 1))),
                          ElevatedButton(
                            onPressed: () => Navigator.pop(ctx, true), 
-                           style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
-                           child: const Text("Complete")
+                           style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent, foregroundColor: AppColors.onyx),
+                           child: const Text("FINALIZE TASK", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 11, letterSpacing: 0.5))
                          ),
                        ],
                      )
@@ -1321,6 +1416,7 @@ class _ManagerServiceAssignmentScreenState extends State<ManagerServiceAssignmen
                  return;
               }
            }
+
       }
 
       _performUpdate(id, status);
@@ -1390,5 +1486,15 @@ class _ManagerServiceAssignmentScreenState extends State<ManagerServiceAssignmen
          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Failed update: $e")));
        }
      }
+  }
+
+  String _formatDate(dynamic date) {
+    if (date == null) return "N/A";
+    try {
+      final DateTime dt = date is DateTime ? date : DateTime.parse(date.toString());
+      return DateFormat('MMM dd, hh:mm a').format(dt);
+    } catch (e) {
+      return date.toString();
+    }
   }
 }

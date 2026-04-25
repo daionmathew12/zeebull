@@ -1,11 +1,9 @@
+import 'package:flutter/foundation.dart';
+
 class ApiConstants {
-  // NOTE: You are pointing to PRODUCTION. 
-  // If you see 404 errors for new endpoints (notifications/reports), 
-  // it means the server code hasn't been updated yet.
-  static const String baseUrl = 'https://teqmates.com/orchidapi/api';
-  static const String imageBaseUrl = 'https://teqmates.com/orchidapi';
-  // static const String baseUrl = 'http://localhost:8011/api'; // LOCAL
-  // static const String imageBaseUrl = 'http://localhost:8011'; // LOCAL
+  // Use localhost for web, 10.0.2.2 for Android emulator
+  static const String baseUrl = 'http://localhost:8011/api';
+  static const String imageBaseUrl = 'http://localhost:8011';
   static const String login = '/auth/login';
   static const String profile = '/auth/me';
   

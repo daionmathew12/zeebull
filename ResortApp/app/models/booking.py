@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Float, Integer, String, ForeignKey, Date, DateTime, Boolean
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import timezone, datetime
 from app.database import Base
 from .room import Room, RoomType
 from .user import User
@@ -25,8 +25,8 @@ class Booking(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     total_amount = Column(Float, default=0.0)
     advance_deposit = Column(Float, default=0.0)  # Advance payment made during booking
-    created_at = Column(DateTime, default=datetime.utcnow) # Added
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc)) # Added
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     room_type_id = Column(Integer, ForeignKey("room_types.id"), nullable=True) # Selected Room Type
     num_rooms = Column(Integer, default=1) # Number of rooms requested
     external_id = Column(String, nullable=True) # OTA/CM ID
@@ -61,7 +61,7 @@ class BookingRoom(Base):
     id = Column(Integer, primary_key=True, index=True)
     booking_id = Column(Integer, ForeignKey("bookings.id"))
     room_id = Column(Integer, ForeignKey("rooms.id"))
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 

@@ -8,7 +8,7 @@ from app.database import get_db
 from app.models.user import User
 from app.utils.auth import get_current_user
 from typing import List, Dict, Any
-from datetime import datetime
+from datetime import timezone, datetime
 from app.utils.branch_scope import get_branch_id
 
 router = APIRouter()
@@ -34,7 +34,7 @@ def reconcile_stock(
     from sqlalchemy import func
     
     report = {
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
         "total_items_checked": 0,
         "discrepancies_found": 0,
         "discrepancies_fixed": 0,
@@ -95,7 +95,7 @@ def reconcile_stock(
                         quantity=abs(discrepancy),
                         unit_price=item.unit_price,
                         total_amount=abs(discrepancy) * (item.unit_price or 0),
-                        reference_number=f"RECONCILE-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
+                        reference_number=f"RECONCILE-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
                         notes=f"Stock reconciliation: Global {old_global} → {total_location_stock} (Discrepancy: {discrepancy})",
                         created_by=current_user.id,
                         branch_id=branch_id
@@ -213,7 +213,7 @@ def stock_audit(
         })
     
     return {
-        "audit_date": datetime.utcnow().isoformat() + "Z",
+        "audit_date": datetime.now(timezone.utc).isoformat() + "Z",
         "items_audited": len(audit_results),
         "results": audit_results
     }

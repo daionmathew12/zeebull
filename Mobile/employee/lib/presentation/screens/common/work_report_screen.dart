@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../widgets/onyx_glass_card.dart';
 import '../../providers/work_report_provider.dart';
 import '../../providers/auth_provider.dart';
 
@@ -26,11 +27,21 @@ class _WorkReportScreenState extends State<WorkReportScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: AppColors.onyx,
       appBar: AppBar(
-        title: const Text("Activity Log"),
-        backgroundColor: AppColors.primary,
+        title: const Text(
+          "ACTIVITY LOG",
+          style: TextStyle(
+            fontWeight: FontWeight.w900,
+            letterSpacing: 2,
+            fontSize: 12,
+            color: AppColors.accent,
+          ),
+        ),
+        backgroundColor: Colors.transparent,
         elevation: 0,
+        centerTitle: true,
+        iconTheme: const IconThemeData(color: AppColors.accent),
       ),
       body: Column(
         children: [
@@ -71,9 +82,9 @@ class _WorkReportScreenState extends State<WorkReportScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.history_toggle_off, size: 60, color: Colors.grey),
+                        Icon(Icons.history_toggle_off, size: 60, color: Colors.white24),
                         SizedBox(height: 16),
-                        Text("No activity found for this period"),
+                        Text("No activity found for this period", style: TextStyle(color: Colors.white60, letterSpacing: 1, fontSize: 14)),
                       ],
                     ),
                   );
@@ -84,57 +95,64 @@ class _WorkReportScreenState extends State<WorkReportScreen> {
                   itemCount: activities.length,
                   itemBuilder: (context, index) {
                     final item = activities[index];
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      elevation: 2,
-                      child: ListTile(
-                        leading: _getIconForType(item.type),
-                        title: Row(
-                          children: [
-                            Text(item.type, style: const TextStyle(fontWeight: FontWeight.bold)),
-                            const Spacer(),
-                            if (item.userName != null)
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: Colors.blue.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Text(
-                                  item.userName!,
-                                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blue),
-                                ),
-                              ),
-                          ],
-                        ),
-                        subtitle: Column(
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: OnyxGlassCard(
+                        padding: const EdgeInsets.all(16),
+                        borderRadius: 16,
+                        child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const SizedBox(height: 4),
-                            Text(
-                              item.description,
-                              style: const TextStyle(height: 1.3),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              DateFormat('MMM d, h:mm a').format(item.activityDate),
-                              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                            _getIconForType(item.type),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Text(item.type.toUpperCase(), style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.white, fontSize: 11, letterSpacing: 1.5)),
+                                      const Spacer(),
+                                      if (item.userName != null)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: AppColors.accent.withOpacity(0.1),
+                                            borderRadius: BorderRadius.circular(12),
+                                            border: Border.all(color: AppColors.accent.withOpacity(0.3)),
+                                          ),
+                                          child: Text(
+                                            item.userName!.toUpperCase(),
+                                            style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: AppColors.accent, letterSpacing: 1),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    item.description,
+                                    style: const TextStyle(height: 1.3, color: Colors.white70, fontSize: 13),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        DateFormat('MMM d, h:mm a').format(item.activityDate).toUpperCase(),
+                                        style: const TextStyle(fontSize: 10, color: Colors.white38, fontWeight: FontWeight.bold, letterSpacing: 1),
+                                      ),
+                                      if (item.amount != null)
+                                        Text(
+                                          "₹${item.amount!.toStringAsFixed(2)}",
+                                          style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.greenAccent, fontSize: 13),
+                                        ),
+                                    ],
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
                         ),
-                        trailing: item.amount != null
-                            ? Column( // Use column to align amount to top if description is long
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text(
-                                    "₹${item.amount!.toStringAsFixed(2)}",
-                                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green),
-                                  ),
-                                ],
-                              ) 
-                            : null,
-                        isThreeLine: true,
                       ),
                     );
                   },
@@ -151,16 +169,20 @@ class _WorkReportScreenState extends State<WorkReportScreen> {
     return Consumer<WorkReportProvider>(
       builder: (context, provider, _) {
         return Container(
-          color: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _filterButton("Today", provider),
-              _filterButton("Week", provider),
-              _filterButton("Month", provider),
-              _filterButton("All", provider),
-            ],
+          color: Colors.transparent,
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+          child: OnyxGlassCard(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            borderRadius: 24,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _filterButton("Today", provider),
+                _filterButton("Week", provider),
+                _filterButton("Month", provider),
+                _filterButton("All", provider),
+              ],
+            ),
           ),
         );
       },
@@ -175,15 +197,17 @@ class _WorkReportScreenState extends State<WorkReportScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected ? AppColors.primary : Colors.transparent,
+          color: isSelected ? AppColors.accent.withOpacity(0.2) : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: isSelected ? AppColors.primary : Colors.grey.shade300),
+          border: Border.all(color: isSelected ? AppColors.accent : Colors.white12),
         ),
         child: Text(
-          label,
+          label.toUpperCase(),
           style: TextStyle(
-            color: isSelected ? Colors.white : Colors.grey[700],
-            fontWeight: FontWeight.bold,
+            color: isSelected ? AppColors.accent : Colors.white60,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1,
+            fontSize: 10,
           ),
         ),
       ),
@@ -219,9 +243,13 @@ class _WorkReportScreenState extends State<WorkReportScreen> {
         color = Colors.grey;
     }
     return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle),
-      child: Icon(icon, color: color),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        shape: BoxShape.circle,
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Icon(icon, color: color, size: 20),
     );
   }
 }

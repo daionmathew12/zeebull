@@ -3,7 +3,7 @@ Pydantic Schemas for Accounting Module
 """
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from datetime import datetime
+from datetime import timezone, datetime
 from enum import Enum
 
 
@@ -119,7 +119,7 @@ class JournalEntryLineOut(JournalEntryLineBase):
 
 # Journal Entry Schemas
 class JournalEntryBase(BaseModel):
-    entry_date: datetime = Field(default_factory=datetime.utcnow)
+    entry_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     reference_type: Optional[str] = None
     reference_id: Optional[int] = None
     description: str

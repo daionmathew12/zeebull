@@ -1,7 +1,7 @@
 """
 Date and Time Utilities for India/Kerala (IST - UTC+5:30)
 """
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from typing import Optional, Union
 import pytz
 
@@ -192,6 +192,28 @@ def ist_to_utc(ist_dt: datetime) -> datetime:
         ist_dt = get_ist_timezone().localize(ist_dt)
     
     return ist_dt.astimezone(timezone.utc)
+
+def format_iso_z(dt: Union[datetime, Union[datetime, date, None]]) -> Optional[str]:
+    """
+    Safely format a date or datetime object as an ISO string with a 'Z' suffix.
+    Ensures that date objects include a time part to avoid parsing errors in clients like Flutter.
+    """
+    from datetime import date as dt_date
+    if dt is None:
+        return None
+    
+    if isinstance(dt, datetime):
+        # If it already has Z or timezone offset, don't add Z
+        iso = dt.isoformat()
+        if 'Z' in iso or '+' in iso or (iso.count('-') > 2): # Very basic check
+             return iso
+        return iso + "Z"
+    
+    if isinstance(dt, dt_date):
+        # Convert date to datetime at midnight to ensure valid ISO format for parsers expecting time
+        return datetime.combine(dt, datetime.min.time()).isoformat() + "Z"
+    
+    return str(dt) + "Z"
 
 
 

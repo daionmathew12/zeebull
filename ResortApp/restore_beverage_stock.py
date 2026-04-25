@@ -3,7 +3,7 @@ Restore Coca Cola and Mineral Water stock to purchased amounts
 """
 from app.database import SessionLocal
 from app.models.inventory import InventoryItem, InventoryTransaction
-from datetime import datetime
+from datetime import timezone, datetime
 
 
 def restore_beverage_stock():
@@ -73,7 +73,7 @@ def restore_beverage_stock():
             department=coca_cola.category.parent_department if coca_cola.category else "Facility",
             notes="Stock restoration after transaction cleanup",
             created_by=None,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         db.add(coca_txn)
         
@@ -93,7 +93,7 @@ def restore_beverage_stock():
             department=water.category.parent_department if water.category else "Facility",
             notes="Stock restoration after transaction cleanup",
             created_by=None,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         db.add(water_txn)
         

@@ -28,13 +28,16 @@ class ExpenseProvider with ChangeNotifier {
     }
   }
 
-  Future<void> fetchExpenses() async {
+  Future<void> fetchExpenses({String? period}) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      final response = await _apiService.dio.get('/expenses?limit=100');
+      final response = await _apiService.dio.get('/expenses', queryParameters: {
+        'limit': 100,
+        if (period != null) 'period': period,
+      });
       if (response.statusCode == 200) {
         _expenses = response.data;
       } else {

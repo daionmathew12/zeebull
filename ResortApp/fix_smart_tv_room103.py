@@ -3,7 +3,7 @@ Fix Smart TV in Room 103 - Remove from location stock after damage
 """
 from app.database import SessionLocal
 from app.models.inventory import LocationStock, Location, InventoryItem
-from datetime import datetime
+from datetime import timezone, datetime
 
 db = SessionLocal()
 
@@ -45,7 +45,7 @@ try:
     if loc_stock.quantity > 0:
         # Deduct the damaged TV
         loc_stock.quantity -= 1
-        loc_stock.last_updated = datetime.utcnow()
+        loc_stock.last_updated = datetime.now(timezone.utc)
         db.commit()
         print(f"✅ Deducted 1 Smart TV from Room 103. New stock: {loc_stock.quantity}")
     else:

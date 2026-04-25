@@ -13,7 +13,7 @@ def fix_missing_history():
     ).all()
     
     from app.curd.inventory import generate_issue_number
-    from datetime import datetime
+    from datetime import timezone, datetime
     
     for mapping in mappings:
         # Check if a transaction/issue already exists for this mapping
@@ -39,7 +39,7 @@ def fix_missing_history():
                 issued_by=mapping.assigned_by if mapping.assigned_by else 1, # Default to admin (1) if unknown
                 source_location_id=1,
                 destination_location_id=mapping.location_id,
-                issue_date=mapping.assigned_date or datetime.utcnow(),
+                issue_date=mapping.assigned_date or datetime.now(timezone.utc),
                 notes=f"Retroactive History for Asset Assignment"
             )
             db.add(issue)

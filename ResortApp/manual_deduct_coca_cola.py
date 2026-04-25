@@ -4,7 +4,7 @@ Manually deduct Coca Cola that should have been deducted at check-in
 from app.database import SessionLocal
 from app.models.inventory import InventoryItem, InventoryTransaction, LocationStock
 from app.models.room import Room
-from datetime import datetime
+from datetime import timezone, datetime
 
 
 def manual_deduct_coca_cola():
@@ -78,7 +78,7 @@ def manual_deduct_coca_cola():
             department=coca_cola.category.parent_department if coca_cola.category else "Housekeeping",
             notes=f"Manual deduction for check-in - Room {room.number} (missed during automatic assignment)",
             created_by=None,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         db.add(transaction)
         

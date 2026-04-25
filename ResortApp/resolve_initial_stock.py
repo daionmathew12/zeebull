@@ -2,7 +2,7 @@
 import sys
 import os
 from sqlalchemy import func
-from datetime import datetime
+from datetime import timezone, datetime
 
 # Add root directory to path
 sys.path.append(os.getcwd())
@@ -97,7 +97,7 @@ def resolve_initial_stock():
         ]
 
         entry = JournalEntryCreate(
-            entry_date=datetime.utcnow(),
+            entry_date=datetime.now(timezone.utc),
             reference_type="manual_adjustment",
             reference_id=0,
             description="Opening Stock Adjustment",

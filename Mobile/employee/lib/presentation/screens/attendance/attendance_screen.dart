@@ -8,6 +8,10 @@ import 'package:provider/provider.dart';
 import 'package:orchid_employee/presentation/providers/leave_provider.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:convert';
+import 'dart:ui';
+import 'package:image_picker/image_picker.dart';
+import 'package:orchid_employee/presentation/widgets/attendance_helper.dart';
+import 'package:orchid_employee/presentation/widgets/onyx_glass_card.dart';
 
 class AttendanceScreen extends StatefulWidget {
   const AttendanceScreen({super.key});
@@ -81,6 +85,22 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     }
   }
 
+  Future<String?> _takeSelfie() async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? photo = await picker.pickImage(
+        source: ImageSource.camera,
+        preferredCameraDevice: CameraDevice.front,
+        imageQuality: 30, // Optimized for upload speed
+        maxWidth: 1000,
+      );
+      return photo?.path;
+    } catch (e) {
+      print("Selfie capture error: $e");
+      return null;
+    }
+  }
+
   Future<void> _checkClockInStatus() async {
     final authProvider = context.read<AuthProvider>();
     final employeeId = authProvider.employeeId;
@@ -103,10 +123,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           );
           
           if (todayLog != null && todayLog['check_out_time'] == null) {
-            // Backend stores in UTC, convert to IST
+            // Backend already stores in IST, just parse it directly
             try {
-              final utcDateTime = DateTime.parse('${todayLog['date']}T${todayLog['check_in_time']}Z');
-              final istDateTime = utcDateTime.add(Duration(hours: 5, minutes: 30));
+              final istDateTime = DateTime.parse('${todayLog['date']}T${todayLog['check_in_time']}');
               
               setState(() {
                 _isClockedIn = true;
@@ -136,187 +155,20 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   }
 
   Future<void> _handleClockInOut() async {
-    final authProvider = context.read<AuthProvider>();
-    final attendanceProvider = context.read<AttendanceProvider>();
-    final employeeId = authProvider.employeeId;
-    
-    if (employeeId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Employee ID not found")),
-      );
-      return;
-    }
-
-    final tasks = authProvider.dailyTasks;
-
-    if (tasks.isEmpty) {
-      // No tasks, proceed directly
-      await _executeClockInOut(context, authProvider, attendanceProvider, employeeId);
-      return;
-    }
-
-    // Show dialog with checklist
-    List<String> currentCompleted = _isClockedIn 
-        ? List<String>.from(_completedTasks)
-        : []; 
-    
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            bool allChecked = true;
-            for (String t in tasks) {
-              if (!currentCompleted.contains(t)) {
-                allChecked = false;
-                break;
-              }
-            }
-
-            return AlertDialog(
-              title: Text(!_isClockedIn ? 'Pre-Shift Task Check' : 'End-Shift Task Check'),
-              content: SizedBox(
-                width: double.maxFinite,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      !_isClockedIn 
-                          ? 'Please acknowledge your assigned daily tasks for today before starting.'
-                          : 'Please confirm completion of all your daily tasks before leaving.',
-                      style: TextStyle(color: Colors.grey.shade700),
-                    ),
-                    const SizedBox(height: 16),
-                    Flexible(
-                      child: ListView.builder(
-                        shrinkWrap: true,
-                        itemCount: tasks.length,
-                        itemBuilder: (context, index) {
-                          final task = tasks[index];
-                          final isChecked = currentCompleted.contains(task);
-                          return CheckboxListTile(
-                            title: Text(task),
-                            value: isChecked,
-                            onChanged: (val) {
-                              setDialogState(() {
-                                if (val == true) {
-                                  currentCompleted.add(task);
-                                } else {
-                                  currentCompleted.remove(task);
-                                }
-                              });
-                            },
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  onPressed: allChecked ? () async {
-                    Navigator.pop(context); // Close dialog
-
-                    await _executeClockInOut(context, authProvider, attendanceProvider, employeeId, tasksToSync: currentCompleted);
-                  } : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: allChecked ? Colors.green : Colors.grey,
-                  ),
-                  child: Text(!_isClockedIn ? 'Acknowledge & Clock In' : 'Complete & Clock Out', style: TextStyle(color: Colors.white)),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Future<void> _executeClockInOut(BuildContext context, AuthProvider authProvider, AttendanceProvider attendanceProvider, int employeeId, {List<String>? tasksToSync}) async {
     setState(() => _isLoading = true);
-
     try {
-      final apiService = ApiService();
-      
-      if (_isClockedIn) {
-        // Update backend with tasks completed if tracking
-        if (tasksToSync != null && _activeLogId != null) {
-           try {
-             await apiService.updateWorkLogTasks(_activeLogId!, tasksToSync);
-           } catch (e) {
-             print("Failed to sync tasks: $e");
-           }
-        }
-
-        // Clock Out
-        final response = await apiService.clockOut(employeeId);
-        if (response.statusCode == 200) {
-          setState(() {
-            _isClockedIn = false;
-            _clockInTime = null;
-          });
-          // Refresh work logs
-          attendanceProvider.fetchWorkLogs(employeeId);
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("✓ Clocked Out Successfully")),
-            );
-          }
-        }
-      } else {
-        // Clock In
-        Position? position = await _getCurrentLocation();
-        final response = await apiService.clockIn(
-          employeeId, 
-          "Mobile App",
-          latitude: position?.latitude,
-          longitude: position?.longitude,
-        );
-        if (response.statusCode == 200) {
-          int? newLogId = response.data?['id'];
-          setState(() {
-            _isClockedIn = true;
-            _clockInTime = DateTime.now();
-            if (newLogId != null) _activeLogId = newLogId;
-            if (tasksToSync != null) {
-              _completedTasks = List.from(tasksToSync);
-            }
-          });
-          
-          if (tasksToSync != null && newLogId != null && tasksToSync.isNotEmpty) {
-             try {
-               await apiService.updateWorkLogTasks(newLogId, tasksToSync);
-             } catch(e) {
-               print("Failed to sync initial tasks on clock in: $e");
-             }
-          }
-
-          // Refresh work logs
-          await attendanceProvider.checkTodayStatus(employeeId);
-          await attendanceProvider.fetchWorkLogs(employeeId);
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("✓ Clocked In Successfully")),
-            );
-          }
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error: ${e.toString()}")),
-        );
-      }
+      await AttendanceHelper.performAttendanceAction(
+        context: context, 
+        isClockingIn: !_isClockedIn,
+      );
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+        _checkClockInStatus();
+      }
     }
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -326,152 +178,150 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     return DefaultTabController(
       length: 4,
       child: Scaffold(
-        backgroundColor: Colors.grey[100],
-        body: SafeArea(
-          child: Column(
-            children: [
-              // Header with Clock In/Out
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: _isClockedIn 
-                        ? [Colors.green, Colors.green.shade700]
-                        : [AppColors.primary, AppColors.primary.withOpacity(0.8)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
+        backgroundColor: AppColors.onyx,
+        extendBodyBehindAppBar: true,
+        body: Stack(
+          children: [
+            // Dark Background
+            Container(color: AppColors.onyx),
+            
+            // Background Gradient for Header
+            Positioned(
+              top: 0, left: 0, right: 0, height: 380,
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(colors: AppColors.primaryGradient, begin: Alignment.topLeft, end: Alignment.bottomRight),
+                  borderRadius: BorderRadius.vertical(bottom: Radius.circular(48)),
                 ),
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        IconButton(
-                          onPressed: () => Navigator.pop(context),
-                          icon: Icon(Icons.arrow_back, color: Colors.white),
-                        ),
-                        Expanded(
-                          child: Text(
-                            "Attendance & Profile",
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          onPressed: () {
-                            if (authProvider.employeeId != null) {
-                              attendanceProvider.fetchWorkLogs(authProvider.employeeId!);
-                            }
-                          },
-                          icon: Icon(Icons.refresh, color: Colors.white),
-                        ),
-                      ],
-                    ),
-                    SizedBox(height: 20),
-                    // Clock In/Out Card
-                    Container(
-                      padding: EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.white.withOpacity(0.3)),
-                      ),
-                      child: Column(
+              ),
+            ),
+
+            SafeArea(
+              child: Column(
+                children: [
+                   Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                      child: Row(
                         children: [
-                          Text(
-                            _isClockedIn ? "You're Clocked In" : "Ready to Start?",
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          SizedBox(height: 16),
-                          Text(
-                            DateFormat('hh:mm a').format(DateTime.now()),
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 48,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          if (_isClockedIn && _clockInTime != null) ...[
-                            SizedBox(height: 8),
-                            Text(
-                              "Clocked in at ${DateFormat('hh:mm a').format(_clockInTime!)}",
-                              style: TextStyle(color: Colors.white70, fontSize: 14),
+                          IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 20)),
+                          const Expanded(child: Text("Attendance & HR", style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold, letterSpacing: 0.5))),
+                          _buildHeaderAction(Icons.refresh, () {
+                            if (authProvider.employeeId != null) attendanceProvider.fetchWorkLogs(authProvider.employeeId!);
+                          }),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: OnyxGlassCard(
+                        padding: const EdgeInsets.all(28),
+                        borderRadius: 32,
+                        child: Column(
+                          children: [
+                            _buildDutyBadge(_isClockedIn),
+                            const SizedBox(height: 24),
+                            Text(DateFormat('hh:mm').format(DateTime.now()), style: const TextStyle(color: Colors.white, fontSize: 64, fontWeight: FontWeight.w100, letterSpacing: -2)),
+                            Text(DateFormat('a').format(DateTime.now()), style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 16, fontWeight: FontWeight.w900, letterSpacing: 2)),
+                            if (_isClockedIn && _clockInTime != null) ...[
+                              const SizedBox(height: 16),
+                              Text("SHIFT STARTED: ${DateFormat('hh:mm a').format(_clockInTime!).toUpperCase()}", style: TextStyle(color: AppColors.accent.withOpacity(0.7), fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1)),
+                            ],
+                            const SizedBox(height: 32),
+                            SizedBox(
+                              width: double.infinity, height: 56,
+                              child: ElevatedButton(
+                                onPressed: _isLoading ? null : _handleClockInOut,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: _isClockedIn ? Colors.white.withOpacity(0.1) : AppColors.accent,
+                                  foregroundColor: _isClockedIn ? Colors.white : AppColors.onyx,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                  side: _isClockedIn ? BorderSide(color: Colors.white.withOpacity(0.2)) : BorderSide.none,
+                                ),
+                                child: _isLoading
+                                    ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                    : Text(_isClockedIn ? "FINISH SHIFT" : "START SHIFT", style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
+                              ),
                             ),
                           ],
-                          SizedBox(height: 24),
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton(
-                              onPressed: _isLoading ? null : _handleClockInOut,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.white,
-                                foregroundColor: _isClockedIn ? Colors.green : AppColors.primary,
-                                padding: EdgeInsets.symmetric(vertical: 16),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                              child: _isLoading
-                                  ? SizedBox(
-                                      height: 20,
-                                      width: 20,
-                                      child: CircularProgressIndicator(strokeWidth: 2),
-                                    )
-                                  : Text(
-                                      _isClockedIn ? "CLOCK OUT" : "CLOCK IN",
-                                      style: TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          const SizedBox(height: 32),
+                          TabBar(
+                            labelColor: AppColors.accent, unselectedLabelColor: Colors.white30, indicatorColor: AppColors.accent, indicatorWeight: 4, indicatorSize: TabBarIndicatorSize.label,
+                            labelStyle: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11, letterSpacing: 1), unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                            tabs: const [Tab(icon: Icon(Icons.history_rounded, size: 20), text: 'HISTORY'), Tab(icon: Icon(Icons.beach_access_rounded, size: 20), text: 'LEAVES'), Tab(icon: Icon(Icons.payments_rounded, size: 20), text: 'PAYROLL'), Tab(icon: Icon(Icons.badge_rounded, size: 20), text: 'ID')],
+                          ),
+                          const SizedBox(height: 16),
+                          Expanded(
+                            child: TabBarView(
+                              children: [
+                                _AttendanceHistoryTab(),
+                                _LeavesTab(),
+                                _PaymentsTab(),
+                                _DetailsTab(),
+                              ],
                             ),
                           ),
                         ],
                       ),
                     ),
-                  ],
-                ),
+                ],
               ),
-              
-              // Tabs
-              Container(
-                color: Colors.white,
-                child: TabBar(
-                  labelColor: AppColors.primary,
-                  unselectedLabelColor: Colors.grey,
-                  indicatorColor: AppColors.primary,
-                  indicatorWeight: 3,
-                  isScrollable: true,
-                  tabs: [
-                    Tab(icon: Icon(Icons.access_time, size: 20), text: 'History'),
-                    Tab(icon: Icon(Icons.beach_access, size: 20), text: 'Leaves'),
-                    Tab(icon: Icon(Icons.payments, size: 20), text: 'Payments'),
-                    Tab(icon: Icon(Icons.info_outline, size: 20), text: 'Details'),
-                  ],
-                ),
-              ),
-              
-              // Tab Content
-              Expanded(
-                child: TabBarView(
-                  children: [
-                    _AttendanceHistoryTab(),
-                    _LeavesTab(),
-                    _PaymentsTab(),
-                    _DetailsTab(),
-                  ],
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildDutyBadge(bool isClockedIn) {
+    final color = isClockedIn ? Colors.greenAccent : Colors.white;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withOpacity(0.3), width: 1),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              boxShadow: [BoxShadow(color: color.withOpacity(0.5), blurRadius: 4, spreadRadius: 1)],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            isClockedIn ? "ON DUTY" : "OFF DUTY",
+            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: color, letterSpacing: 1.5),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeaderAction(IconData icon, VoidCallback onTap) {
+    return Container(
+      margin: const EdgeInsets.only(left: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: IconButton(
+        onPressed: onTap,
+        icon: Icon(icon, color: Colors.white, size: 20),
+        constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+        padding: EdgeInsets.zero,
       ),
     );
   }
@@ -492,62 +342,45 @@ class _AttendanceHistoryTab extends StatelessWidget {
         }
       },
       child: ListView(
-        padding: EdgeInsets.all(16),
+        padding: const EdgeInsets.all(16),
         children: [
           // Summary Card
-          Container(
-            padding: EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Colors.blue.shade400, Colors.blue.shade600],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.blue.withOpacity(0.3),
-                  blurRadius: 10,
-                  offset: Offset(0, 4),
-                ),
-              ],
-            ),
+          OnyxGlassCard(
+            padding: const EdgeInsets.all(28),
+            borderRadius: 32,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    Icon(Icons.calendar_month, color: Colors.white, size: 28),
-                    SizedBox(width: 12),
-                    Flexible(
-                      child: Text(
-                        'This Month',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(color: AppColors.accent.withOpacity(0.1), shape: BoxShape.circle),
+                      child: const Icon(Icons.analytics_outlined, color: AppColors.accent, size: 20),
+                    ),
+                    const SizedBox(width: 16),
+                    const Text(
+                      'MONTHLY INSIGHTS',
+                      style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w900, letterSpacing: 2),
                     ),
                   ],
                 ),
-                SizedBox(height: 20),
+                const SizedBox(height: 32),
                 Row(
                   children: [
-                  Expanded(
-                    child: _SummaryItem(
-                      icon: Icons.event_available,
-                      label: 'Days Worked',
-                      value: '${_groupLogsByDate(workLogs).length}',
-                      color: Colors.white,
-                    ),
-                  ),
-                    SizedBox(width: 16),
                     Expanded(
                       child: _SummaryItem(
-                        icon: Icons.access_time,
-                        label: 'Total Hours',
+                        icon: Icons.calendar_today_outlined,
+                        label: 'DAYS WORKED',
+                        value: '${_groupLogsByDate(workLogs).length}',
+                        color: Colors.white,
+                      ),
+                    ),
+                    Container(width: 1, height: 40, color: Colors.white10),
+                    Expanded(
+                      child: _SummaryItem(
+                        icon: Icons.timer_outlined,
+                        label: 'TOTAL HOURS',
                         value: _calculateTotalHours(workLogs),
                         color: Colors.white,
                       ),
@@ -558,41 +391,35 @@ class _AttendanceHistoryTab extends StatelessWidget {
             ),
           ),
           
-          SizedBox(height: 24),
+          const SizedBox(height: 32),
           
-          // History Header
-          Row(
-            children: [
-              Icon(Icons.history, color: AppColors.primary, size: 24),
-              SizedBox(width: 8),
-              Text(
-                'Attendance History',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.grey[800],
+          Padding(
+            padding: const EdgeInsets.only(left: 8),
+            child: Row(
+              children: [
+                const Icon(Icons.history_rounded, color: Colors.white24, size: 20),
+                const SizedBox(width: 12),
+                const Text(
+                  'ATTENDANCE LOGS',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: Colors.white30, letterSpacing: 2),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
           
-          SizedBox(height: 16),
+          const SizedBox(height: 16),
           
-          // Work Logs List - Grouped by Date
           if (workLogs.isEmpty)
             Center(
               child: Padding(
                 padding: const EdgeInsets.all(40.0),
                 child: Column(
                   children: [
-                    Icon(Icons.event_busy, size: 64, color: Colors.grey[300]),
-                    SizedBox(height: 16),
-                    Text(
-                      'No attendance records found',
-                      style: TextStyle(
-                        color: Colors.grey[500],
-                        fontSize: 16,
-                      ),
+                    Icon(Icons.event_busy, size: 64, color: Colors.white10),
+                    const SizedBox(height: 24),
+                    const Text(
+                      'No records found',
+                      style: TextStyle(color: Colors.white30, fontSize: 14, fontWeight: FontWeight.w900, letterSpacing: 1),
                     ),
                   ],
                 ),
@@ -603,7 +430,6 @@ class _AttendanceHistoryTab extends StatelessWidget {
               final date = entry.key;
               final dayLogs = entry.value;
               
-              // Calculate total duration for the day
               int totalMinutes = 0;
               bool hasActiveLog = false;
               
@@ -611,9 +437,7 @@ class _AttendanceHistoryTab extends StatelessWidget {
                 if (log['clockOut'] == null) {
                   hasActiveLog = true;
                 } else if (log['clockIn'] != null && log['clockOut'] != null) {
-                  totalMinutes += (log['clockOut'] as DateTime)
-                      .difference(log['clockIn'] as DateTime)
-                      .inMinutes;
+                  totalMinutes += (log['clockOut'] as DateTime).difference(log['clockIn'] as DateTime).inMinutes;
                 }
               }
               
@@ -621,162 +445,87 @@ class _AttendanceHistoryTab extends StatelessWidget {
               final remainingMinutes = totalMinutes % 60;
               
               return Container(
-                margin: EdgeInsets.only(bottom: 12),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 8,
-                      offset: Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Padding(
-                  padding: EdgeInsets.all(16),
+                margin: const EdgeInsets.only(bottom: 20),
+                child: OnyxGlassCard(
+                  padding: const EdgeInsets.all(24),
+                  borderRadius: 24,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Date Header
                       Row(
                         children: [
-                          Container(
-                            padding: EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: AppColors.primary.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Icon(
-                              Icons.calendar_today,
-                              color: AppColors.primary,
-                              size: 20,
-                            ),
-                          ),
-                          SizedBox(width: 12),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  DateFormat('EEEE, MMM dd, yyyy').format(DateTime.parse(date)),
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 15,
-                                  ),
+                                  DateFormat('EEEE, MMM dd, yyyy').format(DateTime.parse(date)).toUpperCase(),
+                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 1),
                                 ),
-                                SizedBox(height: 4),
-                                Text(
-                                  hasActiveLog 
-                                      ? 'Currently working'
-                                      : 'Total: ${totalHours}h ${remainingMinutes}m',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: hasActiveLog ? Colors.green : Colors.blue,
-                                    fontWeight: FontWeight.w500,
-                                  ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    Container(
+                                      width: 6,
+                                      height: 6,
+                                      decoration: BoxDecoration(
+                                        color: hasActiveLog ? Colors.greenAccent : Colors.indigoAccent,
+                                        shape: BoxShape.circle,
+                                        boxShadow: [BoxShadow(color: (hasActiveLog ? Colors.greenAccent : Colors.indigoAccent).withOpacity(0.4), blurRadius: 4)],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      hasActiveLog ? 'CURRENTLY ACTIVE' : 'TOTAL: ${totalHours}H ${remainingMinutes}M',
+                                      style: TextStyle(fontSize: 9, color: Colors.white.withOpacity(0.3), fontWeight: FontWeight.w900, letterSpacing: 1.5),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),
                           ),
-                          if (hasActiveLog)
-                            Container(
-                              padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: Colors.green.shade100,
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Text(
-                                'Active',
-                                style: TextStyle(
-                                  color: Colors.green.shade700,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
                         ],
                       ),
-                      
-                      SizedBox(height: 12),
-                      Divider(height: 1),
-                      SizedBox(height: 12),
-                      
-                      // All clock-in/out entries for this day
+                      const SizedBox(height: 16),
+                      const Divider(color: Colors.white10),
+                      const SizedBox(height: 16),
                       ...dayLogs.asMap().entries.map((logEntry) {
                         final index = logEntry.key;
                         final log = logEntry.value;
                         final clockIn = log['clockIn'] as DateTime?;
                         final clockOut = log['clockOut'] as DateTime?;
-                        
-                        final duration = clockIn != null && clockOut != null
-                            ? clockOut.difference(clockIn)
-                            : null;
+                        final duration = (clockIn != null && clockOut != null) ? clockOut.difference(clockIn) : null;
                         
                         return Padding(
-                          padding: EdgeInsets.only(bottom: index < dayLogs.length - 1 ? 12 : 0),
+                          padding: EdgeInsets.only(bottom: index < dayLogs.length - 1 ? 16 : 0),
                           child: Row(
                             children: [
-                              // Entry number badge
                               Container(
-                                width: 28,
-                                height: 28,
-                                decoration: BoxDecoration(
-                                  color: AppColors.primary.withOpacity(0.1),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    '${index + 1}',
-                                    style: TextStyle(
-                                      color: AppColors.primary,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ),
+                                width: 28, height: 28,
+                                decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), shape: BoxShape.circle),
+                                child: Center(child: Text('${index + 1}', style: const TextStyle(color: Colors.white30, fontWeight: FontWeight.w900, fontSize: 10))),
                               ),
-                              SizedBox(width: 12),
+                              const SizedBox(width: 16),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Row(
                                       children: [
-                                        Icon(Icons.login, size: 14, color: Colors.green),
-                                        SizedBox(width: 6),
-                                        Text(
-                                          clockIn != null 
-                                              ? DateFormat('hh:mm a').format(clockIn)
-                                              : 'N/A',
-                                          style: TextStyle(fontSize: 13),
-                                        ),
-                                        SizedBox(width: 16),
-                                        Icon(Icons.logout, size: 14, color: Colors.red),
-                                        SizedBox(width: 6),
-                                        Text(
-                                          clockOut != null 
-                                              ? DateFormat('hh:mm a').format(clockOut)
-                                              : 'Working',
-                                          style: TextStyle(fontSize: 13),
-                                        ),
+                                        const Icon(Icons.login_rounded, size: 12, color: Colors.greenAccent),
+                                        const SizedBox(width: 8),
+                                        Text(clockIn != null ? DateFormat('hh:mm a').format(clockIn) : 'N/A', style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                                        const SizedBox(width: 16),
+                                        const Icon(Icons.logout_rounded, size: 12, color: Colors.orangeAccent),
+                                        const SizedBox(width: 8),
+                                        Text(clockOut != null ? DateFormat('hh:mm a').format(clockOut) : 'Working', style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
                                       ],
                                     ),
                                     if (duration != null) ...[
-                                      SizedBox(height: 4),
-                                      Row(
-                                        children: [
-                                          Icon(Icons.timer, size: 12, color: Colors.blue),
-                                          SizedBox(width: 6),
-                                          Text(
-                                            '${duration.inHours}h ${duration.inMinutes % 60}m',
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color: Colors.blue,
-                                              fontWeight: FontWeight.w500,
-                                            ),
-                                          ),
-                                        ],
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        "DURATION: ${duration.inHours}H ${duration.inMinutes % 60}M",
+                                        style: TextStyle(color: Colors.white24, fontSize: 8, fontWeight: FontWeight.w900, letterSpacing: 1),
                                       ),
                                     ],
                                   ],
@@ -802,11 +551,9 @@ class _AttendanceHistoryTab extends StatelessWidget {
     for (var log in workLogs) {
       try {
         if (log['date'] != null && log['check_in_time'] != null && log['check_out_time'] != null) {
-          // Backend stores in UTC, convert to IST
-          final utcIn = DateTime.parse('${log['date']}T${log['check_in_time']}Z');
-          final utcOut = DateTime.parse('${log['date']}T${log['check_out_time']}Z');
-          final clockIn = utcIn.add(Duration(hours: 5, minutes: 30));
-          final clockOut = utcOut.add(Duration(hours: 5, minutes: 30));
+          // Backend already stores in IST
+          final clockIn = DateTime.parse('${log['date']}T${log['check_in_time']}');
+          final clockOut = DateTime.parse('${log['date']}T${log['check_out_time']}');
           totalMinutes += clockOut.difference(clockIn).inMinutes;
         }
       } catch (e) {
@@ -831,15 +578,13 @@ class _AttendanceHistoryTab extends StatelessWidget {
         DateTime? clockIn;
         DateTime? clockOut;
         
-        // Backend stores in UTC, convert to IST
+        // Backend already stores in IST
         if (log['check_in_time'] != null) {
-          final utcIn = DateTime.parse('${date}T${log['check_in_time']}Z');
-          clockIn = utcIn.add(Duration(hours: 5, minutes: 30));
+          clockIn = DateTime.parse('${date}T${log['check_in_time']}');
         }
         
         if (log['check_out_time'] != null) {
-          final utcOut = DateTime.parse('${date}T${log['check_out_time']}Z');
-          clockOut = utcOut.add(Duration(hours: 5, minutes: 30));
+          clockOut = DateTime.parse('${date}T${log['check_out_time']}');
         }
         
         if (!grouped.containsKey(date)) {
@@ -1449,59 +1194,51 @@ class _PaymentsTabState extends State<_PaymentsTab> {
       padding: EdgeInsets.all(16),
       children: [
         // Current Month Salary Card
-        Container(
-          padding: EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Colors.green.shade400, Colors.green.shade600],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.green.withOpacity(0.3),
-                blurRadius: 10,
-                offset: Offset(0, 4),
-              ),
-            ],
-          ),
+        // Current Month Salary Card - Onyx Glass Version
+        OnyxGlassCard(
+          padding: const EdgeInsets.all(28),
+          borderRadius: 32,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Icon(Icons.account_balance_wallet, color: Colors.white, size: 28),
-                  SizedBox(width: 12),
-                  Text(
-                    'Current Month',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        "MONTHLY SALARY", 
+                        style: TextStyle(color: Colors.white30, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1.5)
+                      ),
+                      const SizedBox(height: 8),
+                      isLoading
+                          ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white24))
+                          : Text(
+                              '₹ $formattedSalary',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 32,
+                                fontWeight: FontWeight.w100,
+                                letterSpacing: -1,
+                              ),
+                            ),
+                    ],
+                  ),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), shape: BoxShape.circle),
+                    child: const Icon(Icons.account_balance_wallet_outlined, color: Colors.white24, size: 24),
                   ),
                 ],
               ),
-              SizedBox(height: 20),
-              Text(
-                'Monthly Salary',
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.9),
-                  fontSize: 14,
-                ),
+              const SizedBox(height: 24),
+              const Divider(color: Colors.white10),
+              const SizedBox(height: 16),
+              const Text(
+                "ESTIMATED PAYOUT FOR CURRENT CYCLE",
+                style: TextStyle(color: Colors.white24, fontSize: 8, fontWeight: FontWeight.w900, letterSpacing: 1),
               ),
-              SizedBox(height: 8),
-              isLoading
-                  ? CircularProgressIndicator(color: Colors.white)
-                  : Text(
-                      '₹ $formattedSalary',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 36,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
             ],
           ),
         ),
@@ -1510,96 +1247,65 @@ class _PaymentsTabState extends State<_PaymentsTab> {
         
         // Salary Breakdown
         if (!isLoading && employeeData != null) ...[
-          Container(
-            padding: EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.receipt_long, color: AppColors.primary, size: 24),
-                    SizedBox(width: 12),
-                    Text(
-                      'Salary Breakdown',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.grey[800],
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            child: OnyxGlassCard(
+              padding: const EdgeInsets.all(24),
+              borderRadius: 24,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.receipt_long_outlined, color: Colors.white24, size: 20),
+                      const SizedBox(width: 12),
+                      const Text(
+                        'SALARY BREAKDOWN',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: Colors.white30, letterSpacing: 2),
                       ),
-                    ),
-                  ],
-                ),
-                SizedBox(height: 20),
-                _SalaryRow(label: 'Basic Salary', amount: salary, isTotal: false),
-                Divider(height: 24),
-                _SalaryRow(label: 'Net Salary', amount: salary, isTotal: true),
-              ],
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  _SalaryRow(label: 'Basic Salary', amount: salary, isTotal: false),
+                  const Divider(color: Colors.white10, height: 32),
+                  _SalaryRow(label: 'Net Salary', amount: salary, isTotal: true),
+                ],
+              ),
             ),
           ),
-          
-          SizedBox(height: 24),
         ],
         
         // Payment History Header
-        Row(
-          children: [
-            Icon(Icons.history, color: AppColors.primary, size: 24),
-            SizedBox(width: 8),
-            Text(
-              'Payment History',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Colors.grey[800],
+        Padding(
+          padding: const EdgeInsets.only(left: 8),
+          child: Row(
+            children: [
+              const Icon(Icons.history_rounded, color: Colors.white24, size: 20),
+              const SizedBox(width: 12),
+              const Text(
+                'PAYMENT HISTORY',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: Colors.white30, letterSpacing: 2),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         
         SizedBox(height: 16),
         
         // Payment Records
         if (isLoading)
-          Center(child: CircularProgressIndicator())
+          const Center(child: CircularProgressIndicator())
         else if (salaryPayments.isEmpty)
-          Container(
-            padding: EdgeInsets.all(32),
-            decoration: BoxDecoration(
-              color: Colors.grey.shade50,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.grey.shade200),
-            ),
+          OnyxGlassCard(
+            padding: const EdgeInsets.all(48),
+            borderRadius: 32,
             child: Column(
               children: [
-                Icon(Icons.receipt_long_outlined, size: 64, color: Colors.grey.shade400),
-                SizedBox(height: 16),
-                Text(
-                  'No Payment Records',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey.shade700,
-                  ),
-                ),
-                SizedBox(height: 8),
-                Text(
-                  'Payment history will appear here',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey.shade500,
-                  ),
-                  textAlign: TextAlign.center,
+                const Icon(Icons.receipt_long_outlined, size: 48, color: Colors.white10),
+                const SizedBox(height: 24),
+                const Text(
+                  'NO PAYMENT RECORDS',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: Colors.white24, letterSpacing: 2),
                 ),
               ],
             ),
@@ -1615,118 +1321,90 @@ class _PaymentsTabState extends State<_PaymentsTab> {
             final status = payment['payment_status'] ?? 'pending';
             
             return Container(
-              margin: EdgeInsets.only(bottom: 12),
-              padding: EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: status == 'paid' ? Colors.green.shade200 : Colors.orange.shade200,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 8,
-                    offset: Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.calendar_month,
-                            color: AppColors.primary,
-                            size: 20,
-                          ),
-                          SizedBox(width: 8),
-                          Text(
-                            month,
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.grey[800],
-                            ),
-                          ),
-                        ],
-                      ),
-                      Container(
-                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: status == 'paid' 
-                              ? Colors.green.shade100 
-                              : Colors.orange.shade100,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          status == 'paid' ? 'Paid' : 'Pending',
-                          style: TextStyle(
-                            color: status == 'paid' 
-                                ? Colors.green.shade700 
-                                : Colors.orange.shade700,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 12),
-                  Divider(height: 1),
-                  SizedBox(height: 12),
-                  _PaymentRow(label: 'Basic Salary', amount: basicSalary),
-                  _PaymentRow(label: 'Allowances', amount: allowances, isPositive: true),
-                  _PaymentRow(label: 'Deductions', amount: deductions, isNegative: true),
-                  SizedBox(height: 8),
-                  Divider(height: 1),
-                  SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Net Salary',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.grey[900],
-                        ),
-                      ),
-                      Text(
-                        '₹ ${netSalary.toStringAsFixed(0)}',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.green.shade700,
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (status == 'paid') ...[
-                    SizedBox(height: 12),
+              margin: const EdgeInsets.only(bottom: 16),
+              child: OnyxGlassCard(
+                padding: const EdgeInsets.all(24),
+                borderRadius: 24,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Icon(Icons.check_circle, size: 14, color: Colors.green.shade600),
-                        SizedBox(width: 6),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(month.toUpperCase(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 1)),
+                            const SizedBox(height: 4),
+                            Text(
+                              status == 'paid' ? "FUNDED" : "PROCESSING",
+                              style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1),
+                            ),
+                          ],
+                        ),
+                        _buildStatusBadge(status.toUpperCase(), status == 'paid' ? Colors.greenAccent : Colors.amberAccent),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    const Divider(color: Colors.white10),
+                    const SizedBox(height: 16),
+                    _PaymentRow(label: 'Basic Salary', amount: basicSalary),
+                    _PaymentRow(label: 'Allowances', amount: allowances, isPositive: true),
+                    _PaymentRow(label: 'Deductions', amount: deductions, isNegative: true),
+                    const Divider(color: Colors.white10, height: 32),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text("NET SALARY", style: TextStyle(color: Colors.white30, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
                         Text(
-                          'Paid on $paymentDate',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey.shade600,
-                          ),
+                          '₹ ${netSalary.toStringAsFixed(0)}',
+                          style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900),
                         ),
                       ],
                     ),
+                    if (status == 'paid') ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        "DISBURSED ON ${paymentDate.toString().toUpperCase()}",
+                        style: TextStyle(color: Colors.greenAccent.withOpacity(0.5), fontSize: 8, fontWeight: FontWeight.w900, letterSpacing: 1),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             );
           }).toList(),
       ],
+    );
+  }
+
+  Widget _buildStatusBadge(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withOpacity(0.3), width: 1),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              boxShadow: [BoxShadow(color: color.withOpacity(0.5), blurRadius: 4, spreadRadius: 1)],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: color, letterSpacing: 1),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1746,24 +1424,25 @@ class _SalaryRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(
-            label,
+            label.toUpperCase(),
             style: TextStyle(
-              fontSize: isTotal ? 16 : 15,
-              fontWeight: isTotal ? FontWeight.bold : FontWeight.w500,
-              color: isTotal ? Colors.grey[900] : Colors.grey[700],
+              fontSize: isTotal ? 11 : 9,
+              fontWeight: FontWeight.w900,
+              color: isTotal ? Colors.white : Colors.white24,
+              letterSpacing: 1.5,
             ),
           ),
           Text(
             '₹ ${amount.toStringAsFixed(0)}',
             style: TextStyle(
-              fontSize: isTotal ? 18 : 15,
-              fontWeight: isTotal ? FontWeight.bold : FontWeight.w600,
-              color: isTotal ? Colors.green.shade700 : Colors.grey[800],
+              fontSize: isTotal ? 18 : 14,
+              fontWeight: isTotal ? FontWeight.w900 : FontWeight.w700,
+              color: isTotal ? AppColors.accent : Colors.white,
             ),
           ),
         ],
@@ -1887,22 +1566,25 @@ class _SummaryItem extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, color: color.withOpacity(0.8), size: 20),
-        SizedBox(height: 8),
+        Icon(icon, color: Colors.white24, size: 16),
+        const SizedBox(height: 12),
         Text(
           value,
-          style: TextStyle(
-            color: color,
+          style: const TextStyle(
+            color: Colors.white,
             fontSize: 24,
-            fontWeight: FontWeight.bold,
+            fontWeight: FontWeight.w100,
+            letterSpacing: -1,
           ),
         ),
-        SizedBox(height: 4),
+        const SizedBox(height: 4),
         Text(
           label,
           style: TextStyle(
-            color: color.withOpacity(0.9),
-            fontSize: 12,
+            color: Colors.white.withOpacity(0.3),
+            fontSize: 9,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1,
           ),
         ),
       ],
@@ -2091,38 +1773,36 @@ class _PaymentRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Color textColor;
-    String prefix;
+    Color textColor = Colors.white70;
+    String prefix = '';
     
     if (isNegative) {
-      textColor = Colors.red;
+      textColor = Colors.redAccent;
       prefix = '-';
     } else if (isPositive) {
-      textColor = Colors.green;
+      textColor = Colors.greenAccent;
       prefix = '+';
-    } else {
-      textColor = Colors.grey[800]!;
-      prefix = '';
     }
     
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      padding: const EdgeInsets.symmetric(vertical: 10.0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(
-            label,
+            label.toUpperCase(),
             style: TextStyle(
-              fontSize: 14,
-              fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-              color: Colors.grey[700],
+              fontSize: 9,
+              fontWeight: FontWeight.w900,
+              color: Colors.white24,
+              letterSpacing: 1,
             ),
           ),
           Text(
             '$prefix ₹ ${amount.toStringAsFixed(0)}',
             style: TextStyle(
-              fontSize: 14,
-              fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
               color: textColor,
             ),
           ),
@@ -2146,40 +1826,33 @@ class _DetailSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Row(
+      margin: const EdgeInsets.only(bottom: 24),
+      child: OnyxGlassCard(
+        padding: const EdgeInsets.all(24),
+        borderRadius: 24,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                Icon(icon, color: AppColors.primary, size: 24),
-                SizedBox(width: 12),
+                Icon(icon, color: Colors.white24, size: 20),
+                const SizedBox(width: 12),
                 Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey[800],
+                  title.toUpperCase(),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                    letterSpacing: 2,
                   ),
                 ),
               ],
             ),
-          ),
-          Divider(height: 1),
-          ...items,
-        ],
+            const SizedBox(height: 16),
+            const Divider(color: Colors.white10),
+            ...items,
+          ],
+        ),
       ),
     );
   }
@@ -2197,28 +1870,23 @@ class _DetailItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: Colors.grey.shade100),
-        ),
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: Colors.white10)),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(
-            label,
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey[600],
-            ),
+            label.toUpperCase(),
+            style: TextStyle(fontSize: 9, color: Colors.white.withOpacity(0.3), fontWeight: FontWeight.w900, letterSpacing: 1),
           ),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-              color: Colors.grey[800],
+          const SizedBox(width: 16),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white),
             ),
           ),
         ],

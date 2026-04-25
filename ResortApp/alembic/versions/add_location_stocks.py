@@ -7,7 +7,7 @@ Create Date: 2025-12-05
 """
 from alembic import op
 import sqlalchemy as sa
-from datetime import datetime
+from datetime import timezone, datetime
 
 # revision identifiers, used by Alembic.
 revision = 'add_location_stocks'
@@ -22,7 +22,7 @@ def upgrade():
         sa.Column('location_id', sa.Integer(), nullable=False),
         sa.Column('item_id', sa.Integer(), nullable=False),
         sa.Column('quantity', sa.Float(), nullable=False, default=0),
-        sa.Column('last_updated', sa.DateTime(), nullable=True, default=datetime.utcnow),
+        sa.Column('last_updated', sa.DateTime(), nullable=True, default=lambda: datetime.now(timezone.utc)),
         sa.ForeignKeyConstraint(['item_id'], ['inventory_items.id'], ),
         sa.ForeignKeyConstraint(['location_id'], ['locations.id'], ),
         sa.PrimaryKeyConstraint('id')

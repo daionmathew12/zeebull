@@ -4,7 +4,7 @@ Tracks inventory items assigned to employees for services
 """
 from sqlalchemy import Column, Integer, Float, String, DateTime, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import timezone, datetime
 from app.database import Base
 
 
@@ -26,8 +26,8 @@ class EmployeeInventoryAssignment(Base):
     is_returned = Column(Boolean, default=False)  # Whether items have been returned
     
     # Timestamps
-    assigned_at = Column(DateTime, default=datetime.utcnow)
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    assigned_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 

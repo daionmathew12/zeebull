@@ -2,7 +2,7 @@
 import sys
 import os
 import random
-from datetime import datetime
+from datetime import timezone, datetime
 
 # Add current directory to path
 sys.path.append(os.getcwd())
@@ -141,7 +141,7 @@ def seed_assets_and_sync_rooms():
                         serial_number=serial,
                         current_location_id=loc.id,
                         status="active",
-                        purchase_date=datetime.utcnow()
+                        purchase_date=datetime.now(timezone.utc)
                     )
                     db.add(new_asset)
                     print(f"  [Asset] Assigned {asset_name} ({tag}) to {loc.name}")

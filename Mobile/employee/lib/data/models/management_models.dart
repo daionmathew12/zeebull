@@ -37,9 +37,9 @@ class DepartmentKPI {
   factory DepartmentKPI.fromJson(Map<String, dynamic> json) {
     return DepartmentKPI(
       assets: (json['assets'] as num?)?.toDouble() ?? 0.0,
-      income: (json['income'] as num?)?.toDouble() ?? 0.0,
-      expenses: (json['expenses'] as num?)?.toDouble() ?? 0.0,
-      inventoryConsumption: (json['inventory_consumption'] as num?)?.toDouble() ?? 0.0,
+      income: (json['income'] as num? ?? json['revenue'] as num? ?? 0.0).toDouble(),
+      expenses: (json['expenses'] as num? ?? json['total_expenses'] as num? ?? 0.0).toDouble(),
+      inventoryConsumption: (json['inventory_consumption'] as num? ?? json['consumption'] as num? ?? json['total_consumption'] as num? ?? 0.0).toDouble(),
       capitalInvestment: (json['capital_investment'] as num?)?.toDouble() ?? 0.0,
     );
   }

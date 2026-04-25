@@ -19,6 +19,10 @@ class AuthProvider extends ChangeNotifier {
   String? _userImage;
   int? _employeeId;
   int? _userId;
+  int? _branchId;
+  bool _isSuperadmin = false;
+  String? _branchName;
+  String? _branchImage;
   List<String> _dailyTasks = [];
 
   AuthStatus get status => _status;
@@ -27,6 +31,10 @@ class AuthProvider extends ChangeNotifier {
   String? get userImage => _userImage;
   int? get employeeId => _employeeId;
   int? get userId => _userId;
+  int? get branchId => _branchId;
+  bool get isSuperadmin => _isSuperadmin;
+  String? get branchName => _branchName;
+  String? get branchImage => _branchImage;
   List<String> get dailyTasks => _dailyTasks;
 
   AuthProvider(this._apiService) {
@@ -80,6 +88,10 @@ class AuthProvider extends ChangeNotifier {
     _userImage = null;
     _employeeId = null;
     _userId = null;
+    _branchId = null;
+    _isSuperadmin = false;
+    _branchName = null;
+    _branchImage = null;
     _dailyTasks = [];
     notifyListeners();
   }
@@ -101,6 +113,10 @@ class AuthProvider extends ChangeNotifier {
      
      // Extract user_id
      _userId = decodedToken['user_id'] ?? (decodedToken['sub'] is int ? decodedToken['sub'] : int.tryParse(decodedToken['sub'].toString()));
+      
+     // Extract branch scoping info
+     _branchId = decodedToken['branch_id'];
+     _isSuperadmin = decodedToken['is_superadmin'] ?? false;
   }
 
   UserRole _parseRole(String? roleStr) {
@@ -123,6 +139,12 @@ class AuthProvider extends ChangeNotifier {
       final response = await _apiService.dio.get(ApiConstants.profile);
       if (response.statusCode == 200 && response.data != null) {
           final data = response.data;
+          
+          _branchId = data['branch_id'];
+          _isSuperadmin = data['is_superadmin'] ?? false;
+          _branchName = data['branch_name'];
+          _branchImage = data['branch_image'];
+
           // IMPORTANT: data['id'] is User ID. We need Employee ID from the 'employee' object.
           if (data['employee'] != null) {
               final empData = data['employee'];

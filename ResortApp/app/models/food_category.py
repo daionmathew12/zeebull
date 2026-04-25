@@ -8,7 +8,7 @@ class FoodCategory(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     image = Column(String, nullable=True)  # Path to category image
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 

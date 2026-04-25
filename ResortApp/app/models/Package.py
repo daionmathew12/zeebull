@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Float, Date, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import timezone, datetime
 from app.database import Base
 
 
@@ -22,7 +22,7 @@ class Package(Base):
     food_included = Column(String, nullable=True)  # Comma-separated list of included meals (e.g., "Breakfast,Lunch,Dinner")
     food_timing = Column(String, nullable=True)    # JSON string: {"Breakfast": "08:00", ...}
     complimentary = Column(String, nullable=True)  # Free inclusions
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     branch_id = Column(Integer, ForeignKey("branches.id"), nullable=True, index=True)
     
     branch = relationship("Branch")
@@ -66,8 +66,8 @@ class PackageBooking(Base):
     status = Column(String)
     total_amount = Column(Float, default=0.0) # Added for tracking package booking value
     advance_deposit = Column(Float, default=0.0)  # Advance payment made during booking
-    created_at = Column(DateTime, default=datetime.utcnow) # Added for sorting
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc)) # Added for sorting
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 
@@ -92,7 +92,7 @@ class PackageBookingRoom(Base):
     id = Column(Integer, primary_key=True, index=True)
     package_booking_id = Column(Integer, ForeignKey("package_bookings.id", ondelete="CASCADE"))
     room_id = Column(Integer, ForeignKey("rooms.id"))
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 

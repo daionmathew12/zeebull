@@ -41,28 +41,56 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return Scaffold(
       drawer: const AppDrawer(),
-      appBar: (userRole == UserRole.kitchen || (userRole == UserRole.manager && _currentIndex == 0))
+      appBar: (userRole == UserRole.kitchen || userRole == UserRole.manager)
           ? null
           : AppBar(
-              title: Text(_getTitleForIndex(userRole, _currentIndex)),
-              backgroundColor: AppColors.primary,
+              flexibleSpace: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: AppColors.primaryGradient,
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+              ),
+              elevation: 0,
+              title: Text(
+                _getTitleForIndex(userRole, _currentIndex),
+                style: const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.5),
+              ),
+              centerTitle: true,
               actions: [
                 _buildNotificationButton(),
                 _buildLogoutButton(),
+                const SizedBox(width: 8),
               ],
             ),
-      body: IndexedStack(
-        index: _currentIndex,
-        children: pages,
+      body: Container(
+        decoration: BoxDecoration(
+          color: AppColors.onyx, // Changed to Onyx background
+        ),
+        child: IndexedStack(
+          index: _currentIndex,
+          children: pages,
+        ),
       ),
       bottomNavigationBar: _shouldShowBottomBar(userRole)
-          ? BottomNavigationBar(
-              currentIndex: _currentIndex,
-              onTap: (index) => setState(() => _currentIndex = index),
-              type: BottomNavigationBarType.fixed,
-              selectedItemColor: AppColors.primary,
-              unselectedItemColor: Colors.grey,
-              items: _getBottomBarItems(userRole),
+          ? Container(
+              decoration: BoxDecoration(
+                border: Border(top: BorderSide(color: Colors.white.withOpacity(0.05), width: 0.5)),
+              ),
+              child: BottomNavigationBar(
+                currentIndex: _currentIndex,
+                onTap: (index) => setState(() => _currentIndex = index),
+                type: BottomNavigationBarType.fixed,
+                backgroundColor: AppColors.onyx,
+                selectedItemColor: AppColors.accent,
+                unselectedItemColor: Colors.white24,
+                selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w900, fontSize: 10, letterSpacing: 0.5),
+                unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 0.5),
+                elevation: 0,
+                items: _getBottomBarItems(userRole),
+              ),
             )
           : null,
     );

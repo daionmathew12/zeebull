@@ -5,9 +5,11 @@ from sqlalchemy import func
 from typing import List, Optional, Dict, Any
 from datetime import date, timedelta, datetime
 from app.utils.auth import get_db, get_current_user
+from app.utils.branch_scope import get_branch_id
 from app import models as models
 from app.schemas import booking as booking_schema, packages as package_schema, suggestion as suggestion_schema
 from app.schemas.foodorder import FoodOrderItemOut
+from app.utils.date_utils import get_ist_now, get_ist_today
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
@@ -85,9 +87,10 @@ def get_guest_profile(
     room_number: Optional[str] = Query(None, description="Search by room number"),
     stay_date: Optional[date] = Query(None, description="Search by stay date"),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
-    """Generates a complete profile for a guest, including all bookings, orders, and services."""
+    """Generates a complete profile for a guest, including all bookings, orders, and services within the branch/enterprise scope."""
     if not any([guest_email, guest_mobile, guest_name, booking_id, room_number]):
         raise HTTPException(status_code=400, detail="Please provide an email, mobile, name, booking ID, or room number to search.")
 
@@ -107,52 +110,67 @@ def get_guest_profile(
             try:
                 numeric_val = int(numeric_id)
                 if "PK-" in bid_str:
-                    target_pkg_booking = db.query(models.PackageBooking).filter(models.PackageBooking.id == numeric_val).first()
+                    query = db.query(models.PackageBooking).filter(models.PackageBooking.id == numeric_val)
+                    if branch_id is not None:
+                        query = query.filter(models.PackageBooking.branch_id == branch_id)
+                    target_pkg_booking = query.first()
                 elif "BK-" in bid_str:
-                    target_booking = db.query(models.Booking).filter(models.Booking.id == numeric_val).first()
+                    query = db.query(models.Booking).filter(models.Booking.id == numeric_val)
+                    if branch_id is not None:
+                        query = query.filter(models.Booking.branch_id == branch_id)
+                    target_booking = query.first()
                 else:
                     # check both
-                    target_booking = db.query(models.Booking).filter(models.Booking.id == numeric_val).first()
-                    target_pkg_booking = db.query(models.PackageBooking).filter(models.PackageBooking.id == numeric_val).first()
+                    q1 = db.query(models.Booking).filter(models.Booking.id == numeric_val)
+                    q2 = db.query(models.PackageBooking).filter(models.PackageBooking.id == numeric_val)
+                    if branch_id is not None:
+                        q1 = q1.filter(models.Booking.branch_id == branch_id)
+                        q2 = q2.filter(models.PackageBooking.branch_id == branch_id)
+                    target_booking = q1.first()
+                    target_pkg_booking = q2.first()
             except ValueError:
                 pass
 
         if room_number and not target_booking and not target_pkg_booking:
-            search_date = stay_date or date.today()
+            search_date = stay_date or get_ist_today().date()
             # Find regular booking
-            target_booking = (
+            query = (
                 db.query(models.Booking)
                 .join(models.booking.BookingRoom)
                 .join(models.Room)
                 .filter(models.Room.number.ilike(f"%{room_number}%"))
                 .filter(models.Booking.check_in <= search_date)
                 .filter(models.Booking.check_out >= search_date)
-                .order_by(models.Booking.id.desc())
-                .first()
             )
+            if branch_id is not None:
+                query = query.filter(models.Booking.branch_id == branch_id)
+            target_booking = query.order_by(models.Booking.id.desc()).first()
+            
             # Find package booking
             if not target_booking:
-                target_pkg_booking = (
+                query = (
                     db.query(models.PackageBooking)
                     .join(models.PackageBookingRoom)
                     .join(models.Room)
                     .filter(models.Room.number.ilike(f"%{room_number}%"))
                     .filter(models.PackageBooking.check_in <= search_date)
                     .filter(models.PackageBooking.check_out >= search_date)
-                    .order_by(models.PackageBooking.id.desc())
-                    .first()
                 )
+                if branch_id is not None:
+                    query = query.filter(models.PackageBooking.branch_id == branch_id)
+                target_pkg_booking = query.order_by(models.PackageBooking.id.desc()).first()
             
             # Fallback if no stay_date provided and not currently checked in - find latest for that room
             if not target_booking and not target_pkg_booking and not stay_date:
-                target_booking = (
+                query = (
                     db.query(models.Booking)
                     .join(models.booking.BookingRoom)
                     .join(models.Room)
                     .filter(models.Room.number.ilike(f"%{room_number}%"))
-                    .order_by(models.Booking.id.desc())
-                    .first()
                 )
+                if branch_id is not None:
+                    query = query.filter(models.Booking.branch_id == branch_id)
+                target_booking = query.order_by(models.Booking.id.desc()).first()
 
         found = target_booking or target_pkg_booking
         if found:
@@ -162,13 +180,14 @@ def get_guest_profile(
         else:
             raise HTTPException(status_code=404, detail="No booking or guest found matching the provided ID/Room criteria.")
 
-    return _get_guest_profile_data(db, resolved_email, resolved_mobile, resolved_name)
+    return _get_guest_profile_data(db, resolved_email, resolved_mobile, resolved_name, branch_id)
 
 @router.get("/food-orders")
 def get_food_orders(
     from_date: Optional[date] = Query(None, description="Start date for filtering (YYYY-MM-DD)"),
     to_date: Optional[date] = Query(None, description="End date for filtering (YYYY-MM-DD)"),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     skip: int = 0,
     limit: int = 20,
     current_user: dict = Depends(get_current_user)
@@ -181,6 +200,9 @@ def get_food_orders(
             joinedload(models.FoodOrder.room)
         )
     )
+
+    if branch_id is not None:
+        query = query.filter(models.FoodOrder.branch_id == branch_id)
 
     if from_date:
         query = query.filter(models.foodorder.FoodOrder.created_at >= from_date)
@@ -245,10 +267,11 @@ def get_user_history(
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Generates a complete history of activities for a specific user within a date range.
+    Generates a complete history of activities for a specific user within a date range and branch/enterprise scope.
     """
     user = db.query(models.User).options(joinedload(models.User.role)).filter(models.User.id == user_id).first()
     if not user:
@@ -267,6 +290,8 @@ def get_user_history(
 
     # 1. Room Bookings created by user
     room_bookings_query = db.query(models.Booking).filter(models.Booking.user_id == user_id)
+    if branch_id is not None:
+        room_bookings_query = room_bookings_query.filter(models.Booking.branch_id == branch_id)
     room_bookings = apply_date_filter(room_bookings_query, models.Booking.check_in).options(
         joinedload(models.Booking.booking_rooms).joinedload(models.BookingRoom.room)
     ).all()
@@ -280,7 +305,9 @@ def get_user_history(
         ))
 
     # 2. Package Bookings created by user
-    package_bookings_query = db.query(models.PackageBooking).filter(models.PackageBooking.user_id == user_id) 
+    package_bookings_query = db.query(models.PackageBooking).filter(models.PackageBooking.user_id == user_id)
+    if branch_id is not None:
+        package_bookings_query = package_bookings_query.filter(models.PackageBooking.branch_id == branch_id)
     package_bookings = apply_date_filter(package_bookings_query, models.PackageBooking.check_in).all()
     for pb in package_bookings:
         activities.append(UserActivityItem(
@@ -318,6 +345,9 @@ def get_user_history(
         filters.append(models.FoodOrder.created_by_id == (emp.id if emp else -1))
         filters.append(models.FoodOrder.prepared_by_id == (emp.id if emp else -1))
         food_orders_query = db.query(models.FoodOrder).filter(or_(*filters))
+    
+    if branch_id is not None:
+        food_orders_query = food_orders_query.filter(models.FoodOrder.branch_id == branch_id)
     
     food_orders = apply_date_filter(food_orders_query, models.FoodOrder.created_at).options(
         joinedload(models.FoodOrder.room),
@@ -387,6 +417,7 @@ def get_service_charges(
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     skip: int = 0,
     limit: int = 20,
     current_user: dict = Depends(get_current_user)
@@ -399,6 +430,9 @@ def get_service_charges(
             joinedload(models.AssignedService.service),
         )
     )
+
+    if branch_id is not None:
+        query = query.filter(models.AssignedService.branch_id == branch_id)
 
     if from_date:
         query = query.filter(models.AssignedService.assigned_at >= from_date)
@@ -425,6 +459,7 @@ def get_room_charges(
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     skip: int = 0,
     limit: int = 20,
     current_user: dict = Depends(get_current_user)
@@ -433,6 +468,9 @@ def get_room_charges(
         db.query(models.Checkout)
         .options(joinedload(models.Checkout.booking).joinedload(models.Booking.booking_rooms).joinedload(models.booking.BookingRoom.room))
     )
+
+    if branch_id is not None:
+        query = query.filter(models.Checkout.branch_id == branch_id)
 
     if from_date:
         query = query.filter(models.Checkout.checkout_date >= from_date)
@@ -458,6 +496,7 @@ def get_rent_records(
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     skip: int = 0,
     limit: int = 20,
     current_user: dict = Depends(get_current_user)
@@ -469,6 +508,9 @@ def get_rent_records(
         db.query(models.Rent)
         .options(joinedload(models.Rent.room))
     )
+
+    if branch_id is not None:
+        query = query.filter(models.Rent.branch_id == branch_id)
 
     if from_date:
         query = query.filter(models.Rent.paid_date >= from_date)
@@ -492,12 +534,16 @@ def get_all_expenses(
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     skip: int = 0,
     limit: int = 20,
     current_user: dict = Depends(get_current_user)
 ):
-    """Retrieves a list of all expenses."""
+    """Retrieves a list of all expenses within the branch/enterprise scope."""
     query = db.query(models.Expense)
+    
+    if branch_id is not None:
+        query = query.filter(models.Expense.branch_id == branch_id)
     
     if from_date:
         query = query.filter(models.Expense.date >= from_date)
@@ -521,12 +567,16 @@ def get_all_room_bookings(
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     skip: int = 0,
     limit: int = 20,
     current_user: dict = Depends(get_current_user)
 ):
-    """Retrieves a list of all standard room bookings."""
+    """Retrieves a list of all standard room bookings within the branch/enterprise scope."""
     query = db.query(models.Booking)
+    if branch_id is not None:
+        query = query.filter(models.Booking.branch_id == branch_id)
+    
     if from_date:
         query = query.filter(models.Booking.check_in >= from_date)
     if to_date:
@@ -554,14 +604,17 @@ def get_all_package_bookings(
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     skip: int = 0,
     limit: int = 20,
     current_user: dict = Depends(get_current_user)
 ):
-    """Retrieves a list of all package bookings."""
+    """Retrieves a list of all package bookings within the branch/enterprise scope."""
     # Use an inner join to filter out orphaned bookings where the package has been deleted.
     # This prevents validation errors when the response model expects a valid package_id.
     query = db.query(models.PackageBooking).join(models.PackageBooking.package)
+    if branch_id is not None:
+        query = query.filter(models.PackageBooking.branch_id == branch_id)
 
     if from_date:
         query = query.filter(models.PackageBooking.check_in >= from_date)
@@ -574,13 +627,16 @@ def get_all_employees(
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     skip: int = 0,
     limit: int = 20,
     current_user: dict = Depends(get_current_user)
 ):
-    """Retrieves a list of all active employees and their salaries."""
+    """Retrieves a list of all active employees and their salaries within the branch/enterprise scope."""
     # The Employee model itself doesn't have an 'is_active' flag. We assume all listed employees are active.
     query = db.query(models.Employee)
+    if branch_id is not None:
+        query = query.filter(models.Employee.branch_id == branch_id)
     if from_date:
         query = query.filter(models.Employee.join_date >= from_date)
     if to_date:
@@ -602,6 +658,7 @@ def get_checkin_by_employee_report(
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -614,12 +671,16 @@ def get_checkin_by_employee_report(
         .join(models.User, models.Booking.user_id == models.User.id)
         .filter(models.Booking.status.in_(["checked-in", "checked_out"]))
     )
+    if branch_id is not None:
+        regular_checkins = regular_checkins.filter(models.Booking.branch_id == branch_id)
     # Query for package bookings
     package_checkins = (
         db.query(models.User.name, func.count(models.PackageBooking.id))
         .join(models.User, models.PackageBooking.user_id == models.User.id)
         .filter(models.PackageBooking.status.in_(["checked-in", "checked_out"]))
     )
+    if branch_id is not None:
+        package_checkins = package_checkins.filter(models.PackageBooking.branch_id == branch_id)
 
     # This example will only count regular bookings for simplicity.
     # A more advanced implementation would union these two queries.
@@ -638,6 +699,7 @@ class GuestSuggestion(BaseModel):
 @router.get("/guest-suggestions", response_model=List[GuestSuggestion])
 def get_guest_suggestions(
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     skip: int = 0,
     limit: int = 20,
     current_user: dict = Depends(get_current_user)
@@ -649,6 +711,12 @@ def get_guest_suggestions(
     # Get recent guests from regular bookings
     regular_guests_query = (
         db.query(models.Booking.guest_name, models.Booking.guest_email, models.Booking.guest_mobile)
+    )
+    if branch_id is not None:
+        regular_guests_query = regular_guests_query.filter(models.Booking.branch_id == branch_id)
+        
+    regular_guests_query = (
+        regular_guests_query
         .distinct(models.Booking.guest_email, models.Booking.guest_mobile)
         .order_by(models.Booking.guest_email, models.Booking.guest_mobile, models.Booking.id.desc())
         .offset(skip)
@@ -658,6 +726,12 @@ def get_guest_suggestions(
     # Get recent guests from package bookings
     package_guests_query = (
         db.query(models.PackageBooking.guest_name, models.PackageBooking.guest_email, models.PackageBooking.guest_mobile)
+    )
+    if branch_id is not None:
+        package_guests_query = package_guests_query.filter(models.PackageBooking.branch_id == branch_id)
+        
+    package_guests_query = (
+        package_guests_query
         .distinct(models.PackageBooking.guest_email, models.PackageBooking.guest_mobile)
         .order_by(models.PackageBooking.guest_email, models.PackageBooking.guest_mobile, models.PackageBooking.id.desc())
         .offset(skip)
@@ -674,7 +748,7 @@ def get_guest_suggestions(
     # Return a limited number of unique guests
     return list(all_guests.values())[:limit]
 
-def _get_guest_profile_data(db: Session, email: Optional[str], mobile: Optional[str], name: Optional[str]):
+def _get_guest_profile_data(db: Session, email: Optional[str], mobile: Optional[str], name: Optional[str], branch_id: Optional[int] = None):
     # Build dynamic filters
     filters = []
     if email:
@@ -683,6 +757,8 @@ def _get_guest_profile_data(db: Session, email: Optional[str], mobile: Optional[
         filters.append(models.Booking.guest_mobile == mobile)
     if name:
         filters.append(models.Booking.guest_name.ilike(f"%{name}%"))
+    if branch_id is not None:
+        filters.append(models.Booking.branch_id == branch_id)
 
     pkg_filters = []
     if email:
@@ -691,8 +767,10 @@ def _get_guest_profile_data(db: Session, email: Optional[str], mobile: Optional[
         pkg_filters.append(models.PackageBooking.guest_mobile == mobile)
     if name:
         pkg_filters.append(models.PackageBooking.guest_name.ilike(f"%{name}%"))
+    if branch_id is not None:
+        pkg_filters.append(models.PackageBooking.branch_id == branch_id)
 
-    # 1. Find the guest's name from the most recent booking
+    # 1. Find the guest's name from the most recent booking within branch scope
     latest_booking = db.query(models.Booking).filter(*filters).order_by(models.Booking.id.desc()).first()
     latest_pkg_booking = db.query(models.PackageBooking).filter(*pkg_filters).order_by(models.PackageBooking.id.desc()).first()
 

@@ -20,6 +20,7 @@ class RoomOut(RoomBase):
     image_url: str | None = None
     extra_images: Optional[str] = None
     current_guest_name: Optional[str] = None
+    inventory_location_id: Optional[int] = None
     
     # Linked Type Data
     type: Optional[str] = None

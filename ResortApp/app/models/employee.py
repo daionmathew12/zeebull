@@ -20,7 +20,7 @@ class Employee(Base):
     wellness_leave_balance = Column(Integer, default=5)
     
     user_id = Column(Integer, ForeignKey("users.id"), unique=True)
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 
@@ -57,7 +57,7 @@ class Leave(Base):
     reason = Column(String)
     leave_type = Column(String, default="Paid") # Leave type: 'Paid', 'Sick', 'Long', 'Wellness'
     status = Column(String, default="pending")
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 
@@ -70,7 +70,7 @@ class Attendance(Base):
     employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
     date = Column(Date, nullable=False)
     status = Column(String, nullable=False) # e.g., 'Present', 'Absent', 'Leave'
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 
@@ -91,7 +91,11 @@ class WorkingLog(Base):
     is_tasks_approved = Column(Integer, default=0) # 0: Pending, 1: Approved, 2: Rejected (using Integer for more states if needed)
     tasks_approved_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     tasks_approved_at = Column(DateTime, nullable=True)
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    
+    clock_in_image = Column(String, nullable=True) # Selfie at clock in
+    clock_out_image = Column(String, nullable=True) # Selfie at clock out
+    
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 

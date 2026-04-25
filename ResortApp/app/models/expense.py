@@ -2,7 +2,10 @@ from sqlalchemy import Column, Integer, String, Float, ForeignKey, Date, DateTim
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
-from app.utils.date_utils import get_ist_now
+
+def _get_ist_now():
+    from app.utils.date_utils import get_ist_now
+    return get_ist_now()
 
 class Expense(Base):
     __tablename__ = "expenses"
@@ -16,8 +19,8 @@ class Expense(Base):
     image = Column(String, nullable=True)
     department = Column(String, nullable=True)  # Restaurant, Facility, Hotel, Office, Security, Fire & Safety, Housekeeping
     status = Column(String, default="Pending", nullable=False) # Pending, Approved, Rejected, Paid
-    created_at = Column(DateTime, default=get_ist_now)
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    created_at = Column(DateTime, default=_get_ist_now)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 

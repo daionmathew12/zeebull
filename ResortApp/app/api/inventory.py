@@ -9,7 +9,8 @@ from sqlalchemy import func
 from typing import List, Optional
 import shutil
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime, timedelta, date
+from app.utils.date_utils import get_ist_now, get_ist_today
 from app.utils.auth import get_db, get_current_user
 from app.utils.branch_scope import get_branch_id
 from app.utils.booking_id import parse_display_id, format_display_id
@@ -362,7 +363,7 @@ def get_item(
     current_user: User = Depends(get_current_user),
     branch_id: Optional[int] = Depends(get_branch_id)
 ):
-    item = inventory_crud.get_item_by_id(db, item_id, branch_id=branch_id)
+    item = inventory_crud.get_item_by_id(db, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     
@@ -805,7 +806,7 @@ def update_vendor(
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
     
-    for field, value in vendor_update.dict(exclude_unset=True).items():
+    for field, value in vendor_update.model_dump(exclude_unset=True).items():
         setattr(vendor, field, value)
     
     db.commit()
@@ -1127,7 +1128,7 @@ def create_purchase_payment(
         ]
         
         entry = JournalEntryCreate(
-            entry_date=datetime.utcnow(),
+            entry_date=datetime.now(timezone.utc),
             reference_type="purchase_payment",
             reference_id=purchase.id,
             description=f"Vendor Payment - {purchase.purchase_number}",
@@ -1638,11 +1639,23 @@ def create_issue(
         # Log to file for debugging
         try:
             with open("api_stock_issue_error.log", "a") as f:
-                f.write(f"\n{'='*80}\n{datetime.now()}\nError: {str(e)}\n{traceback.format_exc()}{'='*80}\n")
+                f.write(f"\n{'='*80}\n{get_ist_now()}\nError: {str(e)}\n{traceback.format_exc()}{'='*80}\n")
         except:
             pass
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error creating issue: {str(e)}")
+
+
+@router.get("/locations", response_model=List[LocationOut])
+def get_locations(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    branch_id: Optional[int] = Depends(get_branch_id)
+):
+    locations = inventory_crud.get_all_locations(db, branch_id=branch_id, skip=skip, limit=limit)
+    return locations
 
 
 @router.get("/issues", response_model=List[StockIssueOut])
@@ -1773,7 +1786,7 @@ def create_waste_log(
 ):
 
     try:
-        from datetime import datetime as dt
+        from datetime import timezone, datetime as dt
         
         # Manual conversion
         parsed_item_id = int(item_id) if item_id and item_id.strip() else None
@@ -2060,7 +2073,7 @@ def get_location_items(
     from app.models.Package import PackageBooking
     from sqlalchemy import func
     from sqlalchemy.orm import joinedload
-    from datetime import datetime, timedelta
+    from datetime import timezone, datetime, timedelta
     
     # --- Date Filtering Logic ---
     filter_start = None
@@ -2691,7 +2704,7 @@ def get_location_items(
             joinedload(InventoryTransaction.user)
         ).filter(
             InventoryTransaction.item_id.in_(location_item_ids),
-            InventoryTransaction.created_at >= (datetime.now() - timedelta(days=30))
+            InventoryTransaction.created_at >= (get_ist_now() - timedelta(days=30))
         )
         if branch_id is not None:
             adjustments_query = adjustments_query.filter(InventoryTransaction.branch_id == branch_id)
@@ -3211,7 +3224,7 @@ def get_asset_mappings(
             })
             
     # Sort by recent date
-    from datetime import datetime as dt
+    from datetime import timezone, datetime as dt
     final_list.sort(key=lambda x: x.get('created_at') or x.get('assigned_date') or dt.min, reverse=True)
     
     # Apply pagination
@@ -3672,7 +3685,7 @@ def create_stock_adjustment(
         total_amount=abs(diff) * (item.unit_price or 0) if item.unit_price else 0,
         notes=f"Stock Adjustment by {current_user.name}: {direction} from {current_qty} to {actual_qty}. {adjustment.notes or ''}",
         created_by=current_user.id,
-        reference_number=f"ADJ-{datetime.now().strftime('%Y%m%d%H%M')}",
+        reference_number=f"ADJ-{get_ist_now().strftime('%Y%m%d%H%M')}",
         source_location_id=adjustment.location_id if diff < 0 else None,
         destination_location_id=adjustment.location_id if diff > 0 else None,
         branch_id=branch_id
@@ -3683,7 +3696,7 @@ def create_stock_adjustment(
     # Update Location Stock
     if loc_stock:
         loc_stock.quantity = actual_qty
-        loc_stock.updated_at = datetime.now()
+        loc_stock.updated_at = get_ist_now()
     else:
         new_stock = LocationStock(
             location_id=adjustment.location_id,
@@ -3827,9 +3840,9 @@ def update_laundry_status(
             log.notes = notes
     
     if status == "Washed":
-        log.washed_at = datetime.utcnow()
+        log.washed_at = datetime.now(timezone.utc)
     elif status == "Returned":
-        log.returned_at = datetime.utcnow()
+        log.returned_at = datetime.now(timezone.utc)
         
     db.commit()
     return {"message": f"Laundry status updated to {status}"}
@@ -3891,7 +3904,7 @@ def return_laundry_items(
     
     # 3. Update Log
     log.status = "Returned"
-    log.returned_at = datetime.utcnow()
+    log.returned_at = datetime.now(timezone.utc)
     
     # 4. Transaction
     target_loc = db.query(Location).filter(Location.id == target_location_id, (Location.branch_id == branch_id if branch_id is not None else True)).first()

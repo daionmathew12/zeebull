@@ -47,7 +47,7 @@ def get_expense_by_id(db: Session, expense_id: int, branch_id: int):
 def update_expense(db: Session, expense_id: int, data: ExpenseUpdate, branch_id: int):
     expense = get_expense_by_id(db, expense_id, branch_id=branch_id)
 
-    for field, value in data.dict(exclude_unset=True).items():
+    for field, value in data.model_dump(exclude_unset=True).items():
         setattr(expense, field, value)
     db.commit()
     return expense

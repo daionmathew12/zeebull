@@ -124,7 +124,7 @@ class AttendanceProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> clockIn(int employeeId, {double? latitude, double? longitude, List<String>? tasksToSync}) async {
+  Future<bool> clockIn(int employeeId, {double? latitude, double? longitude, List<String>? tasksToSync, List<int>? imageBytes, String? fileName}) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
@@ -136,6 +136,8 @@ class AttendanceProvider extends ChangeNotifier {
         "Mobile App",
         latitude: latitude,
         longitude: longitude,
+        imageBytes: imageBytes,
+        fileName: fileName,
       );
       print("Clock-in response status: ${response.statusCode}");
       print("Clock-in response data: ${response.data}");
@@ -184,14 +186,19 @@ class AttendanceProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> clockOut(int employeeId) async {
+  Future<bool> clockOut(int employeeId, {List<String>? completedTasks, List<int>? imageBytes, String? fileName}) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
     
     try {
-      final response = await _apiService.clockOut(employeeId);
-       if (response.statusCode == 200) {
+      final response = await _apiService.clockOut(
+        employeeId, 
+        completedTasks: completedTasks,
+        imageBytes: imageBytes,
+        fileName: fileName,
+      );
+      if (response.statusCode == 200) {
         _isClockedIn = false;
         _clockInTime = null;
         return true;

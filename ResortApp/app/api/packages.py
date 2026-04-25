@@ -18,6 +18,7 @@ from app.curd import packages as crud_package
 from app.curd import foodorder as crud_food_order
 from app.schemas.foodorder import FoodOrderCreate, FoodOrderItemCreate
 from app.utils.employee_helpers import get_fallback_employee_id
+from app.utils.date_utils import get_ist_now, get_ist_today
 import shutil
 import uuid
 import json
@@ -484,7 +485,16 @@ def book_package_guest_api(
         )
 
 @router.get("/bookingsall", response_model=List[PackageBookingOut])
-def get_bookings(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20, branch_id: Optional[int] = Depends(get_branch_id)):
+def get_bookings(
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user), 
+    skip: int = 0, 
+    limit: int = 20, 
+    status: Optional[str] = None,
+    guest_name: Optional[str] = None,
+    check_in_date: Optional[str] = None,
+    branch_id: Optional[int] = Depends(get_branch_id)
+):
     try:
         # Optimized for low network - reduced to 50
         if limit > 50:
@@ -504,10 +514,26 @@ def get_bookings(db: Session = Depends(get_db), current_user: User = Depends(get
         if branch_id is not None:
             query = query.filter(PackageBooking.branch_id == branch_id)
             
+        if status:
+            query = query.filter(PackageBooking.status.ilike(status))
+        
+        if guest_name:
+            query = query.filter(PackageBooking.guest_name.ilike(f"%{guest_name}%"))
+            
+        if check_in_date:
+            try:
+                from datetime import datetime
+                d = datetime.strptime(check_in_date, '%Y-%m-%d').date()
+                query = query.filter(PackageBooking.check_in == d)
+            except:
+                pass
+            
         result = query.order_by(PackageBooking.id.desc()).offset(skip).limit(limit).all()
         
-        # Fallback: Calculate total amount if 0 (for legacy data)
+        # Populate room_type_id from package and handle total_amount fallback
         for booking in result:
+            booking.room_type_id = booking.package.room_types if booking.package else None
+            
             if (not booking.total_amount or booking.total_amount == 0) and booking.check_in and booking.check_out and booking.package:
                 try:
                     from datetime import datetime, date
@@ -616,6 +642,10 @@ def get_package_bookings_history(package_id: int, db: Session = Depends(get_db),
         joinedload(PackageBooking.checkout),
         joinedload(PackageBooking.package).joinedload(Package.images)
     ).filter(PackageBooking.package_id == package_id).order_by(desc(PackageBooking.created_at)).all()
+    
+    for b in bookings:
+        b.room_type_id = b.package.room_types if b.package else None
+        
     return bookings
 
 
@@ -749,7 +779,7 @@ def extend_package_booking_checkout(booking_id: Union[str, int], new_checkout: s
         # Also check if check-out date is in the future (guest is still checked in)
         from datetime import date
         has_checkin_images = bool(booking.id_card_image_url) or bool(booking.guest_photo_url)
-        today = date.today()
+        today = get_ist_today().date()
         checkout_is_future = booking.check_out >= today
         
         # If status says "checked_out" but:

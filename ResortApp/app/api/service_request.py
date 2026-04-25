@@ -15,7 +15,7 @@ from pydantic import BaseModel
 import json
 import shutil
 import uuid
-from datetime import datetime, timedelta
+from datetime import timezone, datetime, timedelta
 
 UPLOAD_DIR = os.path.join(_UPLOAD_ROOT, "service_requests")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -62,7 +62,8 @@ async def create_damage_report(
     return crud.create_service_request(db, request_data, branch_id=branch_id)
 
 
-@router.get("")
+@router.get("", response_model=List[dict])
+@router.get("/", response_model=List[dict])
 def get_service_requests(
     skip: int = 0,
     limit: int = 100,
@@ -170,8 +171,8 @@ def get_service_requests(
                 "description": str(sr.description) if sr.description else None,
                 "status": str(sr.status) if sr.status else "pending",
                 "billing_status": sr.billing_status,
-                "created_at": sr.created_at.isoformat() + "Z" if sr.created_at else None,
-                "completed_at": sr.completed_at.isoformat() + "Z" if sr.completed_at else None,
+                "created_at": sr.created_at.isoformat() + "Z" if (sr.created_at and not sr.created_at.tzinfo) else (sr.created_at.isoformat().replace("+00:00", "Z") if sr.created_at else None),
+                "completed_at": sr.completed_at.isoformat() + "Z" if (sr.completed_at and not sr.completed_at.tzinfo) else (sr.completed_at.isoformat().replace("+00:00", "Z") if sr.completed_at else None),
                 "is_checkout_request": False,
                 "is_assigned_service": False,
                 "room_number": sr.room.number if sr.room else (str(getattr(sr, 'room_number', '')) if getattr(sr, 'room_number', None) else None),
@@ -226,7 +227,7 @@ def get_service_requests(
     else:
         # Include all pending, in_progress, and recently completed (last 7 days)
         from app.models.service import ServiceStatus
-        seven_days_ago = datetime.utcnow() - timedelta(days=7)
+        seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
         assigned_query = assigned_query.filter(
             (AssignedServiceModel.status.notin_([ServiceStatus.completed, ServiceStatus.cancelled])) |
             ((AssignedServiceModel.status.in_([ServiceStatus.completed, ServiceStatus.cancelled])) & 
@@ -276,9 +277,9 @@ def get_service_requests(
                 "type": asvc.service.name, # Alias for mobile app
                 "description": asvc.service.description or f"Manual duty: {asvc.service.name}",
                 "status": str(asvc.status.value if hasattr(asvc.status, 'value') else asvc.status),
-                "created_at": asvc.assigned_at.isoformat() + "Z" if asvc.assigned_at else None,
-                "started_at": asvc.started_at.isoformat() + "Z" if getattr(asvc, 'started_at', None) else None,
-                "completed_at": asvc.last_used_at.isoformat() + "Z" if getattr(asvc, 'last_used_at', None) else None,
+                "created_at": asvc.assigned_at.isoformat() + "Z" if (asvc.assigned_at and not asvc.assigned_at.tzinfo) else (asvc.assigned_at.isoformat().replace("+00:00", "Z") if asvc.assigned_at else None),
+                "started_at": asvc.started_at.isoformat() + "Z" if (getattr(asvc, 'started_at', None) and not asvc.started_at.tzinfo) else (asvc.started_at.isoformat().replace("+00:00", "Z") if getattr(asvc, 'started_at', None) else None),
+                "completed_at": asvc.last_used_at.isoformat() + "Z" if (getattr(asvc, 'last_used_at', None) and not asvc.last_used_at.tzinfo) else (asvc.last_used_at.isoformat().replace("+00:00", "Z") if getattr(asvc, 'last_used_at', None) else None),
                 "is_checkout_request": False,
                 "is_assigned_service": True,
                 "assigned_service_id": asvc.id,
@@ -330,7 +331,7 @@ def get_service_requests(
                 checkout_query = checkout_query.filter(CheckoutRequestModel.id == -1)
         else:
             # Include all pending, in_progress, and recently completed (last 7 days)
-            seven_days_ago = datetime.utcnow() - timedelta(days=7)
+            seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
             checkout_query = checkout_query.filter(
                 (CheckoutRequestModel.status.notin_(["cancelled", "completed"])) |
                 ((CheckoutRequestModel.status.in_(["completed", "cancelled"])) & 
@@ -389,11 +390,11 @@ def get_service_requests(
                     "type": "checkout_verification", # Alias for mobile app
                     "description": f"Checkout inventory verification for Room {cr.room_number} - Guest: {cr.guest_name}",
                     "status": str(cr.status) if cr.status else "pending",
-                    "created_at": cr.created_at.isoformat() + "Z" if cr.created_at else None,
-                    "started_at": cr.started_at.isoformat() + "Z" if getattr(cr, 'started_at', None) else None,
-                    "completed_at": cr.completed_at.isoformat() + "Z" if cr.completed_at else None,
-                    "inventory_checked_at": cr.inventory_checked_at.isoformat() + "Z" if cr.inventory_checked_at else None,
-                    "requested_at": cr.requested_at.isoformat() + "Z" if cr.requested_at else None,
+                    "created_at": cr.created_at.isoformat() + "Z" if (cr.created_at and not cr.created_at.tzinfo) else (cr.created_at.isoformat().replace("+00:00", "Z") if cr.created_at else None),
+                    "started_at": cr.started_at.isoformat() + "Z" if (getattr(cr, 'started_at', None) and not cr.started_at.tzinfo) else (cr.started_at.isoformat().replace("+00:00", "Z") if getattr(cr, 'started_at', None) else None),
+                    "completed_at": cr.completed_at.isoformat() + "Z" if (cr.completed_at and not cr.completed_at.tzinfo) else (cr.completed_at.isoformat().replace("+00:00", "Z") if cr.completed_at else None),
+                    "inventory_checked_at": cr.inventory_checked_at.isoformat() + "Z" if (cr.inventory_checked_at and not cr.inventory_checked_at.tzinfo) else (cr.inventory_checked_at.isoformat().replace("+00:00", "Z") if cr.inventory_checked_at else None),
+                    "requested_at": cr.requested_at.isoformat() + "Z" if (cr.requested_at and not cr.requested_at.tzinfo) else (cr.requested_at.isoformat().replace("+00:00", "Z") if cr.requested_at else None),
                     "is_checkout_request": True,
                     "is_assigned_service": False,
                     "checkout_request_id": cr.id,
@@ -465,9 +466,9 @@ def update_service_request(
             old_checkout_status = checkout_request.status
             checkout_request.status = update.status
             if update.status == "in_progress" and not checkout_request.started_at:
-                checkout_request.started_at = datetime.utcnow()
+                checkout_request.started_at = datetime.now(timezone.utc)
             elif update.status == "completed":
-                checkout_request.completed_at = datetime.utcnow()
+                checkout_request.completed_at = datetime.now(timezone.utc)
             print(f"[INFO] CheckoutRequest {actual_checkout_id} status: {old_checkout_status} -> {update.status}")
         
         db.commit()
@@ -486,9 +487,9 @@ def update_service_request(
             "description": f"Checkout inventory verification for Room {checkout_request.room_number}",
             "status": checkout_request.status,
             "billing_status": None,
-            "created_at": checkout_request.created_at.isoformat() + "Z" if checkout_request.created_at else None,
-            "started_at": checkout_request.started_at.isoformat() + "Z" if checkout_request.started_at else None,
-            "completed_at": checkout_request.completed_at.isoformat() + "Z" if checkout_request.completed_at else None,
+            "created_at": checkout_request.created_at.isoformat() + "Z" if (checkout_request.created_at and not checkout_request.created_at.tzinfo) else (checkout_request.created_at.isoformat().replace("+00:00", "Z") if checkout_request.created_at else None),
+            "started_at": checkout_request.started_at.isoformat() + "Z" if (checkout_request.started_at and not checkout_request.started_at.tzinfo) else (checkout_request.started_at.isoformat().replace("+00:00", "Z") if checkout_request.started_at else None),
+            "completed_at": checkout_request.completed_at.isoformat() + "Z" if (checkout_request.completed_at and not checkout_request.completed_at.tzinfo) else (checkout_request.completed_at.isoformat().replace("+00:00", "Z") if checkout_request.completed_at else None),
             "is_checkout_request": True,
             "is_assigned_service": False,
             "room_number": checkout_request.room_number,
@@ -551,9 +552,9 @@ def update_service_request(
             "description": updated_asvc.service.description if updated_asvc.service else "",
             "status": asvc_status,
             "billing_status": updated_asvc.billing_status,
-            "created_at": updated_asvc.assigned_at.isoformat() + "Z" if updated_asvc.assigned_at else None,
-            "started_at": updated_asvc.started_at.isoformat() + "Z" if getattr(updated_asvc, 'started_at', None) else None,
-            "completed_at": updated_asvc.completed_at.isoformat() + "Z" if getattr(updated_asvc, 'completed_at', None) else None,
+            "created_at": updated_asvc.assigned_at.isoformat() + "Z" if (updated_asvc.assigned_at and not updated_asvc.assigned_at.tzinfo) else (updated_asvc.assigned_at.isoformat().replace("+00:00", "Z") if updated_asvc.assigned_at else None),
+            "started_at": updated_asvc.started_at.isoformat() + "Z" if (getattr(updated_asvc, 'started_at', None) and not updated_asvc.started_at.tzinfo) else (updated_asvc.started_at.isoformat().replace("+00:00", "Z") if getattr(updated_asvc, 'started_at', None) else None),
+            "completed_at": updated_asvc.completed_at.isoformat() + "Z" if (getattr(updated_asvc, 'completed_at', None) and not updated_asvc.completed_at.tzinfo) else (updated_asvc.completed_at.isoformat().replace("+00:00", "Z") if getattr(updated_asvc, 'completed_at', None) else None),
             "is_checkout_request": False,
             "is_assigned_service": True,
             "assigned_service_id": updated_asvc.id,
@@ -628,9 +629,9 @@ def update_service_request(
         "description": str(reloaded.description) if reloaded.description else None,
         "status": str(reloaded.status) if reloaded.status else "pending",
         "billing_status": reloaded.billing_status,
-        "created_at": reloaded.created_at.isoformat() + "Z" if reloaded.created_at else None,
-        "started_at": reloaded.started_at.isoformat() + "Z" if reloaded.started_at else None,
-        "completed_at": reloaded.completed_at.isoformat() + "Z" if reloaded.completed_at else None,
+        "created_at": reloaded.created_at.isoformat() + "Z" if (reloaded.created_at and not reloaded.created_at.tzinfo) else (reloaded.created_at.isoformat().replace("+00:00", "Z") if reloaded.created_at else None),
+        "started_at": reloaded.started_at.isoformat() + "Z" if (reloaded.started_at and not reloaded.started_at.tzinfo) else (reloaded.started_at.isoformat().replace("+00:00", "Z") if reloaded.started_at else None),
+        "completed_at": reloaded.completed_at.isoformat() + "Z" if (reloaded.completed_at and not reloaded.completed_at.tzinfo) else (reloaded.completed_at.isoformat().replace("+00:00", "Z") if reloaded.completed_at else None),
         "is_checkout_request": False,
         "is_assigned_service": False,
         "room_number": reloaded.room.number if reloaded.room else None,

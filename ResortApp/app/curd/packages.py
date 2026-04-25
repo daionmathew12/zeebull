@@ -4,7 +4,7 @@ from typing import List, Optional, Union
 import uuid
 import os
 import shutil
-from datetime import datetime
+from datetime import timezone, datetime
 
 from app.models.Package import Package, PackageImage, PackageBooking, PackageBookingRoom
 from app.models.room import Room
@@ -304,7 +304,7 @@ def book_package(db: Session, booking: PackageBookingCreate, branch_id: int = No
     # Logic: price * nights * (rooms count if applicable? usually package is per room-night or per person-night?
     # Based on book_package_guest_api logic: package_charges = package_price * stay_nights * len(booking.room_ids)
     
-    from datetime import datetime, date
+    from datetime import timezone, datetime, date
     d_check_in = booking.check_in if isinstance(booking.check_in, date) else datetime.strptime(str(booking.check_in), '%Y-%m-%d').date()
     d_check_out = booking.check_out if isinstance(booking.check_out, date) else datetime.strptime(str(booking.check_out), '%Y-%m-%d').date()
     stay_days = (d_check_out - d_check_in).days
@@ -490,7 +490,7 @@ def check_in_package(db: Session, booking_id: int, current_user: User, id_card_i
         # 1.5. PROCESS AMENITY ALLOCATION / SCHEDULED ORDERS (Ported from booking.py)
         if amenityAllocation:
             try:
-                from datetime import time, timedelta, date
+                from datetime import timezone, time, timedelta, date
                 alloc_data = json.loads(amenityAllocation)
                 items = alloc_data.get("items", [])
                 
@@ -579,7 +579,7 @@ def check_in_package(db: Session, booking_id: int, current_user: User, id_card_i
         # 1.6. AUTO-SCHEDULE PACKAGE MEALS if not in allocation
         if booking.package and booking.package.food_included and not amenityAllocation:
             try:
-                from datetime import time, timedelta, date
+                from datetime import timezone, time, timedelta, date
                 meals = [m.strip() for m in booking.package.food_included.split(",") if m.strip()]
                 # Load food timing JSON
                 timings = {}
@@ -625,7 +625,7 @@ def check_in_package(db: Session, booking_id: int, current_user: User, id_card_i
 
         # 2. Update booking status
         booking.status = "checked-in"
-        booking.checked_in_at = datetime.utcnow()
+        booking.checked_in_at = datetime.now(timezone.utc)
         
         # 3. Update room status
         if booking.rooms:
@@ -647,7 +647,7 @@ def check_in_package(db: Session, booking_id: int, current_user: User, id_card_i
                     stock_issue = StockIssue(
                         source_location_id=source_id,
                         destination_location_id=room.inventory_location_id,
-                        issue_date=datetime.utcnow(),
+                        issue_date=datetime.now(timezone.utc),
                         status="approved",
                         issued_by_id=current_user.id if current_user else None,
                         reference_number=f"PKG-CHKIN-{booking.id}-{room.number}",
@@ -666,7 +666,7 @@ def check_in_package(db: Session, booking_id: int, current_user: User, id_card_i
                         qty_per_night = float(item.get("complimentaryPerNight", 0))
                         qty_per_stay = float(item.get("complimentaryPerStay", 0))
                         
-                        from datetime import date
+                        from datetime import timezone, date
                         check_in_dt = booking.check_in if isinstance(booking.check_in, date) else datetime.strptime(str(booking.check_in), '%Y-%m-%d').date()
                         check_out_dt = booking.check_out if isinstance(booking.check_out, date) else datetime.strptime(str(booking.check_out), '%Y-%m-%d').date()
                         nights = max(1, (check_out_dt - check_in_dt).days)

@@ -1,10 +1,13 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+import traceback
 from typing import Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, Date, or_
 from datetime import date, timedelta, datetime
+import pytz
 
 from app.utils.auth import get_db, get_current_user
+from app.utils.date_utils import get_ist_now, get_ist_today, ist_to_utc, get_ist_date_range
 from app.utils.branch_scope import get_branch_id
 from app.models.user import User
 from app.models.checkout import Checkout
@@ -16,7 +19,7 @@ from app.models.food_item import FoodItem
 from app.models.expense import Expense
 from app.models.employee import Employee, WorkingLog
 from app.models.service import Service, AssignedService
-from app.models.inventory import InventoryItem, InventoryCategory, PurchaseMaster, Vendor, StockIssue, StockIssueDetail, AssetRegistry, Location
+from app.models.inventory import InventoryItem, InventoryCategory, PurchaseMaster, Vendor, StockIssue, StockIssueDetail, AssetRegistry, Location, InventoryTransaction, PurchaseDetail
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -36,14 +39,22 @@ def get_kpis(
     Calculates and returns key performance indicators for the dashboard.
     """
     try:
-        today = date.today()
+        today = get_ist_today().date()
+        ist_now = get_ist_now()
+        start_ist, end_ist = get_ist_date_range('today')
+        start_utc = ist_to_utc(start_ist)
+        end_utc = ist_to_utc(end_ist)
 
         # 1. Checkout KPIs - use estimates for large datasets
         checkouts_today = 0
         checkouts_total = 0
         try:
             # For today, use exact count (should be small)
-            q_today = db.query(func.count(Checkout.id)).filter(func.cast(Checkout.checkout_date, Date) == today)
+            # Use UTC boundaries for accurate IST day coverage
+            q_today = db.query(func.count(Checkout.id)).filter(
+                Checkout.checkout_date >= start_utc,
+                Checkout.checkout_date < end_utc
+            )
             checkouts_today = apply_branch_scope(q_today, Checkout, branch_id).scalar() or 0
             # For total, use estimate if dataset is large
             sample = db.query(Checkout).limit(1000).all()
@@ -101,14 +112,16 @@ def get_kpis(
         food_revenue_today = 0
         try:
             food_q = db.query(func.sum(FoodOrder.amount)).filter(
-                func.cast(FoodOrder.created_at, Date) == today
+                FoodOrder.created_at >= start_utc,
+                FoodOrder.created_at < end_utc
             )
             food_revenue_today = apply_branch_scope(food_q, FoodOrder, branch_id).scalar() or 0
         except Exception:
             # Fallback to total_amount if amount field doesn't exist
             try:
                 food_revenue_today = db.query(func.sum(FoodOrder.total_amount)).filter(
-                    func.cast(FoodOrder.created_at, Date) == today
+                    FoodOrder.created_at >= start_utc,
+                    FoodOrder.created_at < end_utc
                 ).scalar() or 0
             except Exception as e:
                 print(f"Error in Food Revenue fallback: {e}")
@@ -119,7 +132,8 @@ def get_kpis(
         package_bookings_today = 0
         try:
             pkg_q = db.query(func.count(PackageBooking.id)).filter(
-                func.cast(PackageBooking.check_in, Date) == today
+                PackageBooking.check_in >= start_ist.date(), # check_in is a Date column
+                PackageBooking.check_in < end_ist.date()
             )
             package_bookings_today = apply_branch_scope(pkg_q, PackageBooking, branch_id).scalar() or 0
         except Exception as e:
@@ -131,7 +145,8 @@ def get_kpis(
         service_revenue_today = 0
         try:
             service_q = db.query(func.sum(func.coalesce(AssignedService.override_charges, Service.charges))).join(Service).filter(
-                func.cast(AssignedService.assigned_at, Date) == today
+                AssignedService.assigned_at >= start_utc,
+                AssignedService.assigned_at < end_utc
             )
             service_revenue_today = apply_branch_scope(service_q, AssignedService, branch_id).scalar() or 0
         except Exception as e:
@@ -142,7 +157,10 @@ def get_kpis(
         # Calculate combined today revenue
         checkouts_rev_today = 0
         try:
-            checkouts_rev_q = db.query(func.sum(Checkout.grand_total)).filter(func.cast(Checkout.checkout_date, Date) == today)
+            checkouts_rev_q = db.query(func.sum(Checkout.grand_total)).filter(
+                Checkout.checkout_date >= start_utc,
+                Checkout.checkout_date < end_utc
+            )
             checkouts_rev_today = apply_branch_scope(checkouts_rev_q, Checkout, branch_id).scalar() or 0
         except Exception as e:
             print(f"Error in Checkout Revenue KPI: {e}")
@@ -208,7 +226,7 @@ def get_chart_data(
     # Limit queries to prevent timeouts
     if (room_total + package_total + food_total) == 0:
         # Estimate room revenue: sum(room.price * nights) for recent bookings (last 30 days, limited)
-        thirty_days_ago = date.today() - timedelta(days=30)
+        thirty_days_ago = get_ist_today().date() - timedelta(days=30)
         recent_bookings = (
             db.query(Booking)
             .filter(Booking.check_in >= thirty_days_ago)
@@ -270,7 +288,7 @@ def get_chart_data(
 
     # --- Weekly performance ---
     weekly_performance = []
-    today = date.today()
+    today = get_ist_today().date()
     for i in range(6, -1, -1):
         day = today - timedelta(days=i)
         # Billed revenue and checkout count for each day
@@ -354,7 +372,7 @@ def get_reports_data(
             "total_expenses": apply_branch_scope(db.query(func.sum(Expense.amount)), Expense, branch_id).scalar() or 0,
             "total_bookings": apply_branch_scope(db.query(Booking), Booking, branch_id).count() + apply_branch_scope(db.query(PackageBooking), PackageBooking, branch_id).count(),
             "active_employees": apply_branch_scope(db.query(Employee), Employee, branch_id).count(),
-            "online_employees": apply_branch_scope(db.query(WorkingLog).filter(WorkingLog.date == date.today(), WorkingLog.check_out_time == None), WorkingLog, branch_id).count(),
+            "online_employees": apply_branch_scope(db.query(WorkingLog).filter(WorkingLog.date == get_ist_today().date(), WorkingLog.check_out_time == None), WorkingLog, branch_id).count(),
             "total_rooms": apply_branch_scope(db.query(Room), Room, branch_id).count(),
         },
         "recent_bookings": all_recent,
@@ -363,21 +381,10 @@ def get_reports_data(
 
 
 def get_date_range(period: str):
-    """Helper to determine start and end dates based on a string period."""
-    today = date.today()
-    if period == "day":
-        start_date = today
-        end_date = today + timedelta(days=1)
-    elif period == "week":
-        start_date = today - timedelta(days=today.weekday())  # Monday
-        end_date = start_date + timedelta(days=7)
-    elif period == "month":
-        start_date = today.replace(day=1)
-        # Find the first day of the next month to use as an exclusive end date
-        next_month = (start_date.replace(day=28) + timedelta(days=4)).replace(day=1)
-        end_date = next_month
-    else:  # "all"
-        start_date, end_date = None, None
+    """Helper to determine start and end dates based on a string period in IST."""
+    start_date, end_date = get_ist_date_range(period if period != "all" else "today")
+    if period == "all":
+        return None, None
     return start_date, end_date
 
 
@@ -393,17 +400,51 @@ def get_summary(
     """
     Provides a comprehensive summary of KPIs for a given period (day, week, month, all).
     """
-    today = date.today()
+    today = get_ist_today().date()
+    today_ist = today
     if period != "custom":
         start_date, end_date = get_date_range(period)
 
     def apply_date_filter(query, date_column):
-        """Applies a date range filter to a SQLAlchemy query if dates are provided."""
-        if start_date:
-            query = query.filter(date_column >= start_date)
-        if end_date:
-            # Use '<' for the end date to correctly handle date ranges
-            query = query.filter(date_column < end_date)
+        """Applies a date range filter to a SQLAlchemy query if dates are provided.
+        Automatically converts IST filter boundaries to UTC for DateTime columns,
+        while maintaining IST dates for Date columns to ensure midnight alignment.
+        """
+        if not start_date and not end_date:
+            return query
+            
+        s, e = start_date, end_date
+        
+        # Determine if we are filtering a Date or DateTime column
+        is_date_type = False
+        try:
+            from sqlalchemy import Date as SADate
+            # Handle both raw columns and cast expressions
+            col_type = getattr(date_column, 'type', None)
+            if isinstance(col_type, SADate):
+                is_date_type = True
+        except:
+            pass
+
+        if is_date_type:
+            # For Date columns, use the IST date directly
+            s_val = s.date() if isinstance(s, datetime) else s
+            e_val = e.date() if isinstance(e, datetime) else e
+        else:
+            # For DateTime columns, convert IST boundaries to UTC
+            s_val = ist_to_utc(s) if isinstance(s, datetime) else s
+            e_val = ist_to_utc(e) if isinstance(e, datetime) else e
+            # Log boundary conversion for auditing
+            try:
+                col_name = getattr(date_column, 'name', 'expression')
+                print(f"DEBUG-DASH: Filtering {col_name} | IST: {s} -> {e} | UTC SQL: {s_val} -> {e_val}")
+            except:
+                pass
+            
+        if s_val:
+            query = query.filter(date_column >= s_val)
+        if e_val:
+            query = query.filter(date_column < e_val)
         return query
 
     # --- KPI Calculations ---
@@ -564,12 +605,36 @@ def get_summary(
     inventory_items_count = 0
     try:
         inv_val_q = db.query(func.sum(func.abs(InventoryItem.current_stock) * InventoryItem.unit_price))
-        total_inventory_value = inv_val_q.scalar() or 0  # No branch_id
+        total_inventory_value = inv_val_q.scalar() or 0
         
         inv_count_q = db.query(func.count(InventoryItem.id))
-        inventory_items_count = inv_count_q.scalar() or 0  # No branch_id
+        inventory_items_count = inv_count_q.scalar() or 0
     except Exception as e:
         print(f"Dashboard: Error calculating inventory stats: {e}")
+        db.rollback()
+        pass
+
+    total_consumption_value = 0
+    total_waste_value = 0
+    try:
+        from app.models.inventory import InventoryTransaction
+        cons_q = db.query(func.sum(func.abs(InventoryTransaction.quantity) * InventoryItem.unit_price)).select_from(InventoryTransaction).join(InventoryItem, InventoryTransaction.item_id == InventoryItem.id).filter(
+            InventoryTransaction.transaction_type.in_(['out', 'usage'])
+        )
+        if branch_id is not None:
+            cons_q = cons_q.filter(InventoryTransaction.branch_id == branch_id)
+        # Removed date filters to provide all-time consumption value for inventory control
+        total_consumption_value = cons_q.scalar() or 0
+        
+        waste_q = db.query(func.sum(func.abs(InventoryTransaction.quantity) * InventoryItem.unit_price)).select_from(InventoryTransaction).join(InventoryItem, InventoryTransaction.item_id == InventoryItem.id).filter(
+            InventoryTransaction.transaction_type == 'waste'
+        )
+        if branch_id is not None:
+            waste_q = waste_q.filter(InventoryTransaction.branch_id == branch_id)
+        # Removed date filters to provide all-time waste value for inventory control
+        total_waste_value = waste_q.scalar() or 0
+    except Exception as e:
+        print(f"Dashboard: Error calculating consumption/waste: {e}")
         db.rollback()
         pass
 
@@ -593,26 +658,26 @@ def get_summary(
 
     # Purchase KPIs - Total purchase amount and count
     total_purchases = 0
+    total_purchases_value = 0
     purchase_count = 0
     try:
+        # Period-filtered purchases for main dashboard
         purchases_q = apply_date_filter(db.query(PurchaseMaster), PurchaseMaster.purchase_date)
         purchases_query = apply_branch_scope(purchases_q, PurchaseMaster, branch_id)
-        # Debug print
-        print(f"Dashboard: Calculating purchases. Period: {period}")
-        
         total_purchases = purchases_query.with_entities(func.sum(PurchaseMaster.total_amount)).scalar() or 0
-        print(f"Dashboard: Total purchases sum: {total_purchases}")
         
-        # Estimate purchase count
+        # All-time purchases for inventory valuation screen
+        all_purchases_q = apply_branch_scope(db.query(PurchaseMaster), PurchaseMaster, branch_id)
+        total_purchases_value = all_purchases_q.with_entities(func.sum(PurchaseMaster.total_amount)).scalar() or 0
+
         sample = purchases_query.limit(1000).all()
         purchase_count = len(sample) if len(sample) < 1000 else 1000
-        print(f"Dashboard: Purchase count: {purchase_count}")
     except Exception as e:
         import traceback
         print(f"Dashboard: Error calculating purchases: {e}")
-        print(traceback.format_exc())
         db.rollback()
         total_purchases = 0
+        total_purchases_value = 0
         purchase_count = 0
 
     # Vendor KPI - Count of active vendors
@@ -632,20 +697,21 @@ def get_summary(
     
     try:
         # 1. Settled Revenue (from Checkouts)
-        revenue_q = apply_date_filter(db.query(Checkout), func.cast(Checkout.checkout_date, Date))
+        # Removed problematic func.cast for accurate IST midnight coverage
+        revenue_q = apply_date_filter(db.query(Checkout), Checkout.checkout_date)
         revenue_query = apply_branch_scope(revenue_q, Checkout, branch_id)
         settled_revenue = revenue_query.with_entities(func.sum(Checkout.grand_total)).scalar() or 0
         total_output_tax = revenue_query.with_entities(func.sum(Checkout.tax_amount)).scalar() or 0.0
         
         # 2. Unbilled Food Revenue (not in a checkout yet)
-        food_unbilled_q = apply_date_filter(db.query(FoodOrder), func.cast(FoodOrder.created_at, Date))
+        food_unbilled_q = apply_date_filter(db.query(FoodOrder), FoodOrder.created_at)
         food_unbilled_query = apply_branch_scope(food_unbilled_q, FoodOrder, branch_id).filter(
             FoodOrder.billing_status.in_(["unbilled", "unpaid"])
         )
         unbilled_food = food_unbilled_query.with_entities(func.sum(FoodOrder.amount)).scalar() or 0
         
         # 3. Unbilled Service Revenue (not in a checkout yet)
-        service_unbilled_q = apply_date_filter(db.query(AssignedService), func.cast(AssignedService.assigned_at, Date))
+        service_unbilled_q = apply_date_filter(db.query(AssignedService), AssignedService.assigned_at)
         service_unbilled_query = apply_branch_scope(service_unbilled_q, AssignedService, branch_id).join(Service).filter(
             AssignedService.billing_status.in_(["unbilled", "unpaid"])
         )
@@ -710,6 +776,9 @@ def get_summary(
         "inventory_categories": inventory_categories_count,
         "inventory_departments": inventory_departments_count,
         "total_purchases": float(total_purchases) if total_purchases else 0,
+        "total_purchases_value": float(total_purchases_value) if total_purchases_value else 0,
+        "total_consumption_value": float(total_consumption_value) if total_consumption_value else 0,
+        "total_waste_value": float(total_waste_value) if total_waste_value else 0,
         "purchase_count": purchase_count,
         "vendor_count": vendor_count,
         "low_stock_items_count": low_stock_count,
@@ -1143,108 +1212,253 @@ def get_department_details(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if period != "custom":
-        start_date, end_date = get_date_range(period)
-    
-    def apply_date(q, col):
-        if start_date: 
-            q = q.filter(col >= start_date)
-        if end_date: 
-            q = q.filter(col <= end_date)
-        return q
+    try:
+        if period != "custom":
+            start_date, end_date = get_ist_date_range(period)
+        
+        def apply_date(q, col):
+            if not start_date and not end_date:
+                return q
+            if start_date:
+                q = q.filter(col >= start_date)
+            if end_date:
+                q = q.filter(col <= end_date)
+            return q
 
-    # 1. Expenses
-    exp_q = db.query(func.sum(Expense.amount)).filter(Expense.department == dept_name)
-    exp_q = apply_date(exp_q, Expense.date)
-    total_expenses = exp_q.scalar() or 0.0
-
-    # 2. Income (Approximation)
-    total_income = 0.0
-    if dept_name == "Restaurant":
-         inc_q = db.query(func.sum(FoodOrder.total_amount)).filter(FoodOrder.status != "Cancelled")
-         if start_date: inc_q = inc_q.filter(func.date(FoodOrder.created_at) >= start_date)
-         if end_date: inc_q = inc_q.filter(func.date(FoodOrder.created_at) <= end_date)
-         total_income = inc_q.scalar() or 0.0
-    
-    # 3. Assets (Fixed assets in this department)
-    total_assets = 0.0
-    try:
-        # Fixed assets explicitly marked
-        fixed_assets_query = db.query(
-            func.sum(func.abs(InventoryItem.current_stock) * InventoryItem.unit_price)
-        ).join(InventoryCategory).filter(
-            InventoryCategory.parent_department == dept_name,
-            InventoryItem.is_asset_fixed == True,
-            InventoryItem.current_stock != 0
-        )
-        fixed_assets = fixed_assets_query.scalar() or 0
-        
-        # High-value items (likely assets even if not marked)
-        high_value_query = db.query(
-            func.sum(func.abs(InventoryItem.current_stock) * InventoryItem.unit_price)
-        ).join(InventoryCategory).filter(
-            InventoryCategory.parent_department == dept_name,
-            InventoryItem.is_asset_fixed == False,
-            InventoryItem.unit_price >= 10000,
-            InventoryItem.current_stock != 0
-        )
-        high_value_assets = high_value_query.scalar() or 0
-        
-        total_assets = float(fixed_assets) + float(high_value_assets)
-    except Exception as e:
-        print(f"Error calculating assets for {dept_name}: {e}")
-        total_assets = 0.0
-    
-    # 4. Capital Investment (Inventory purchases for this department)
-    # Use same logic as summary endpoint for consistency
-    capital_investment = 0.0
-    try:
-        from app.models.inventory import PurchaseDetail
-        purchase_query = db.query(PurchaseDetail).join(PurchaseMaster)
-        purchase_query = apply_date(purchase_query, PurchaseMaster.purchase_date)
-        
-        # Join with InventoryItem and InventoryCategory to filter by department
-        dept_purchases = purchase_query.join(
-            InventoryItem, PurchaseDetail.item_id == InventoryItem.id
-        ).join(
-            InventoryCategory, InventoryItem.category_id == InventoryCategory.id
-        ).filter(
-            InventoryCategory.parent_department == dept_name
-        ).with_entities(func.sum(PurchaseDetail.total_amount)).scalar() or 0
-        
-        capital_investment = float(dept_purchases) if dept_purchases else 0.0
-    except Exception as e:
-        print(f"Error calculating capital investment for {dept_name}: {e}")
-        capital_investment = 0.0
-    
-    # 5. Inventory Consumption (Stock Issued to Dept locations)
-    inventory_consumption = 0.0
-    try:
-        locs = db.query(Location.id).filter(Location.name.ilike(f"%{dept_name}%")).all()
-        loc_ids = [l[0] for l in locs]
-        
-        if loc_ids:
-            cons_q = db.query(func.sum(StockIssueDetail.quantity * InventoryItem.unit_price))\
-                .select_from(StockIssueDetail)\
-                .join(StockIssue)\
-                .join(InventoryItem)\
-                .filter(StockIssue.destination_location_id.in_(loc_ids))
-            
-            cons_q = apply_date(cons_q, StockIssue.created_at)
-            inventory_consumption = cons_q.scalar() or 0.0
-    except Exception as e:
-        print(f"Error calculating inventory consumption for {dept_name}: {e}")
+        # Inventory Consumption (Includes Food Orders for Restaurant)
         inventory_consumption = 0.0
+        try:
+            cons_q = db.query(func.sum(InventoryTransaction.total_amount)).filter(
+                or_(InventoryTransaction.transaction_type == "out", InventoryTransaction.transaction_type == "Usage"),
+                InventoryTransaction.department.ilike(dept_name)
+            )
+            cons_q = apply_date(cons_q, InventoryTransaction.created_at)
+            inventory_consumption = cons_q.scalar() or 0.0
+            
+            if dept_name.lower() == "restaurant":
+                fo_cons_q = db.query(func.sum(FoodOrder.total_with_gst)).filter(FoodOrder.status != "Cancelled")
+                if start_date: fo_cons_q = fo_cons_q.filter(FoodOrder.created_at >= start_date)
+                if end_date: fo_cons_q = fo_cons_q.filter(FoodOrder.created_at <= end_date)
+                inventory_consumption += float(fo_cons_q.scalar() or 0)
+        except: pass
 
-    return {
-        "department": dept_name,
-        "income": round(float(total_income), 2),
-        "expenses": round(float(total_expenses), 2),
-        "regular_expenses": round(float(total_expenses), 2),
-        "inventory_consumption": round(float(inventory_consumption), 2),
-        "capital_investment": round(capital_investment, 2),
-        "assets": round(total_assets, 2)
-    }
+        # 1. Totals Calculations
+        # Expenses (Direct + Consumption/COGS)
+        exp_q = db.query(func.sum(Expense.amount)).filter(Expense.department.ilike(dept_name))
+        exp_q = apply_date(exp_q, Expense.date)
+        direct_expenses = exp_q.scalar() or 0.0
+        total_expenses = float(direct_expenses) + float(inventory_consumption)
+
+        # Income
+        total_income = 0.0
+        if dept_name.lower() == "restaurant":
+            inc_q = db.query(func.sum(FoodOrder.total_with_gst)).filter(FoodOrder.status != "Cancelled")
+            if start_date: inc_q = inc_q.filter(FoodOrder.created_at >= start_date)
+            if end_date: inc_q = inc_q.filter(FoodOrder.created_at <= end_date)
+            total_income = inc_q.scalar() or 0.0
+        elif dept_name.lower() == "hotel":
+            inc_q = db.query(func.sum(Checkout.room_total)).filter(Checkout.payment_status.ilike("paid"))
+            inc_q = apply_date(inc_q, Checkout.checkout_date)
+            total_income = inc_q.scalar() or 0.0
+        
+        # Assets
+        total_assets = 0.0
+        try:
+            fixed_assets_query = db.query(
+                func.sum(func.abs(InventoryItem.current_stock) * InventoryItem.unit_price)
+            ).join(InventoryCategory).filter(
+                InventoryCategory.parent_department.ilike(dept_name),
+                InventoryItem.is_asset_fixed == True,
+                InventoryItem.current_stock != 0
+            )
+            fixed_assets = fixed_assets_query.scalar() or 0
+            
+            high_value_query = db.query(
+                func.sum(func.abs(InventoryItem.current_stock) * InventoryItem.unit_price)
+            ).join(InventoryCategory).filter(
+                InventoryCategory.parent_department.ilike(dept_name),
+                InventoryItem.is_asset_fixed == False,
+                InventoryItem.unit_price >= 10000,
+                InventoryItem.current_stock != 0
+            )
+            high_value_assets = high_value_query.scalar() or 0
+            total_assets = float(fixed_assets) + float(high_value_assets)
+        except: pass
+        
+        # Capital Investment (Purchases)
+        capital_investment = 0.0
+        try:
+            purchase_query = db.query(PurchaseDetail).join(PurchaseMaster)
+            purchase_query = apply_date(purchase_query, PurchaseMaster.purchase_date)
+            dept_purchases = purchase_query.join(
+                InventoryItem, PurchaseDetail.item_id == InventoryItem.id
+            ).join(
+                InventoryCategory, InventoryItem.category_id == InventoryCategory.id
+            ).filter(InventoryCategory.parent_department.ilike(dept_name)).with_entities(func.sum(PurchaseDetail.total_amount)).scalar() or 0
+            capital_investment = float(dept_purchases)
+        except: pass
+        
+        # Inventory Consumption (Includes Food Orders for Restaurant)
+        inventory_consumption = 0.0
+        try:
+            cons_q = db.query(func.sum(InventoryTransaction.total_amount)).filter(
+                or_(InventoryTransaction.transaction_type == "out", InventoryTransaction.transaction_type == "Usage"),
+                InventoryTransaction.department.ilike(dept_name)
+            )
+            cons_q = apply_date(cons_q, InventoryTransaction.created_at)
+            inventory_consumption = cons_q.scalar() or 0.0
+            
+            if dept_name.lower() == "restaurant":
+                fo_cons_q = db.query(func.sum(FoodOrder.total_with_gst)).filter(FoodOrder.status != "Cancelled")
+                if start_date: fo_cons_q = fo_cons_q.filter(FoodOrder.created_at >= start_date)
+                if end_date: fo_cons_q = fo_cons_q.filter(FoodOrder.created_at <= end_date)
+                inventory_consumption += float(fo_cons_q.scalar() or 0)
+        except: pass
+
+        # 2. Detailed Lists for Dossier
+        # Expenses List
+        expenses_list = []
+        try:
+            exps_q = db.query(Expense).filter(Expense.department.ilike(dept_name)).order_by(Expense.date.desc())
+            exps_q = apply_date(exps_q, Expense.date)
+            for e in exps_q.limit(20).all():
+                expenses_list.append({
+                    "id": e.id,
+                    "description": e.description or e.category,
+                    "amount": float(e.amount or 0),
+                    "date": e.date.isoformat() if e.date else None,
+                    "category": e.category
+                })
+            # Add Consumption items as operational expenses
+            for c in consumption_list:
+                expenses_list.append({
+                    "id": f"cons_{c['id']}",
+                    "description": f"{c['item_name']} (Consumed)",
+                    "amount": c['amount'],
+                    "date": c['date'],
+                    "category": "Operational (COGS)"
+                })
+            
+            # Re-sort combined expenses list
+            expenses_list.sort(key=lambda x: x['date'] if x['date'] else '', reverse=True)
+            expenses_list = expenses_list[:20]
+        except: pass
+
+
+        # Income List
+        income_list = []
+        if dept_name.lower() == "restaurant":
+            orders_q = db.query(FoodOrder).options(joinedload(FoodOrder.room)).filter(FoodOrder.status != "Cancelled").order_by(FoodOrder.created_at.desc())
+            if start_date: orders_q = orders_q.filter(FoodOrder.created_at >= start_date)
+            if end_date: orders_q = orders_q.filter(FoodOrder.created_at <= end_date)
+            
+            for o in orders_q.limit(20).all():
+                income_list.append({
+                    "id": o.id,
+                    "source": f"Room {o.room.number if o.room else 'Dine-in'}",
+                    "amount": float(o.total_with_gst or 0),
+                    "date": o.created_at.isoformat() if o.created_at else None,
+                    "type": "Food Order"
+                })
+        elif dept_name.lower() == "hotel":
+            chks_q = db.query(Checkout).filter(Checkout.payment_status.ilike("paid")).order_by(Checkout.checkout_date.desc())
+            chks_q = apply_date(chks_q, Checkout.checkout_date)
+            for c in chks_q.limit(20).all():
+                income_list.append({
+                    "id": c.id,
+                    "source": f"Room {c.room_number} - {c.guest_name}",
+                    "amount": float(c.room_total or 0),
+                    "date": c.checkout_date.isoformat() if c.checkout_date else None,
+                    "type": "Room Revenue"
+                })
+
+        # Assets List
+        asset_list = []
+        try:
+            ast_q = db.query(InventoryItem).join(InventoryCategory).filter(
+                InventoryCategory.parent_department.ilike(dept_name),
+                or_(InventoryItem.is_asset_fixed == True, InventoryItem.unit_price >= 10000),
+                InventoryItem.current_stock != 0
+            ).limit(20)
+            for a in ast_q.all():
+                asset_list.append({
+                    "id": a.id,
+                    "name": a.name,
+                    "value": float(abs(a.current_stock or 0) * (a.unit_price or 0)),
+                    "quantity": float(a.current_stock or 0),
+                    "unit": a.unit_type or "PCS"
+                })
+        except: pass
+
+        # Consumption List (Inventory + Food Orders)
+        consumption_list = []
+        try:
+            cons_list_q = db.query(InventoryTransaction).join(InventoryItem).filter(
+                or_(InventoryTransaction.transaction_type == "out", InventoryTransaction.transaction_type == "Usage"),
+                InventoryTransaction.department.ilike(dept_name)
+            ).order_by(InventoryTransaction.created_at.desc())
+            cons_list_q = apply_date(cons_list_q, InventoryTransaction.created_at)
+            for t in cons_list_q.limit(20).all():
+                consumption_list.append({
+                    "id": f"inv_{t.id}",
+                    "item_name": t.item.name if t.item else "Unknown",
+                    "amount": float(t.total_amount or 0),
+                    "quantity": float(t.quantity or 0),
+                    "date": t.created_at.isoformat() if t.created_at else None,
+                    "type": "Inventory"
+                })
+            
+            if dept_name.lower() == "restaurant":
+                fo_q = db.query(FoodOrder).options(joinedload(FoodOrder.room)).filter(FoodOrder.status != "Cancelled").order_by(FoodOrder.created_at.desc())
+                if start_date: fo_q = fo_q.filter(FoodOrder.created_at >= start_date)
+                if end_date: fo_q = fo_q.filter(FoodOrder.created_at <= end_date)
+                for fo in fo_q.limit(20).all():
+                    consumption_list.append({
+                        "id": f"fo_{fo.id}",
+                        "item_name": f"Food Order #{fo.id} ({'Room ' + fo.room.number if fo.room else 'Dine-in'})",
+                        "amount": float(fo.total_with_gst or 0),
+                        "quantity": 1.0,
+                        "date": fo.created_at.isoformat() if fo.created_at else None,
+                        "type": "Food Sale"
+                    })
+                consumption_list.sort(key=lambda x: x['date'] if x['date'] else '', reverse=True)
+                consumption_list = consumption_list[:20]
+        except: pass
+
+        # Purchases List
+        purchase_list = []
+        try:
+            pur_q = db.query(PurchaseDetail).join(PurchaseMaster).join(InventoryItem).join(InventoryCategory).filter(
+                InventoryCategory.parent_department.ilike(dept_name)
+            ).order_by(PurchaseMaster.purchase_date.desc())
+            pur_q = apply_date(pur_q, PurchaseMaster.purchase_date)
+            for p in pur_q.limit(20).all():
+                purchase_list.append({
+                    "id": p.id,
+                    "item_name": p.item.name if p.item else "Unknown",
+                    "total_amount": float(p.total_amount or 0),
+                    "quantity": float(p.quantity or 0),
+                    "date": p.purchase_master.purchase_date.isoformat() if p.purchase_master and p.purchase_master.purchase_date else None
+                })
+        except: pass
+
+        return {
+            "department": dept_name,
+            "income_total": round(float(total_income), 2),
+            "expenses_total": round(float(total_expenses), 2),
+            "assets_total": round(total_assets, 2),
+            "consumption_total": round(float(inventory_consumption), 2),
+            "purchases_total": round(capital_investment, 2),
+            "income": income_list,
+            "expenses": expenses_list,
+            "assets": asset_list,
+            "consumption": consumption_list,
+            "purchases": purchase_list
+        }
+    except Exception as e:
+        print(f"ERROR in get_department_details: {str(e)}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/vendors/stats")
 def get_vendor_stats(

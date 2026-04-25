@@ -3,7 +3,7 @@ import sys
 import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from datetime import datetime
+from datetime import timezone, datetime
 import random
 
 # Add parent directory to path
@@ -45,12 +45,12 @@ def create_comprehensive_stock_purchase():
         print(f"Vendor: {vendor.name} (ID: {vendor.id})")
 
         # 2. CREATE PURCHASE HEADER
-        po_number = f"PO-AUTO-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
+        po_number = f"PO-AUTO-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
         
         purchase = PurchaseMaster(
             purchase_number=po_number,
             vendor_id=vendor.id,
-            purchase_date=datetime.utcnow(),
+            purchase_date=datetime.now(timezone.utc),
             status="received", # Auto-receive
             destination_location_id=warehouse.id,
             created_by=user_id,
@@ -116,13 +116,13 @@ def create_comprehensive_stock_purchase():
             
             if loc_stock:
                 loc_stock.quantity += qty_to_add
-                loc_stock.last_updated = datetime.utcnow()
+                loc_stock.last_updated = datetime.now(timezone.utc)
             else:
                 new_ls = LocationStock(
                     location_id=warehouse.id,
                     item_id=item.id,
                     quantity=qty_to_add,
-                    last_updated=datetime.utcnow()
+                    last_updated=datetime.now(timezone.utc)
                 )
                 db.add(new_ls)
                 
@@ -137,7 +137,7 @@ def create_comprehensive_stock_purchase():
                 purchase_master_id=purchase.id,
                 notes="Auto-replenishment",
                 created_by=user_id,
-                created_at=datetime.utcnow()
+                created_at=datetime.now(timezone.utc)
             )
             db.add(txn)
             

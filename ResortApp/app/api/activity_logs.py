@@ -5,7 +5,7 @@ from app.models.activity_log import ActivityLog
 from app.models.user import User
 from app.utils.auth import get_current_user
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import timezone, datetime, timedelta
 
 router = APIRouter(prefix="/activity-logs", tags=["Activity Logs"])
 
@@ -41,7 +41,7 @@ def get_activity_logs(
         query = query.filter(ActivityLog.user_id == user_id)
     
     if hours:
-        time_threshold = datetime.utcnow() - timedelta(hours=hours)
+        time_threshold = datetime.now(timezone.utc) - timedelta(hours=hours)
         query = query.filter(ActivityLog.timestamp >= time_threshold)
     
     # Order by most recent first
@@ -87,7 +87,7 @@ def get_activity_stats(
     """
     Get activity statistics.
     """
-    time_threshold = datetime.utcnow() - timedelta(hours=hours)
+    time_threshold = datetime.now(timezone.utc) - timedelta(hours=hours)
     
     # Total requests
     total_requests = db.query(ActivityLog).filter(

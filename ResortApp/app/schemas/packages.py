@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, model_validator
 from datetime import date, datetime
-from typing import List, Optional
+from typing import List, Optional, Union
 from .checkout import CheckoutFull
 
 
@@ -105,6 +105,7 @@ class PackageBookingOut(PackageBookingBase):
     rooms: List[PackageBookingRoomOut] = Field(default_factory=list)
     package: Optional[PackageOut]
     checkout: Optional[CheckoutFull] = None # Support detailed checkout info
+    room_type_id: Optional[Union[int, str]] = None
     
     @model_validator(mode='after')
     def set_display_id(self):

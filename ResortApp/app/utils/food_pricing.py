@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, time
+from datetime import timezone, datetime, time
 from typing import Optional, List, Dict
 
 def get_food_item_price_at_time(food_item, order_time: Optional[datetime] = None, order_type: str = "dine_in") -> float:
@@ -9,8 +9,8 @@ def get_food_item_price_at_time(food_item, order_time: Optional[datetime] = None
     """
     if not order_time:
         # Default to current time in IST (standard for the app)
-        from datetime import timedelta
-        order_time = datetime.utcnow() + timedelta(hours=5, minutes=30)
+        from datetime import timezone, timedelta
+        order_time = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
     
     current_time = order_time.time()
     

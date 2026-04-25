@@ -15,7 +15,7 @@ class RoomType(Base):
     adults_capacity = Column(Integer, default=2)
     children_capacity = Column(Integer, default=0)
     channel_manager_id = Column(String, nullable=True) # For future OTA sync
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     # Amenities moved to type level
     air_conditioning = Column(Boolean, default=False)
@@ -69,7 +69,7 @@ class Room(Base):
     image_url = Column(String, nullable=True)
     extra_images = Column(String, nullable=True) # JSON string of extra image URLs
     inventory_location_id = Column(Integer, ForeignKey("locations.id"), nullable=True)  # Link to inventory locations
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 

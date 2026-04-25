@@ -1,5 +1,5 @@
 from app.utils.timezone import get_system_timezone
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -14,7 +14,10 @@ from app.models.employee import Attendance, WorkingLog, Employee, Leave
 from app.models.settings import SystemSetting
 from app.models.user import User
 from app.utils.branch_scope import get_branch_id
+from app.utils.date_utils import get_ist_now, get_ist_today
 import json
+import os
+import shutil
 
 router = APIRouter(prefix="/attendance", tags=["Attendance"])
 
@@ -128,7 +131,16 @@ def log_working_hours(log: WorkingLogCreate, db: Session = Depends(get_db), curr
     return log_data
 
 @router.post("/clock-in", response_model=WorkingLogRecord)
-def clock_in(clock_in_data: ClockInCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+def clock_in(
+    employee_id: int = Form(...),
+    location: str = Form(...),
+    latitude: Optional[float] = Form(None),
+    longitude: Optional[float] = Form(None),
+    image: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user), 
+    branch_id: int = Depends(get_branch_id)
+):
     try:
         # Use Indian Standard Time (IST)
         ist = get_system_timezone()
@@ -136,7 +148,7 @@ def clock_in(clock_in_data: ClockInCreate, db: Session = Depends(get_db), curren
         
         # Check if there's an open clock-in for this employee today
         open_log = db.query(WorkingLog).filter(
-            WorkingLog.employee_id == clock_in_data.employee_id,
+            WorkingLog.employee_id == employee_id,
             WorkingLog.date == now.date(),
             WorkingLog.check_out_time.is_(None)
         ).first()
@@ -144,13 +156,25 @@ def clock_in(clock_in_data: ClockInCreate, db: Session = Depends(get_db), curren
         if open_log:
             raise HTTPException(status_code=400, detail="Employee is already clocked in. Please clock out first.")
 
+        image_url = None
+        if image and image.filename:
+            upload_folder = os.path.join("uploads", "attendance")
+            os.makedirs(upload_folder, exist_ok=True)
+            file_extension = os.path.splitext(image.filename)[1]
+            file_name = f"in_{employee_id}_{get_ist_now().strftime('%Y%m%d%H%M%S')}{file_extension}"
+            file_path = os.path.join(upload_folder, file_name)
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(image.file, buffer)
+            image_url = file_path.replace("\\", "/")
+
         new_log = WorkingLog(
-            employee_id=clock_in_data.employee_id,
+            employee_id=employee_id,
             date=now.date(),
             check_in_time=now.time(),
-            location=clock_in_data.location,
-            latitude=clock_in_data.latitude,
-            longitude=clock_in_data.longitude,
+            location=location,
+            latitude=latitude,
+            longitude=longitude,
+            clock_in_image=image_url,
             branch_id=branch_id
         )
         db.add(new_log)
@@ -159,21 +183,28 @@ def clock_in(clock_in_data: ClockInCreate, db: Session = Depends(get_db), curren
         return new_log
     except Exception as e:
         import traceback
-        print(f"ERROR: Clock-in failed for employee {clock_in_data.employee_id}: {str(e)}")
+        print(f"ERROR: Clock-in failed for employee {employee_id}: {str(e)}")
         traceback.print_exc()
         if isinstance(e, HTTPException):
             raise e
         raise HTTPException(status_code=500, detail=f"Internal Server Error during clock-in: {str(e)}")
 
 @router.post("/clock-out", response_model=WorkingLogRecord)
-def clock_out(clock_out_data: ClockOutCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+def clock_out(
+    employee_id: int = Form(...),
+    completed_tasks: Optional[str] = Form(None),
+    image: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user), 
+    branch_id: int = Depends(get_branch_id)
+):
     # Use Indian Standard Time (IST)
     ist = get_system_timezone()
     now = datetime.now(ist)
     
     # Find the last open clock-in for this employee in this branch
     query = db.query(WorkingLog).filter(
-        WorkingLog.employee_id == clock_out_data.employee_id, 
+        WorkingLog.employee_id == employee_id, 
         WorkingLog.check_out_time.is_(None)
     )
     if branch_id is not None:
@@ -184,7 +215,11 @@ def clock_out(clock_out_data: ClockOutCreate, db: Session = Depends(get_db), cur
     if not log_to_close:
         raise HTTPException(status_code=404, detail="No open clock-in found to clock out.")
         
-    employee = db.query(Employee).filter(Employee.id == clock_out_data.employee_id).first()
+    # Update tasks if provided
+    if completed_tasks is not None:
+        log_to_close.completed_tasks = completed_tasks
+
+    employee = db.query(Employee).filter(Employee.id == employee_id).first()
     if employee and employee.daily_tasks:
         try:
             assigned_tasks = json.loads(employee.daily_tasks)
@@ -195,13 +230,25 @@ def clock_out(clock_out_data: ClockOutCreate, db: Session = Depends(get_db), cur
             
         if assigned_tasks:
             try:
-                completed_tasks = json.loads(log_to_close.completed_tasks or "[]")
+                tasks_done = json.loads(log_to_close.completed_tasks or "[]")
             except:
-                completed_tasks = []
+                tasks_done = []
                 
-            all_completed = all(task in completed_tasks for task in assigned_tasks)
+            all_completed = all(task in tasks_done for task in assigned_tasks)
             if not all_completed:
                 raise HTTPException(status_code=400, detail="Please complete all assigned active shift tasks before clocking out.")
+
+    image_url = None
+    if image and image.filename:
+        upload_folder = os.path.join("uploads", "attendance")
+        os.makedirs(upload_folder, exist_ok=True)
+        file_extension = os.path.splitext(image.filename)[1]
+        file_name = f"out_{employee_id}_{get_ist_now().strftime('%Y%m%d%H%M%S')}{file_extension}"
+        file_path = os.path.join(upload_folder, file_name)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(image.file, buffer)
+        image_url = file_path.replace("\\", "/")
+        log_to_close.clock_out_image = image_url
 
     log_to_close.check_out_time = now.time()
     
@@ -248,9 +295,13 @@ def get_work_logs_by_date(log_date: date, db: Session = Depends(get_db), current
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/work-logs/{employee_id}", response_model=List[WorkingLogRecord])
-def get_work_logs_for_employee(employee_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def get_work_logs_for_employee(employee_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
     try:
-        work_logs = db.query(WorkingLog).filter(WorkingLog.employee_id == employee_id).order_by(WorkingLog.date.desc(), WorkingLog.check_in_time.desc()).all()
+        query = db.query(WorkingLog).filter(WorkingLog.employee_id == employee_id)
+        if branch_id is not None:
+            query = query.filter(WorkingLog.branch_id == branch_id)
+            
+        work_logs = query.order_by(WorkingLog.date.desc(), WorkingLog.check_in_time.desc()).all()
         
         results = []
         for log in work_logs:
@@ -299,7 +350,7 @@ def approve_working_log_tasks(log_id: int, db: Session = Depends(get_db), curren
         
     log.is_tasks_approved = 1 # Approved
     log.tasks_approved_by_id = current_user.id
-    log.tasks_approved_at = datetime.now(get_system_timezone())
+    log.tasks_approved_at = get_ist_now()
     
     db.commit()
     db.refresh(log)
@@ -309,8 +360,12 @@ def approve_working_log_tasks(log_id: int, db: Session = Depends(get_db), curren
     return log_data
 
 @router.get("/monthly-report/{employee_id}", response_model=MonthlyReport)
-def get_monthly_report(employee_id: int, year: int, month: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    employee = db.query(Employee).filter(Employee.id == employee_id).first()
+def get_monthly_report(employee_id: int, year: int, month: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+    query = db.query(Employee).filter(Employee.id == employee_id)
+    if branch_id is not None:
+        query = query.filter(Employee.branch_id == branch_id)
+    
+    employee = query.first()
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
 
@@ -320,11 +375,15 @@ def get_monthly_report(employee_id: int, year: int, month: int, db: Session = De
     end_of_month = date(year, month, total_days_in_month)
 
     # Calculate present days based on duration (>= 4 hours)
-    working_logs = db.query(WorkingLog).filter(
+    working_logs_q = db.query(WorkingLog).filter(
         WorkingLog.employee_id == employee_id,
         WorkingLog.date >= start_of_month,
         WorkingLog.date <= end_of_month
-    ).all()
+    )
+    if branch_id is not None:
+        working_logs_q = working_logs_q.filter(WorkingLog.branch_id == branch_id)
+        
+    working_logs = working_logs_q.all()
     
     daily_hours = {}
     for log in working_logs:
@@ -343,12 +402,16 @@ def get_monthly_report(employee_id: int, year: int, month: int, db: Session = De
     present_days = sum(1 for hours in daily_hours.values() if hours >= 4)
 
     # --- Leave Calculation for the Month ---
-    approved_leaves_month = db.query(Leave).filter(
+    approved_leaves_q = db.query(Leave).filter(
         Leave.employee_id == employee_id,
         Leave.status == 'approved',
         Leave.from_date <= end_of_month,
         Leave.to_date >= start_of_month
-    ).all()
+    )
+    if branch_id is not None:
+        approved_leaves_q = approved_leaves_q.filter(Leave.branch_id == branch_id)
+        
+    approved_leaves_month = approved_leaves_q.all()
 
     paid_leaves_taken_month = 0
     sick_leaves_taken_month = 0
@@ -374,7 +437,7 @@ def get_monthly_report(employee_id: int, year: int, month: int, db: Session = De
 
     # Robust handling for missing join_date
     if employee.join_date:
-        months_of_service = (datetime.now().year - employee.join_date.year) * 12 + datetime.now().month - employee.join_date.month + 1
+        months_of_service = (get_ist_today().year - employee.join_date.year) * 12 + get_ist_today().month - employee.join_date.month + 1
     else:
         # Fallback if join_date is missing
         months_of_service = 1 # Assume at least 1 month
@@ -419,7 +482,7 @@ def get_monthly_report(employee_id: int, year: int, month: int, db: Session = De
 @router.get("/utilization/aggregate", response_model=List[UtilizationRecord])
 def get_aggregate_utilization(db: Session = Depends(get_db), current_user: Any = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
     """Calculates aggregate working hours per month for the last 12 months for all staff."""
-    now = datetime.now()
+    now = get_ist_now()
     results = []
     for i in range(11, -1, -1):
         # Calculate month and year correctly
@@ -443,8 +506,8 @@ def get_aggregate_utilization(db: Session = Depends(get_db), current_user: Any =
         for log in logs:
             if log.check_in_time and log.check_out_time:
                 # Direct subtraction of time objects isn't supported, combine with dummy date
-                start_dt = datetime.combine(date.today(), log.check_in_time)
-                end_dt = datetime.combine(date.today(), log.check_out_time)
+                start_dt = datetime.combine(get_ist_today().date(), log.check_in_time)
+                end_dt = datetime.combine(get_ist_today().date(), log.check_out_time)
                 if end_dt > start_dt:
                     total_month_hours += (end_dt - start_dt).total_seconds() / 3600
         
@@ -491,9 +554,7 @@ def update_holidays(holidays: List[HolidayItem], db: Session = Depends(get_db), 
 @router.get("/status/today", response_model=TodayStatus)
 def get_today_status(db: Session = Depends(get_db), current_user: Any = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
     """Returns the count of employees on leave and active today."""
-    ist = get_system_timezone()
-    now_ist = datetime.now(ist)
-    today = now_ist.date()
+    today = get_ist_today().date()
     yesterday = today - timedelta(days=1)
     
     # Employees on leave today

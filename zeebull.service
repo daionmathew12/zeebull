@@ -1,0 +1,15 @@
+[Unit]
+Description=Zeebull Backend Service
+After=network.target postgresql.service
+
+[Service]
+User=basilabrahamsby
+Group=www-data
+WorkingDirectory=/var/www/teqmates/ResortApp
+Environment="PATH=/var/www/teqmates/ResortApp/venv/bin"
+EnvironmentFile=/var/www/teqmates/ResortApp/.env
+ExecStart=/var/www/teqmates/ResortApp/venv/bin/gunicorn main:app -c gunicorn.conf.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

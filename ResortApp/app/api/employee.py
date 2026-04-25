@@ -1,6 +1,7 @@
 # app/api/employee.py
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, status
+from fastapi.encoders import jsonable_encoder
 import os
 # Absolute project root path (ResortApp/)
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -48,6 +49,10 @@ def add_employee(
     current_user: User = Depends(get_current_user),
     branch_id: int = Depends(get_branch_id)
 ):
+
+    if daily_tasks is None or daily_tasks.strip() == "":
+        default_tasks = ["Review shift briefing", "Verify assigned area/inventory", "Check equipment & uniform"]
+        daily_tasks = json.dumps(default_tasks)
 
     image_url = None
     if image and image.filename:
@@ -273,7 +278,8 @@ def get_employee_status_overview(db: Session = Depends(get_db), current_user: Us
         WorkingLogModel.branch_id == branch_id
     ).all()
 
-    on_duty_ids = {log.employee_id for log in active_logs}
+    # Map employee_id -> active_log
+    active_log_map = {log.employee_id: log for log in active_logs}
     
     result = {
         "active_employees": [],
@@ -284,8 +290,12 @@ def get_employee_status_overview(db: Session = Depends(get_db), current_user: Us
     }
     
     for emp in employees:
-        if emp.id in on_duty_ids:
-            result["active_employees"].append(emp)
+        if emp.id in active_log_map:
+            log = active_log_map[emp.id]
+            emp_data = jsonable_encoder(emp)
+            emp_data['working_log_id'] = log.id
+            emp_data['check_in_time'] = log.check_in_time
+            result["active_employees"].append(emp_data)
         elif emp.id in leave_map:
             l_type = leave_map[emp.id]
             if l_type == "Sick":
@@ -307,16 +317,22 @@ def get_myself(db: Session = Depends(get_db), current_user: User = Depends(get_c
     if current_user.employee:
         return current_user.employee
     
-    # Self-Healing: Try to find unlinked employee by matching name/email parts
+    # Self-Healing: Try to find unlinked employee by matching name/email parts in THIS branch
     search_name = current_user.name
     emp = None
     if search_name:
-         emp = db.query(EmployeeModel).filter(EmployeeModel.name.ilike(f"%{search_name}%")).first()
+         query = db.query(EmployeeModel).filter(EmployeeModel.name.ilike(f"%{search_name}%"))
+         if branch_id is not None:
+             query = query.filter(EmployeeModel.branch_id == branch_id)
+         emp = query.first()
     
     if not emp and current_user.email:
          # Try email username part
          username = current_user.email.split('@')[0]
-         emp = db.query(EmployeeModel).filter(EmployeeModel.name.ilike(f"%{username}%")).first()
+         query = db.query(EmployeeModel).filter(EmployeeModel.name.ilike(f"%{username}%"))
+         if branch_id is not None:
+             query = query.filter(EmployeeModel.branch_id == branch_id)
+         emp = query.first()
          
     if emp:
         # Link if found (Self-Healing)
@@ -327,6 +343,33 @@ def get_myself(db: Session = Depends(get_db), current_user: User = Depends(get_c
         return emp
             
     raise HTTPException(status_code=404, detail="No linked employee profile")
+
+
+@router.get("/pending-leaves", response_model=list[LeaveOut])
+def get_pending_leaves(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
+    query = db.query(LeaveModel).filter(LeaveModel.status == 'pending')
+    if branch_id is not None:
+        query = query.filter(LeaveModel.branch_id == branch_id)
+    return query.options(joinedload(LeaveModel.employee)).all()
+
+
+@router.get("/all-leaves", response_model=list[LeaveOut])
+def get_all_leaves(
+    status: str = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    skip: int = 0,
+    limit: int = 100,
+    branch_id: int = Depends(get_branch_id)
+):
+    query = db.query(LeaveModel).options(joinedload(LeaveModel.employee))
+    
+    if branch_id is not None:
+        query = query.filter(LeaveModel.branch_id == branch_id)
+
+    if status and status != 'all':
+        query = query.filter(LeaveModel.status == status)
+    return query.order_by(LeaveModel.from_date.desc()).offset(skip).limit(limit).all()
 
 
 @router.get("/{employee_id}")
@@ -475,33 +518,11 @@ def delete_employee(employee_id: int, db: Session = Depends(get_db), current_use
 
 @router.post("/leave", response_model=LeaveOut)
 def apply_leave(leave: LeaveCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
-    # Add branch_id to leave object since LeaveCreate schema might not have it or we want to enforce it
-    leave_data = leave.model_dump() if hasattr(leave, 'model_dump') else leave.dict()
-    leave_data['branch_id'] = branch_id
-    
-    # We can't easily modify Pydantic object if it's strictly validated, so let's use a modified create
-    return crud_employee.create_leave(db, leave) # Wait, crud_employee.create_leave needs to be updated too
+    if branch_id is None:
+        raise HTTPException(status_code=400, detail="Branch ID is required to apply for leave.")
+    return crud_employee.create_leave(db, leave, branch_id)
 
 
-@router.get("/pending-leaves", response_model=list[LeaveOut])
-def get_pending_leaves(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
-    return db.query(LeaveModel).filter(LeaveModel.status == 'pending', LeaveModel.branch_id == branch_id).options(joinedload(LeaveModel.employee)).all()
-
-
-@router.get("/all-leaves", response_model=list[LeaveOut])
-def get_all_leaves(
-    status: str = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    skip: int = 0,
-    limit: int = 100,
-    branch_id: int = Depends(get_branch_id)
-):
-    query = db.query(LeaveModel).options(joinedload(LeaveModel.employee)).filter(LeaveModel.branch_id == branch_id)
-
-    if status and status != 'all':
-        query = query.filter(LeaveModel.status == status)
-    return query.order_by(LeaveModel.from_date.desc()).offset(skip).limit(limit).all()
 
 @router.get("/leave/{employee_id}", response_model=list[LeaveOut])
 def view_leaves(employee_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 100, branch_id: int = Depends(get_branch_id)):
@@ -514,7 +535,7 @@ def view_leaves(employee_id: int, db: Session = Depends(get_db), current_user: U
     emp = query.first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
-    return crud_employee.get_employee_leaves(db, employee_id, skip=skip, limit=limit)
+    return crud_employee.get_employee_leaves(db, employee_id, branch_id=branch_id, skip=skip, limit=limit)
 
 
 @router.put("/leave/{leave_id}/status/{status}", response_model=LeaveOut)

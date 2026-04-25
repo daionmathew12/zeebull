@@ -13,7 +13,7 @@ class FoodItem(Base):
     price = Column(Float)
     available = Column(Boolean, default=True)
     category_id = Column(Integer, ForeignKey("food_categories.id"))
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 

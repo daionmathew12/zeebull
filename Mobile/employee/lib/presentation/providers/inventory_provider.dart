@@ -20,10 +20,28 @@ class InventoryProvider with ChangeNotifier {
   List<dynamic> _locations = [];
   List<dynamic> _rooms = [];
   List<dynamic> _categories = [];
+  List<dynamic> _transactions = [];
   List<InventoryItem> get allItems => _allItems;
   List<dynamic> get locations => _locations;
   List<dynamic> get rooms => _rooms;
   List<dynamic> get categories => _categories;
+  List<dynamic> get transactions => _transactions;
+
+  Future<void> fetchTransactions({String? type}) async {
+    _isLoading = true;
+    notifyListeners();
+    try {
+      final response = await _apiService.getInventoryTransactions(type: type);
+      if (response.statusCode == 200) {
+        _transactions = response.data;
+      }
+    } catch (e) {
+      print("Error fetching transactions: $e");
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
 
   Future<void> fetchCategories() async {
     try {

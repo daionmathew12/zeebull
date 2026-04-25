@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import timezone, datetime
 from app.database import Base
 
 class Payment(Base):
@@ -11,8 +11,8 @@ class Payment(Base):
     amount = Column(Float)
     method = Column(String)  # upi, card, cash
     status = Column(String, default="paid")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 
@@ -27,7 +27,7 @@ class Voucher(Base):
     code = Column(String, unique=True)
     discount_percent = Column(Float)
     expiry_date = Column(DateTime)
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 

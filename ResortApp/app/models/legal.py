@@ -11,7 +11,7 @@ class LegalDocument(Base):
     file_path = Column(String, nullable=False)
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
     description = Column(String, nullable=True)
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     # Needs import or mapping if relationship is used, but since legal.py doesn't have Branch imported yet:
     # I will stick to just the Column for now or add relationship if I add the import.

@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import datetime, timedelta
+from datetime import timezone, datetime, timedelta
 from sqlalchemy.orm import Session, joinedload
 from app.database import SessionLocal
 from app.models.Package import PackageBooking
@@ -13,7 +13,7 @@ from app.schemas.foodorder import FoodOrderCreate, FoodOrderItemCreate
 def get_ist_time():
     """Get current time in Indian Standard Time"""
     # Assuming the server might be in UTC, IST is UTC+5:30
-    return datetime.utcnow() + timedelta(hours=5, minutes=30)
+    return datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
 
 async def run_food_scheduler():
     """Background task to check food schedules every minute"""

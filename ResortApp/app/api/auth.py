@@ -109,6 +109,8 @@ def get_current_user_profile(
             "branch_id": user.branch_id,
             "is_superadmin": getattr(user, 'is_superadmin', False),
             "permissions": user.role.permissions_list if user.role else [],
+            "branch_name": user.branch.name if user.branch else None,
+            "branch_image": user.branch.image_url if user.branch else None,
             "employee": None
         }
 

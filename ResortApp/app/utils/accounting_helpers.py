@@ -2,7 +2,7 @@
 Helper functions for automatic accounting entries
 """
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import List, Optional
 from app.models.account import AccountLedger
 from app.curd.account import create_journal_entry
@@ -96,7 +96,7 @@ def create_booking_journal_entry(
         raise ValueError(error_msg)
     
     entry = JournalEntryCreate(
-        entry_date=datetime.utcnow(),
+        entry_date=datetime.now(timezone.utc),
         reference_type="booking",
         reference_id=booking_id,
         description=f"Room booking checkout - Booking #{booking_id} ({guest_name})",
@@ -216,7 +216,7 @@ def create_purchase_journal_entry(
         raise ValueError(error_msg)
     
     entry = JournalEntryCreate(
-        entry_date=datetime.utcnow(),
+        entry_date=datetime.now(timezone.utc),
         reference_type="purchase",
         reference_id=purchase_id,
         description=f"Inventory purchase - Purchase #{purchase_id} from {vendor_name}",
@@ -290,7 +290,7 @@ def create_consumption_journal_entry(
         raise ValueError(error_msg)
     
     entry = JournalEntryCreate(
-        entry_date=datetime.utcnow(),
+        entry_date=datetime.now(timezone.utc),
         reference_type=reference_type,
         reference_id=consumption_id,
         description=f"Inventory consumption - {inventory_item_name}",
@@ -364,7 +364,7 @@ def create_complimentary_journal_entry(
         raise ValueError(error_msg)
     
     entry = JournalEntryCreate(
-        entry_date=datetime.utcnow(),
+        entry_date=datetime.now(timezone.utc),
         reference_type="complimentary",
         reference_id=complimentary_id,
         description=f"Complimentary item - {item_name} (Room {room_number})",
@@ -460,7 +460,7 @@ def create_food_order_journal_entry(
         raise ValueError(error_msg)
     
     entry = JournalEntryCreate(
-        entry_date=datetime.utcnow(),
+        entry_date=datetime.now(timezone.utc),
         reference_type="food_order",
         reference_id=food_order_id,
         description=f"Food order revenue - Order #{food_order_id} (Room {room_number})",
@@ -557,7 +557,7 @@ def create_service_revenue_journal_entry(
         raise ValueError(error_msg)
     
     entry = JournalEntryCreate(
-        entry_date=datetime.utcnow(),
+        entry_date=datetime.now(timezone.utc),
         reference_type="service",
         reference_id=service_id,
         description=f"Service revenue - {service_name} (Room {room_number})",
@@ -637,7 +637,7 @@ def create_expense_journal_entry(
         raise ValueError(error_msg)
     
     entry = JournalEntryCreate(
-        entry_date=datetime.utcnow(),
+        entry_date=datetime.now(timezone.utc),
         reference_type="expense",
         reference_id=expense_id,
         description=f"Expense - {category}: {description}",
@@ -877,7 +877,7 @@ def create_complete_checkout_journal_entry(
         raise ValueError(error_msg)
     
     entry = JournalEntryCreate(
-        entry_date=datetime.utcnow(),
+        entry_date=datetime.now(timezone.utc),
         reference_type="checkout",
         reference_id=checkout_id,
         description=f"Complete checkout - {guest_name} (Room {room_number})",
@@ -905,7 +905,7 @@ def generate_rcm_self_invoice_number(db: Session) -> str:
     Generate self-invoice number for RCM transactions
     Format: SLF-YYYY-XXX (e.g., SLF-2025-001)
     """
-    from datetime import datetime
+    from datetime import timezone, datetime
     current_year = datetime.now().year
     
     # Find the highest invoice number for this year
@@ -1094,7 +1094,7 @@ def create_rcm_journal_entry(
         raise ValueError(error_msg)
     
     entry = JournalEntryCreate(
-        entry_date=datetime.utcnow(),
+        entry_date=datetime.now(timezone.utc),
         reference_type=ref_type,
         reference_id=ref_id,
         description=f"RCM Transaction - {nature_of_supply} from {vendor_name}",

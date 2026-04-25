@@ -21,12 +21,9 @@ from datetime import date
 # Import other schemas if needed or stick to simple
 router = APIRouter(prefix="/public", tags=["Public"])
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+from app.database import get_db
+# Remove local get_db definition to ensure dependency override works in tests
+
 
 # Schemas for Availability
 class PublicRoomRef(BaseModel):
@@ -123,7 +120,7 @@ def get_public_food_categories(db: Session = Depends(get_db)):
 def get_public_services(db: Session = Depends(get_db), branch_id: int = None):
     """Get all services for a specific branch"""
     try:
-        query = db.query(Service)
+        query = db.query(Service).filter(Service.is_visible_to_guest == True)
         if branch_id:
             query = query.filter(Service.branch_id == branch_id)
         services = query.options(joinedload(Service.images)).all()

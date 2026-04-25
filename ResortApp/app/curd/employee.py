@@ -5,7 +5,7 @@ from app.models.employee import Employee, Leave
 from app.schemas.employee import EmployeeCreate, LeaveCreate
 
 def create_employee(db: Session, emp: EmployeeCreate):
-    employee = Employee(**emp.dict())
+    employee = Employee(**emp.model_dump())
     db.add(employee)
     db.commit()
     db.refresh(employee)
@@ -37,18 +37,22 @@ def create_employee(
     db.commit()
     db.refresh(db_employee)
 
-def create_leave(db: Session, leave: LeaveCreate):
-    # Use model_dump() for Pydantic v2, or dict() for v1
-    leave_data = leave.model_dump() if hasattr(leave, 'model_dump') else leave.dict()
-    # Ensure leave_type is included if provided, otherwise it uses the model's default
+def create_leave(db: Session, leave: LeaveCreate, branch_id: int):
+    # Use model_dump() for Pydantic v2
+    leave_data = leave.model_dump()
+    leave_data['branch_id'] = branch_id
+    
     leave_entry = Leave(**leave_data)
     db.add(leave_entry)
     db.commit()
     db.refresh(leave_entry)
     return leave_entry
 
-def get_employee_leaves(db: Session, emp_id: int, skip: int = 0, limit: int = 100):
-    return db.query(Leave).filter(Leave.employee_id == emp_id).offset(skip).limit(limit).all()
+def get_employee_leaves(db: Session, emp_id: int, branch_id: int = None, skip: int = 0, limit: int = 100):
+    query = db.query(Leave).filter(Leave.employee_id == emp_id)
+    if branch_id is not None:
+        query = query.filter(Leave.branch_id == branch_id)
+    return query.offset(skip).limit(limit).all()
 
 def update_leave_status(db: Session, leave_id: int, status: str):
     leave = db.query(Leave).filter(Leave.id == leave_id).first()

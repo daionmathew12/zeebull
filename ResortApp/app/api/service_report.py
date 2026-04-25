@@ -9,6 +9,7 @@ from typing import List, Optional
 from datetime import date, datetime
 from pydantic import BaseModel
 from app.utils.auth import get_db, get_current_user
+from app.utils.branch_scope import get_branch_id
 from app.models.user import User
 from app.models.service import AssignedService, Service
 from app.models.booking import Booking, BookingRoom
@@ -59,6 +60,7 @@ class ServiceUsageReport(BaseModel):
 
 
 @router.get("/detailed-usage", response_model=ServiceUsageReport)
+@router.get("/detailed-usage/", response_model=ServiceUsageReport)
 def get_detailed_service_usage_report(
     from_date: Optional[date] = Query(None, description="Start date for the report"),
     to_date: Optional[date] = Query(None, description="End date for the report"),
@@ -66,6 +68,7 @@ def get_detailed_service_usage_report(
     guest_name: Optional[str] = Query(None, description="Filter by guest name"),
     location_id: Optional[int] = Query(None, description="Filter by location/store ID"),
     db: Session = Depends(get_db),
+    branch_id: Optional[int] = Depends(get_branch_id),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -83,6 +86,9 @@ def get_detailed_service_usage_report(
             joinedload(AssignedService.employee),
             joinedload(AssignedService.room)
         )
+        
+        if branch_id is not None:
+            query = query.filter(AssignedService.branch_id == branch_id)
         
         # Apply date filters
         if from_date:
@@ -120,9 +126,12 @@ def get_detailed_service_usage_report(
         all_package_bookings = {}
         
         # Get regular bookings
-        bookings = db.query(Booking).options(
+        bookings_query = db.query(Booking).options(
             joinedload(Booking.booking_rooms).joinedload(BookingRoom.room)
-        ).all()
+        )
+        if branch_id is not None:
+            bookings_query = bookings_query.filter(Booking.branch_id == branch_id)
+        bookings = bookings_query.all()
         for booking in bookings:
             for br in booking.booking_rooms:
                 all_bookings[br.room_id] = {
@@ -132,9 +141,12 @@ def get_detailed_service_usage_report(
                 }
         
         # Get package bookings
-        package_bookings = db.query(PackageBooking).options(
+        pkg_bookings_query = db.query(PackageBooking).options(
             joinedload(PackageBooking.rooms).joinedload(PackageBookingRoom.room)
-        ).all()
+        )
+        if branch_id is not None:
+            pkg_bookings_query = pkg_bookings_query.filter(PackageBooking.branch_id == branch_id)
+        package_bookings = pkg_bookings_query.all()
         for pkg_booking in package_bookings:
             for pbr in pkg_booking.rooms:
                 all_package_bookings[pbr.room_id] = {
@@ -246,19 +258,19 @@ def get_detailed_service_usage_report(
             # Organize by room
             if room.number not in by_room:
                 by_room[room.number] = []
-            by_room[room.number].append(service_item.dict())
+            by_room[room.number].append(service_item.model_dump())
             
             # Organize by guest
             if guest_name:
                 if guest_name not in by_guest:
                     by_guest[guest_name] = []
-                by_guest[guest_name].append(service_item.dict())
+                by_guest[guest_name].append(service_item.model_dump())
             
             # Organize by location
             if location_name:
                 if location_name not in by_location:
                     by_location[location_name] = []
-                by_location[location_name].append(service_item.dict())
+                by_location[location_name].append(service_item.model_dump())
         
         return ServiceUsageReport(
             from_date=from_date,

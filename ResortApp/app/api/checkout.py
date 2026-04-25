@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, func, and_
 from typing import List, Optional
@@ -30,6 +31,10 @@ from app.utils.checkout_helpers import (
     calculate_consumable_charge
 )
 from app.utils.pricing import calculate_dynamic_booking_price
+from app.utils.date_utils import get_ist_now, get_ist_today
+from app.utils.pdf_generator import generate_checkout_bill_pdf
+import os
+import tempfile
 
 router = APIRouter(prefix="/bill", tags=["checkout"])
 
@@ -108,13 +113,13 @@ def create_checkout_request(
                 existing_request = db.query(CheckoutRequestModel).filter(
                     CheckoutRequestModel.package_booking_id == booking.id,
                     CheckoutRequestModel.room_number == target_room.number,
-                    CheckoutRequestModel.status.in_(["pending", "inventory_checked"])
+                    CheckoutRequestModel.status.in_(["pending", "inventory_checked", "completed"])
                 ).first()
             else:
                 existing_request = db.query(CheckoutRequestModel).filter(
                     CheckoutRequestModel.booking_id == booking.id,
                     CheckoutRequestModel.room_number == target_room.number,
-                    CheckoutRequestModel.status.in_(["pending", "inventory_checked"])
+                    CheckoutRequestModel.status.in_(["pending", "inventory_checked", "completed"])
                 ).first()
                 
             # Keep track of the primary request to return
@@ -130,7 +135,7 @@ def create_checkout_request(
                     status="pending",
                     requested_by=requested_by_name,
                     inventory_checked=False,
-                    branch_id=branch_id
+                    branch_id=target_room.branch_id
                 )
                 db.add(new_request)
                 db.flush() # flush to get the id
@@ -250,9 +255,9 @@ def get_checkout_request(
         "status": aggregate_status,
         "inventory_checked": aggregate_inventory_checked,
         "inventory_checked_by": checkout_request.inventory_checked_by,
-        "inventory_checked_at": checkout_request.inventory_checked_at.isoformat() + "Z" if checkout_request.inventory_checked_at else None,
+        "inventory_checked_at": checkout_request.inventory_checked_at.isoformat() + "Z" if (checkout_request.inventory_checked_at and not checkout_request.inventory_checked_at.tzinfo) else (checkout_request.inventory_checked_at.isoformat().replace("+00:00", "Z") if checkout_request.inventory_checked_at else None),
         "inventory_notes": checkout_request.inventory_notes,
-        "requested_at": checkout_request.requested_at.isoformat() + "Z" if checkout_request.requested_at else None,
+        "requested_at": checkout_request.requested_at.isoformat() + "Z" if (checkout_request.requested_at and not checkout_request.requested_at.tzinfo) else (checkout_request.requested_at.isoformat().replace("+00:00", "Z") if checkout_request.requested_at else None),
         "requested_by": checkout_request.requested_by,
         "employee_id": checkout_request.employee_id,
         "employee_name": checkout_request.employee.name if checkout_request.employee else None
@@ -286,8 +291,8 @@ def update_checkout_request_status(
     if status == "completed":
         checkout_request.inventory_checked = True
         checkout_request.inventory_checked_by = getattr(current_user, 'name', None) or getattr(current_user, 'email', None) or "system"
-        checkout_request.inventory_checked_at = datetime.utcnow()
-        checkout_request.completed_at = datetime.utcnow()
+        checkout_request.inventory_checked_at = get_ist_now()
+        checkout_request.completed_at = get_ist_now()
     
     db.commit()
     db.refresh(checkout_request)
@@ -618,13 +623,25 @@ async def handleCompleteCheckoutRequest(
     if not checkout_request:
         raise HTTPException(status_code=404, detail="Checkout request not found")
     
+    # CRITICAL: Use the branch_id from the request context, not the (potentially null) header dependency
+    effective_branch_id = checkout_request.branch_id
+    
     if checkout_request.status == "cancelled":
         raise HTTPException(status_code=400, detail="Cannot check inventory for a cancelled request")
     
     checkout_request.inventory_checked = True
     checkout_request.inventory_checked_by = getattr(current_user, 'name', None) or getattr(current_user, 'email', None) or "system"
-    checkout_request.inventory_checked_at = datetime.utcnow()
+    checkout_request.inventory_checked_at = get_ist_now()
     checkout_request.inventory_notes = payload.inventory_notes
+    
+    # 0. Fetch Booking context EARLY to avoid scoping errors
+    from app.models.booking import Booking
+    from app.models.Package import PackageBooking
+    booking = None
+    if checkout_request.booking_id:
+        booking = db.query(Booking).filter(Booking.id == checkout_request.booking_id).first()
+    elif checkout_request.package_booking_id:
+        booking = db.query(PackageBooking).filter(PackageBooking.id == checkout_request.package_booking_id).first()
     
     # Store inventory data and calculate charges for missing items
     total_missing_charges = 0.0
@@ -638,7 +655,7 @@ async def handleCompleteCheckoutRequest(
 
     if payload.items:
         for item in payload.items:
-            item_dict = item.dict()
+            item_dict = item.model_dump()
             
             # Fetch Inventory Item
             inv_item = db.query(InventoryItem).options(joinedload(InventoryItem.category)).filter(InventoryItem.id == item.item_id).first()
@@ -650,8 +667,8 @@ async def handleCompleteCheckoutRequest(
             target_room_number = str(getattr(item, 'room_number', None) or checkout_request.room_number).strip()
             
             room_query = db.query(Room).filter(func.trim(Room.number) == target_room_number)
-            if branch_id is not None:
-                room_query = room_query.filter(Room.branch_id == branch_id)
+            if effective_branch_id is not None:
+                room_query = room_query.filter(Room.branch_id == effective_branch_id)
             room_obj = room_query.first()
             
             if not room_obj:
@@ -714,7 +731,7 @@ async def handleCompleteCheckoutRequest(
                 else:
                     # Fallback: Check StockIssueDetail if room_stock record is missing
                     # IMPROVED: Only sum issues from the current booking period
-                    booking_start = getattr(booking, 'checked_in_at', None) or (booking.check_in if booking else datetime.utcnow())
+                    booking_start = getattr(booking, 'checked_in_at', None) or (booking.check_in if booking else get_ist_now())
                     if isinstance(booking_start, date) and not isinstance(booking_start, datetime):
                         booking_start = datetime.combine(booking_start, datetime.min.time())
                         
@@ -765,7 +782,7 @@ async def handleCompleteCheckoutRequest(
                 if room_stock_record and remaining_lost > 0:
                     deduct = min(remaining_lost, float(room_stock_record.quantity))
                     room_stock_record.quantity = max(0, float(room_stock_record.quantity) - deduct)
-                    room_stock_record.last_updated = datetime.utcnow()
+                    room_stock_record.last_updated = get_ist_now()
                     remaining_lost -= deduct
                 
                 # Priority 2: Deduct from AssetMapping
@@ -788,15 +805,15 @@ async def handleCompleteCheckoutRequest(
                         reference_number=f"CHK-{request_id}",
                         notes=f"Consumed in Room {target_room_number} during checkout verification",
                         created_by=current_user.id,
-                        branch_id=branch_id,
-                        created_at=datetime.utcnow()
+                        branch_id=effective_branch_id,
+                        created_at=get_ist_now()
                     ))
 
             if unused_qty > 0 and (item.is_returned or item.is_laundry):
                 # Deduct unused from room stock as well (it's moving out)
                 if room_stock_record:
                     room_stock_record.quantity = max(0, float(room_stock_record.quantity) - unused_qty)
-                    room_stock_record.last_updated = datetime.utcnow()
+                    room_stock_record.last_updated = get_ist_now()
                 
                 target_return_loc_id = item.return_location_id
                 if not target_return_loc_id:
@@ -804,10 +821,10 @@ async def handleCompleteCheckoutRequest(
                     fallback_loc = db.query(Location).filter(
                         (Location.name.ilike('%warehouse%')) | (Location.location_type == 'WAREHOUSE'),
                         Location.is_active == True,
-                        Location.branch_id == branch_id
+                        Location.branch_id == effective_branch_id
                     ).first()
                     if not fallback_loc:
-                        fallback_loc = db.query(Location).filter(Location.is_active == True, Location.branch_id == branch_id).first()
+                        fallback_loc = db.query(Location).filter(Location.is_active == True, Location.branch_id == effective_branch_id).first()
                     
                     if fallback_loc:
                         target_return_loc_id = fallback_loc.id
@@ -820,10 +837,10 @@ async def handleCompleteCheckoutRequest(
                         room_number=target_room_number,
                         quantity=unused_qty,
                         status="Incomplete Washing",
-                        sent_at=datetime.utcnow(),
+                        sent_at=datetime.now(__import__("datetime").timezone.utc),
                         created_by=current_user.id,
                         notes=f"Checkout RM{target_room_number}",
-                        branch_id=branch_id
+                        branch_id=effective_branch_id
                     )
                     db.add(laundry_entry)
                     
@@ -833,8 +850,8 @@ async def handleCompleteCheckoutRequest(
                             request_type="replenishment",
                             description=f"Replacement for {inv_item.name} (sent to laundry from RM{target_room_number})",
                             status="pending",
-                            created_at=datetime.utcnow(),
-                            branch_id=branch_id
+                            created_at=datetime.now(__import__("datetime").timezone.utc),
+                            branch_id=effective_branch_id
                         )
                         db.add(new_sr)
 
@@ -846,14 +863,14 @@ async def handleCompleteCheckoutRequest(
                     ).first()
                     if dest_stock:
                         dest_stock.quantity = float(dest_stock.quantity) + unused_qty
-                        dest_stock.last_updated = datetime.utcnow()
+                        dest_stock.last_updated = datetime.now(__import__("datetime").timezone.utc)
                     else:
                         db.add(LocationStock(
                             location_id=target_return_loc_id,
                             item_id=item.item_id,
                             quantity=unused_qty,
-                            last_updated=datetime.utcnow(),
-                            branch_id=branch_id
+                            last_updated=datetime.now(__import__("datetime").timezone.utc),
+                            branch_id=effective_branch_id
                         ))
                     
                     # ADDED: Transaction for returned items
@@ -868,7 +885,7 @@ async def handleCompleteCheckoutRequest(
                         created_by=current_user.id,
                         source_location_id=room_loc_id,
                         destination_location_id=target_return_loc_id,
-                        branch_id=branch_id
+                        branch_id=effective_branch_id
                     )
                     db.add(return_txn)
                     
@@ -942,11 +959,7 @@ async def handleCompleteCheckoutRequest(
 
             # 4. Calculate Complimentary Limit
             calculated_limit = 0
-            booking = None
-            if checkout_request.booking_id:
-                booking = db.query(Booking).filter(Booking.id == checkout_request.booking_id).first()
-            elif checkout_request.package_booking_id:
-                booking = db.query(PackageBooking).filter(PackageBooking.id == checkout_request.package_booking_id).first()
+            # booking is already defined above at function start
             
             if booking:
                 booking_start = getattr(booking, 'checked_in_at', None) or booking.check_in
@@ -988,7 +1001,7 @@ async def handleCompleteCheckoutRequest(
                         # Calculate stay_days
                         stay_days = 1
                         if booking:
-                            eff_checkout = checkout_request.completed_at or datetime.utcnow()
+                            eff_checkout = checkout_request.completed_at or datetime.now(__import__("datetime").timezone.utc)
                             booking_checkin = getattr(booking, 'checked_in_at', None) or booking.check_in
                             if isinstance(booking_checkin, datetime):
                                 booking_checkin = booking_checkin.date()
@@ -1055,69 +1068,13 @@ async def handleCompleteCheckoutRequest(
                         "room_number": target_room_number
                     })
 
-            # Now perform stock deductions and returns for room AFTER calculating charges
-            # 3. Handle Returns (Unused pieces or rental items to be returned)
-            effective_allocated = allocated_stock
-            if effective_allocated == 0 and is_rental:
-                 effective_allocated = float(actual_chargeable_qty or 0)
-            
-            unused_qty = max(0, effective_allocated - total_lost)
-            
-            if unused_qty > 0:
-                remaining_unused = unused_qty
-                
-                # Deduct from LocationStock
-                if room_stock_record and remaining_unused > 0:
-                    deduct = min(remaining_unused, float(room_stock_record.quantity))
-                    room_stock_record.quantity = max(0, float(room_stock_record.quantity) - deduct)
-                    room_stock_record.last_updated = datetime.utcnow()
-                    remaining_unused -= deduct
-                
-                # Deduct from AssetMapping
-                if mapping_record and remaining_unused > 0:
-                    deduct = min(remaining_unused, float(mapping_record.quantity or 0))
-                    new_qty = max(0, float(mapping_record.quantity or 0) - deduct)
-                    if new_qty <= 0:
-                        mapping_record.is_active = False
-                    else:
-                        mapping_record.quantity = new_qty
-                    remaining_unused -= deduct
-                
-                target_return_loc_id = item.return_location_id
-                if not target_return_loc_id:
-                    # Fallback loc search logic...
-                    fallback_loc = db.query(Location).filter(
-                        (Location.name.ilike('%warehouse%')) | (Location.location_type == 'WAREHOUSE'),
-                        Location.is_active == True, Location.branch_id == branch_id
-                    ).first()
-                    if not fallback_loc: fallback_loc = db.query(Location).filter(Location.is_active == True, Location.branch_id == branch_id).first()
-                    if fallback_loc: target_return_loc_id = fallback_loc.id
-                
-                if target_return_loc_id:
-                    # Laundry / Stock Update / Transaction / Issue Update
-                    dest_stock = db.query(LocationStock).filter(LocationStock.location_id == target_return_loc_id, LocationStock.item_id == item.item_id).first()
-                    if dest_stock:
-                        dest_stock.quantity = float(dest_stock.quantity) + unused_qty
-                    else:
-                        db.add(LocationStock(location_id=target_return_loc_id, item_id=item.item_id, quantity=unused_qty, last_updated=datetime.utcnow(), branch_id=branch_id))
-                    
-                    # Update StockIssueDetail (THIS causes later lookups to find 0 if not careful)
-                    active_issue = db.query(StockIssueDetail).join(StockIssue).filter(
-                        StockIssue.destination_location_id == room_loc_id,
-                        StockIssueDetail.item_id == item.item_id,
-                        StockIssueDetail.issued_quantity > 0
-                    ).first()
-                    if active_issue:
-                        active_issue.issued_quantity = max(0, float(active_issue.issued_quantity) - unused_qty)
-                    
-
             # Append the final item_dict
             inventory_data_with_charges.append(item_dict)
 
     # Process asset damages
     if payload.asset_damages:
         for asset in payload.asset_damages:
-            asset_dict = asset.dict()
+            asset_dict = asset.model_dump()
             
             # Identify Target Room for this asset
             target_room_number = getattr(asset, 'room_number', checkout_request.room_number)
@@ -1180,10 +1137,10 @@ async def handleCompleteCheckoutRequest(
                 fallback_loc = db.query(Location).filter(
                     (Location.name.ilike('%warehouse%')) | (Location.location_type == 'WAREHOUSE'),
                     Location.is_active == True,
-                    Location.branch_id == branch_id
+                    Location.branch_id == effective_branch_id
                 ).first()
                 if not fallback_loc:
-                    fallback_loc = db.query(Location).filter(Location.is_active == True, Location.branch_id == branch_id).first()
+                    fallback_loc = db.query(Location).filter(Location.is_active == True, Location.branch_id == effective_branch_id).first()
                 if fallback_loc:
                     asset_return_loc_id = fallback_loc.id
                     print(f"[CHECKOUT-DEBUG] Asset {asset.item_name} using fallback return location {fallback_loc.name}")
@@ -1228,7 +1185,7 @@ async def handleCompleteCheckoutRequest(
                 
                 if asset.is_damaged and not should_skip_waste_log:
                     if is_actually_asset:
-                        waste_log_num = generate_waste_log_number(db, branch_id)
+                        waste_log_num = generate_waste_log_number(db, effective_branch_id)
                         waste_log = WasteLog(
                             log_number=waste_log_num,
                             item_id=target_item_id,
@@ -1240,8 +1197,8 @@ async def handleCompleteCheckoutRequest(
                             action_taken="Charged to Guest",
                             notes=f"Damaged asset during checkout - Room {target_room_number}. {asset.notes or ''}",
                             reported_by=current_user.id,
-                            waste_date=datetime.utcnow(),
-                            branch_id=branch_id
+                            waste_date=datetime.now(__import__("datetime").timezone.utc),
+                            branch_id=effective_branch_id
                         )
                         db.add(waste_log)
                         db.flush()
@@ -1257,7 +1214,7 @@ async def handleCompleteCheckoutRequest(
                             notes=f"WASTE: Damaged asset at checkout - Room {target_room_number}",
                             created_by=current_user.id,
                             source_location_id=target_location_id,
-                            branch_id=branch_id
+                            branch_id=effective_branch_id
                         )
                         db.add(damage_txn)
                     else:
@@ -1271,7 +1228,7 @@ async def handleCompleteCheckoutRequest(
                             notes=f"WASTE: Damaged item at checkout - Room {target_room_number}",
                             created_by=current_user.id,
                             source_location_id=target_location_id,
-                            branch_id=branch_id
+                            branch_id=effective_branch_id
                         )
                         db.add(damage_txn)
                 
@@ -1283,7 +1240,7 @@ async def handleCompleteCheckoutRequest(
                     ).first()
                     if loc_stock:
                         loc_stock.quantity = max(0, loc_stock.quantity - 1)
-                        loc_stock.last_updated = datetime.utcnow()
+                        loc_stock.last_updated = datetime.now(__import__("datetime").timezone.utc)
 
                 # Deactivate Asset Mapping SURGICALLY
                 # We decrement quantity or deactivate if count hits zero
@@ -1322,7 +1279,7 @@ async def handleCompleteCheckoutRequest(
                     if l_stock:
                         l_stock.quantity += 1
                     else:
-                        db.add(LocationStock(location_id=asset_laundry_id, item_id=target_item_id, quantity=1, last_updated=datetime.utcnow(), branch_id=branch_id))
+                        db.add(LocationStock(location_id=asset_laundry_id, item_id=target_item_id, quantity=1, last_updated=datetime.now(__import__("datetime").timezone.utc), branch_id=effective_branch_id))
                     
                     laundry_entry = LaundryLog(
                         item_id=target_item_id,
@@ -1330,10 +1287,10 @@ async def handleCompleteCheckoutRequest(
                         room_number=target_room_number,
                         quantity=1,
                         status="Incomplete Washing",
-                        sent_at=datetime.utcnow(),
+                        sent_at=datetime.now(__import__("datetime").timezone.utc),
                         created_by=current_user.id,
                         notes=f"Asset movement at checkout - Room {target_room_number}",
-                        branch_id=branch_id
+                        branch_id=effective_branch_id
                     )
                     db.add(laundry_entry)
 
@@ -1347,7 +1304,7 @@ async def handleCompleteCheckoutRequest(
                         created_by=current_user.id,
                         source_location_id=target_location_id,
                         destination_location_id=asset_laundry_id,
-                        branch_id=branch_id
+                        branch_id=effective_branch_id
                     )
                     db.add(laundry_txn)
 
@@ -1360,7 +1317,7 @@ async def handleCompleteCheckoutRequest(
                     if dest_stock:
                         dest_stock.quantity += 1
                     else:
-                        db.add(LocationStock(location_id=asset_return_loc_id, item_id=target_item_id, quantity=1, last_updated=datetime.utcnow(), branch_id=branch_id))
+                        db.add(LocationStock(location_id=asset_return_loc_id, item_id=target_item_id, quantity=1, last_updated=datetime.now(__import__("datetime").timezone.utc), branch_id=effective_branch_id))
                     
                     return_txn = InventoryTransaction(
                         item_id=target_item_id,
@@ -1372,7 +1329,7 @@ async def handleCompleteCheckoutRequest(
                         created_by=current_user.id,
                         source_location_id=room_loc_id,
                         destination_location_id=asset_return_loc_id,
-                        branch_id=branch_id
+                        branch_id=effective_branch_id
                     )
                     db.add(return_txn)
                     
@@ -1391,8 +1348,8 @@ async def handleCompleteCheckoutRequest(
                             description=f"REPLACEMENT REQUIRED: {t_item.name if t_item else asset.item_name} (Fixed Asset) sent to laundry. Fresh unit needed for Room {target_room_number}." if is_actually_asset else f"LINEN/LAUNDRY REFILL: {t_item.name if t_item else asset.item_name} for Room {target_room_number}.",
                             status="pending",
                             pickup_location_id=default_store.id if default_store else None,
-                            created_at=datetime.utcnow(),
-                            branch_id=branch_id,
+                            created_at=datetime.now(__import__("datetime").timezone.utc),
+                            branch_id=effective_branch_id,
                             refill_data=json.dumps([{
                                 "item_id": target_item_id,
                                 "quantity": 1,
@@ -1415,7 +1372,7 @@ async def handleCompleteCheckoutRequest(
                     if waste_stock:
                         waste_stock.quantity += 1
                     else:
-                        db.add(LocationStock(location_id=asset.waste_location_id, item_id=target_item_id, quantity=1, last_updated=datetime.utcnow(), branch_id=branch_id))
+                        db.add(LocationStock(location_id=asset.waste_location_id, item_id=target_item_id, quantity=1, last_updated=datetime.now(__import__("datetime").timezone.utc), branch_id=effective_branch_id))
 
                 elif asset.is_returned and asset.return_location_id:
                     if asset_record:
@@ -1428,7 +1385,7 @@ async def handleCompleteCheckoutRequest(
                     if return_stock:
                         return_stock.quantity += 1
                     else:
-                        db.add(LocationStock(location_id=asset.return_location_id, item_id=target_item_id, quantity=1, last_updated=datetime.utcnow(), branch_id=branch_id))
+                        db.add(LocationStock(location_id=asset.return_location_id, item_id=target_item_id, quantity=1, last_updated=datetime.now(__import__("datetime").timezone.utc), branch_id=effective_branch_id))
                     
                     # ADDED: Transaction for returned asset
                     asset_return_txn = InventoryTransaction(
@@ -1442,7 +1399,7 @@ async def handleCompleteCheckoutRequest(
                         created_by=current_user.id,
                         source_location_id=target_location_id,
                         destination_location_id=asset.return_location_id,
-                        branch_id=branch_id
+                        branch_id=effective_branch_id
                     )
                     db.add(asset_return_txn)
                     
@@ -1462,8 +1419,8 @@ async def handleCompleteCheckoutRequest(
                         description=f"REPLACEMENT REQUIRED: {t_item.name if t_item else asset.item_name} (Fixed Asset) requested for Room {target_room_number} during checkout." if is_actually_asset else f"LINEN/LAUNDRY REFILL: {t_item.name if t_item else asset.item_name} for Room {target_room_number}.",
                         status="pending",
                         pickup_location_id=default_store.id if default_store else None,
-                        created_at=datetime.utcnow(),
-                        branch_id=branch_id,
+                        created_at=datetime.now(__import__("datetime").timezone.utc),
+                        branch_id=effective_branch_id,
                         refill_data=json.dumps([{
                             "item_id": target_item_id,
                             "quantity": 1,
@@ -1482,7 +1439,7 @@ async def handleCompleteCheckoutRequest(
         checkout_request.inventory_data = []
         
     checkout_request.status = "completed"
-    checkout_request.completed_at = datetime.utcnow()
+    checkout_request.completed_at = datetime.now(__import__("datetime").timezone.utc)
     
     # NEW: Consolidate workflow - Complete any existing 'return_items' service requests for this room
     try:
@@ -1499,7 +1456,7 @@ async def handleCompleteCheckoutRequest(
             
             for return_req in pending_returns:
                 return_req.status = "completed"
-                return_req.completed_at = datetime.utcnow()
+                return_req.completed_at = datetime.now(__import__("datetime").timezone.utc)
                 return_req.description += f" | Auto-completed via Checkout Verification #{checkout_request.id}"
                 print(f"[CHECKOUT] Auto-completed redundant 'return_items' service request #{return_req.id} for Room {room_obj.number}")
     except Exception as cleanup_error:
@@ -1526,9 +1483,20 @@ def get_pre_checkout_verification_data(room_number: str, db: Session = Depends(g
     - Actual Consumables stock in room (from LocationStock)
     - Actual Fixed Assets in room (from AssetRegistry) with serial numbers
     """
-    room = db.query(Room).filter(Room.number == room_number, Room.branch_id == branch_id).first()
+    # 1. Find the Room - safely handle global view
+    room_query = db.query(Room).filter(func.trim(Room.number) == str(room_number).strip())
+    if branch_id is not None:
+        room_query = room_query.filter(Room.branch_id == branch_id)
+    room = room_query.first()
+    
+    if not room:
+        # Fallback for enterprise view global lookup
+        room = db.query(Room).filter(func.trim(Room.number) == str(room_number).strip()).first()
+        
     if not room:
         raise HTTPException(status_code=404, detail=f"Room {room_number} not found")
+
+    effective_branch_id = room.branch_id
     
     # Get booking info
     booking_link = (db.query(BookingRoom)
@@ -1751,7 +1719,7 @@ def generate_invoice(checkout_id: int, db: Session = Depends(get_db), current_us
     # Build invoice data
     invoice_data = {
         "invoice_number": checkout.invoice_number or f"INV-{checkout_id}",
-        "invoice_date": checkout.checkout_date.strftime("%d-%m-%Y") if checkout.checkout_date else datetime.now().strftime("%d-%m-%Y"),
+        "invoice_date": checkout.checkout_date.strftime("%d-%m-%Y") if checkout.checkout_date else get_ist_now().strftime("%d-%m-%Y"),
         "guest_name": checkout.guest_name,
         "guest_mobile": booking.guest_mobile if booking else None,
         "guest_email": booking.guest_email if booking else None,
@@ -1813,14 +1781,14 @@ def generate_gate_pass(checkout_id: int, db: Session = Depends(get_db), current_
         raise HTTPException(status_code=404, detail="Checkout not found")
     
     gate_pass_data = {
-        "gate_pass_number": f"GP-{checkout_id}-{datetime.now().strftime('%Y%m%d')}",
+        "gate_pass_number": f"GP-{checkout_id}-{get_ist_now().strftime('%Y%m%d')}",
         "checkout_id": checkout_id,
         "guest_name": checkout.guest_name,
         "room_number": checkout.room_number,
         "checkout_date": checkout.checkout_date.strftime("%d-%m-%Y %H:%M") if checkout.checkout_date else None,
         "payment_status": checkout.payment_status,
         "grand_total": checkout.grand_total,
-        "generated_at": datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+        "generated_at": get_ist_now().strftime("%d-%m-%Y %H:%M:%S")
     }
     
     # TODO: Generate actual gate pass PDF/slip
@@ -1943,11 +1911,22 @@ def repair_room_checkout_status(room_number: str, db: Session = Depends(get_db),
     If a checkout record exists but room is not marked as Available, fix the room status.
     If room is Available but no checkout record exists, create a minimal checkout record.
     """
-    room = db.query(Room).filter(Room.number == room_number, Room.branch_id == branch_id).first()
+    # 1. Find the Room - safely handle global view
+    room_query = db.query(Room).filter(func.trim(Room.number) == str(room_number).strip())
+    if branch_id is not None:
+        room_query = room_query.filter(Room.branch_id == branch_id)
+    room = room_query.first()
+    
+    if not room:
+        # Fallback for enterprise view global lookup
+        room = db.query(Room).filter(func.trim(Room.number) == str(room_number).strip()).first()
+        
     if not room:
         raise HTTPException(status_code=404, detail=f"Room {room_number} not found")
+
+    effective_branch_id = room.branch_id
         
-    today = date.today()
+    today = get_ist_today().date()
     existing_checkout = db.query(Checkout).filter(
         Checkout.room_number == room_number,
         func.date(Checkout.checkout_date) == today
@@ -1990,7 +1969,7 @@ def repair_room_checkout_status(room_number: str, db: Session = Depends(get_db),
             
             if not remaining_rooms and booking.status not in ['checked_out', 'checked-out']:
                 booking.status = "checked_out"
-                booking.checked_out_at = datetime.utcnow()
+                booking.checked_out_at = datetime.now(__import__("datetime").timezone.utc)
                 repairs_made.append(f"Updated booking {booking.id} status to 'checked_out' (all rooms checked out)")
     
     # Case 2: Room is Available but no checkout record (might have been manually set)
@@ -2045,14 +2024,14 @@ def repair_room_checkout_status(room_number: str, db: Session = Depends(get_db),
                                 
                                 if dest_stock:
                                     dest_stock.quantity += qty
-                                    dest_stock.last_updated = datetime.utcnow()
+                                    dest_stock.last_updated = datetime.now(__import__("datetime").timezone.utc)
                                 else:
                                     db.add(LocationStock(
                                         location_id=target_location.id,
                                         item_id=item_stock.item_id,
                                         quantity=qty,
-                                        last_updated=datetime.utcnow(),
-                                        branch_id=branch_id
+                                        last_updated=datetime.now(__import__("datetime").timezone.utc),
+                                        branch_id=effective_branch_id
                                     ))
                                 
                                 db.add(InventoryTransaction(
@@ -2063,11 +2042,11 @@ def repair_room_checkout_status(room_number: str, db: Session = Depends(get_db),
                                     created_by=current_user.id if current_user else None,
                                     source_location_id=room.inventory_location_id,
                                     destination_location_id=target_location.id,
-                                    branch_id=branch_id
+                                    branch_id=effective_branch_id
                                 ))
                                 
                                 item_stock.quantity = 0
-                                item_stock.last_updated = datetime.utcnow()
+                                item_stock.last_updated = datetime.now(__import__("datetime").timezone.utc)
                                 print(f"[CLEANUP] Returned {qty} x {item_name} from Room {room.number}")
             except Exception as e:
                 print(f"[WARNING] Cleanup failed: {e}")
@@ -2592,7 +2571,7 @@ def _calculate_bill_for_single_room(db: Session, room_number: str, branch_id: in
     # Calculate effective checkout date:
     # If actual checkout date (today) > booking.check_out (late checkout): use today
     # If actual checkout date (today) < booking.check_out (early checkout): use booking.check_out
-    today = date.today()
+    today = get_ist_today().date()
     effective_checkout_date = max(today, booking.check_out)
     stay_days = max(1, (effective_checkout_date - booking.check_in).days)
     
@@ -2935,8 +2914,10 @@ def _calculate_bill_for_single_room(db: Session, room_number: str, branch_id: in
             aggregated_audit[audit_key]["missing_qty"] += float(item_data.get('missing_qty') or 0)
             
             # SEPARATE USAGE VS DAMAGE CHARGES
-            aggregated_audit[audit_key]["provided_usage_charge"] += float(item_data.get('total_charge') or 0)
-            aggregated_audit[audit_key]["provided_bad_charge"] += float(item_data.get('damage_charge') or item_data.get('missing_item_charge') or 0)
+            u_chg = float(item_data.get('total_charge') or 0)
+            b_chg = float(item_data.get('damage_charge') or item_data.get('missing_item_charge') or 0)
+            aggregated_audit[audit_key]["provided_usage_charge"] += u_chg
+            aggregated_audit[audit_key]["provided_bad_charge"] += b_chg
             
             # Use max for limit to prevent double counting of master limit across multiple batches
             aggregated_audit[audit_key]["complimentary_qty"] = max(aggregated_audit[audit_key]["complimentary_qty"], float(item_data.get('complimentary_qty') or item_data.get('complimentary_limit') or 0))
@@ -3109,7 +3090,7 @@ def _calculate_bill_for_single_room(db: Session, room_number: str, branch_id: in
                         item_notes = "Rent waived (Damaged/Missing)"
                     
                     charges.inventory_usage.append({
-                        "date": checkout_request.completed_at or datetime.now(),
+                        "date": checkout_request.completed_at or get_ist_now(),
                         "item_name": clean_name + (f" @ {price}" if len(price_groups) > 1 else ""),
                         "category": inv_item.category.name if inv_item.category else "Rental",
                         "quantity": group_qty,
@@ -3193,7 +3174,7 @@ def _calculate_bill_for_single_room(db: Session, room_number: str, branch_id: in
                             
                             charges.consumables_charges = (charges.consumables_charges or 0) + total_item_charge
                             charges.consumables_items.append({
-                                "date": checkout_request.completed_at or datetime.now(),
+                                "date": checkout_request.completed_at or get_ist_now(),
                                 "item_id": item_id,
                                 "item_name": label,
                                 "actual_consumed": total_qty,
@@ -3345,12 +3326,15 @@ def _calculate_bill_for_single_room(db: Session, room_number: str, branch_id: in
                 })
 
                 
-    # Summary & GST
-    # Room GST Logic (Standard Tiered)
-    # Standard: 12% if < 7500, 18% if >= 7500
-    room_gst_rate = 0.12 if (room.price or 0) < 7500 else 0.18
-    # Keep 5% only for extremely budget rooms if that was the intent, but user instructions say 12%
-    if (room.price or 0) < 1000: room_gst_rate = 0.12 # Assuming no 0% category for simplicity here
+    # Room GST Logic (Standard Tiered as per User Requirement)
+    # Rules: < 5000: 5%, 5000-7499: 12%, >= 7500: 18%
+    daily_rate = (charges.room_charges or 0) / max(1, stay_nights if 'stay_nights' in locals() else stay_days)
+    
+    room_gst_rate = 0.18
+    if daily_rate < 5000:
+        room_gst_rate = 0.05
+    elif daily_rate < 7500:
+        room_gst_rate = 0.12
     
     charges.room_gst = (charges.room_charges or 0) * room_gst_rate
     
@@ -3365,7 +3349,7 @@ def _calculate_bill_for_single_room(db: Session, room_number: str, branch_id: in
         
         pkg_gst_rate = 0.18
         if p_rate < 5000: pkg_gst_rate = 0.05
-        elif p_rate <= 7500: pkg_gst_rate = 0.12
+        elif p_rate < 7500: pkg_gst_rate = 0.12
         charges.package_gst = (charges.package_charges or 0) * pkg_gst_rate
     else:
         charges.package_gst = 0
@@ -3379,6 +3363,15 @@ def _calculate_bill_for_single_room(db: Session, room_number: str, branch_id: in
     # Total calculation
     charges.total_gst = sum([charges.room_gst or 0, charges.food_gst or 0, charges.service_gst or 0, charges.package_gst or 0, charges.consumables_gst or 0, charges.inventory_gst or 0, charges.asset_damage_gst or 0])
     charges.total_due = sum([charges.room_charges or 0, charges.food_charges or 0, charges.service_charges or 0, charges.package_charges or 0, charges.consumables_charges or 0, charges.inventory_charges or 0, charges.asset_damage_charges or 0])
+
+    # Mobile Compatibility Mapping (Support for Modernized Flutter UI)
+    charges.rent = (charges.room_charges or 0) + (charges.package_charges or 0)
+    charges.food = (charges.food_charges or 0)
+    charges.services = (charges.service_charges or 0)
+    charges.penalties = (charges.inventory_charges or 0) + (charges.asset_damage_charges or 0) + (charges.consumables_charges or 0)
+    charges.subtotal = (charges.total_due or 0)
+    charges.gst = (charges.total_gst or 0)
+    charges.grand_total = (charges.total_due or 0) + (charges.total_gst or 0)
 
 
     
@@ -3403,15 +3396,25 @@ def _calculate_bill_for_entire_booking(db: Session, room_number: str, branch_id:
     if not initial_room:
         raise HTTPException(status_code=404, detail="Initial room not found.")
 
-    # 2. Find the active parent booking (regular or package) linked to this room
+    # 1. Find the initial room to get the booking context
+    q = db.query(Room).filter(Room.number == room_number)
+    if branch_id is not None:
+        q = q.filter(Room.branch_id == branch_id)
+    initial_room = q.first()
+    
+    if not initial_room:
+        # Enterprise View Fallback: Lookup by number only if not found in specific branch
+        initial_room = db.query(Room).filter(func.trim(Room.number) == str(room_number).strip()).first()
+        
+    if not initial_room:
+        raise HTTPException(status_code=404, detail=f"Room {room_number} not found.")
+
+    # 2. Find the active parent booking linkage
     booking, is_package = None, False
     
-    # Eagerly load the booking relationship to avoid extra queries
-    # Order by descending ID to get the MOST RECENT booking for the room first.
-    # Handle both 'checked-in' and 'checked_in' status formats
     booking_link = (db.query(BookingRoom)
                     .join(Booking)
-                    .options(joinedload(BookingRoom.booking)) # Eager load the booking
+                    .options(joinedload(BookingRoom.booking))
                     .filter(BookingRoom.room_id == initial_room.id, Booking.status.in_(['checked-in', 'checked_in', 'booked']))
                     .order_by(Booking.id.desc()).first())
 
@@ -3460,14 +3463,20 @@ def _calculate_bill_for_entire_booking(db: Session, room_number: str, branch_id:
     if not booking:
         raise HTTPException(status_code=404, detail="No active or recent booking found for this room.")
 
-    # 3. Get ALL rooms and their IDs associated with the found booking
+    # 3. Get ALL rooms associated with the found booking
     all_rooms = []
     if is_package:
-        # For package bookings, the relationship is `booking.rooms` -> `PackageBookingRoom` -> `room`
-        all_rooms = [link.room for link in booking.rooms]
+        # Use explicit query for reliability instead of relying on lazy relations
+        from app.models.Package import PackageBookingRoom # Ensure correct model name 'app.models.Package'
+        all_rooms = db.query(Room).join(PackageBookingRoom).filter(PackageBookingRoom.package_booking_id == booking.id).all()
+        # Fallback to relationship if query returned nothing (e.g. freshly created objects in session)
+        if not all_rooms:
+            all_rooms = [link.room for link in booking.rooms if link.room]
     else:
-        # For regular bookings, the relationship is `booking.booking_rooms` -> `BookingRoom` -> `room`
-        all_rooms = [link.room for link in booking.booking_rooms]
+        # Use explicit query for regular bookings
+        all_rooms = db.query(Room).join(BookingRoom).filter(BookingRoom.booking_id == booking.id).all()
+        if not all_rooms:
+            all_rooms = [link.room for link in booking.booking_rooms if link.room]
     
     room_ids = [room.id for room in all_rooms if room]
     
@@ -3480,7 +3489,7 @@ def _calculate_bill_for_entire_booking(db: Session, room_number: str, branch_id:
     # Calculate effective checkout date:
     # If actual checkout date (today) > booking.check_out (late checkout): use today
     # If actual checkout date (today) < booking.check_out (early checkout): use booking.check_out
-    today = date.today()
+    today = get_ist_today().date()
     effective_checkout_date = max(today, booking.check_out)
     stay_days = max(1, (effective_checkout_date - booking.check_in).days)
 
@@ -3514,8 +3523,11 @@ def _calculate_bill_for_entire_booking(db: Session, room_number: str, branch_id:
         # For regular bookings: calculate total room charges from ALL rooms using dynamic pricing
         total_room_cost = 0.0
         for room in all_rooms:
+            # Match the single-room pricing logic exactly
             dynamic_rate = calculate_dynamic_booking_price(db, room.room_type_id, booking.check_in, effective_checkout_date, room_count=1)
-            total_room_cost += dynamic_rate or ((room.price or 0) * stay_days)
+            room_cost = dynamic_rate or ((room.price or 0) * stay_days)
+            total_room_cost += room_cost
+            print(f"[DEBUG-BILL-MULTI] Room {room.number} (Type ID: {room.room_type_id}): Dynamic={dynamic_rate}, Final={room_cost}")
             
         charges.room_charges = total_room_cost
     
@@ -3742,14 +3754,7 @@ def _calculate_bill_for_entire_booking(db: Session, room_number: str, branch_id:
                 rental_map[iid]["rental_price"] = max(rental_map[iid]["rental_price"], float(d.rental_price or 0.0))
 
 
-    # FIX: Calculate stay_days at the top level of entire booking
-    stay_days = 1
-    if booking:
-        checkout_date_val = booking.check_out
-        checkin_date_val = booking.check_in
-        if isinstance(checkout_date_val, datetime): checkout_date_val = checkout_date_val.date()
-        if isinstance(checkin_date_val, datetime): checkin_date_val = checkin_date_val.date()
-        stay_days = max(1, (checkout_date_val - checkin_date_val).days)
+    # Redundant stay_days redefinition removed to ensure global consistency
 
     checkout_requests = []
 
@@ -3804,7 +3809,7 @@ def _calculate_bill_for_entire_booking(db: Session, room_number: str, branch_id:
             aggregated_room_audit[audit_key]["used_qty"] += float(item_data.get('used_qty') or 0)
             aggregated_room_audit[audit_key]["damage_qty"] += float(item_data.get('damage_qty') or 0)
             aggregated_room_audit[audit_key]["missing_qty"] += float(item_data.get('missing_qty') or 0)
-            aggregated_room_audit[audit_key]["provided_bad_charge"] += float(item_data.get('damage_charge') or item_data.get('missing_item_charge') or item_data.get('total_charge') or 0)
+            aggregated_room_audit[audit_key]["provided_bad_charge"] += float(item_data.get('damage_charge') or item_data.get('missing_item_charge') or 0)
             aggregated_room_audit[audit_key]["allocated_stock"] += float(item_data.get('allocated_stock') or 0)
 
         # Process Aggregated Room Audit
@@ -3931,7 +3936,7 @@ def _calculate_bill_for_entire_booking(db: Session, room_number: str, branch_id:
                     item_notes += " - Rent waived (Damaged/Missing)"
 
                 charges.inventory_usage.append({
-                    "date": checkout_request.completed_at or datetime.now(),
+                    "date": checkout_request.completed_at or get_ist_now(),
                     "room_number": r_num,
                     "item_name": f"Room {r_num}: {clean_name}",
                     "category": inv_item.category.name if inv_item.category else "Rental",
@@ -3978,7 +3983,7 @@ def _calculate_bill_for_entire_booking(db: Session, room_number: str, branch_id:
                     
                     charges.consumables_charges = (charges.consumables_charges or 0) + total_item_charge
                     charges.consumables_items.append({
-                        "date": checkout_request.completed_at or datetime.now(),
+                        "date": checkout_request.completed_at or get_ist_now(),
                         "item_id": item_id,
                         "item_name": label,
                         "actual_consumed": total_qty,
@@ -4080,39 +4085,37 @@ def _calculate_bill_for_entire_booking(db: Session, room_number: str, branch_id:
     total_inventory_charges = charges.inventory_charges or 0
 
     # Calculate GST
-    # Room charges: 5% GST if < 5000, 12% GST if 5000-7500, 18% GST if > 7500
-    # FIX: Calculate GST for each room individually based on its nightly rate
+    # Room charges: Slab-based GST based on DAILY rate
     charges.room_gst = 0.0
     if not is_package:
         for room in all_rooms:
-            room_price = room.price or 0
+            # Match the single-room pricing logic for GST tiers
+            dynamic_rate = calculate_dynamic_booking_price(db, room.room_type_id, booking.check_in, effective_checkout_date, room_count=1)
+            room_cost = dynamic_rate or ((room.price or 0) * stay_days)
+            daily_rate = room_cost / max(1, stay_days)
+            
             room_gst_rate = 0.18
-            if room_price < 5000:
+            if daily_rate < 5000:
                 room_gst_rate = 0.05
-            elif room_price <= 7500:
+            elif daily_rate < 7500:
                 room_gst_rate = 0.12
             
-            # Calculate total charge for this room
-            room_total = room_price * stay_days
-            charges.room_gst += room_total * room_gst_rate
+            charges.room_gst += room_cost * room_gst_rate
     
     # Package charges: Same rule as room charges
     # Determine daily rate for package to find the slab
     package_daily_rate = 0
     if is_package:
+        package_daily = 0
         if is_whole_property:
-            package_daily_rate = (package.price if package else 0) / max(1, stay_days)
+            package_daily = (package.price if package else 0) / max(1, stay_days)
         else:
-            package_daily_rate = package.price if package else 0
-            
-    package_gst_rate = 0.18
-    if package_daily_rate > 0:
-        if package_daily_rate < 5000:
-            package_gst_rate = 0.05
-        elif package_daily_rate <= 7500:
-            package_gst_rate = 0.12
-            
-    charges.package_gst = (charges.package_charges or 0) * package_gst_rate
+            package_daily = (package.price if package else 0)
+        
+        pkg_gst_rate = 0.18
+        if package_daily < 5000: pkg_gst_rate = 0.05
+        elif package_daily < 7500: pkg_gst_rate = 0.12
+        charges.package_gst = (charges.package_charges or 0) * pkg_gst_rate
     
     # Food charges: 5% GST always
     food_charge_amount = charges.food_charges or 0
@@ -4141,7 +4144,6 @@ def _calculate_bill_for_entire_booking(db: Session, room_number: str, branch_id:
     # Total GST
     charges.total_gst = (charges.room_gst or 0) + (charges.food_gst or 0) + (charges.service_gst or 0) + (charges.package_gst or 0) + (charges.consumables_gst or 0) + (charges.inventory_gst or 0) + (charges.asset_damage_gst or 0)
     
-    # Total due (subtotal before GST)
     charges.total_due = sum([
         charges.room_charges or 0, 
         charges.food_charges or 0, 
@@ -4151,6 +4153,15 @@ def _calculate_bill_for_entire_booking(db: Session, room_number: str, branch_id:
         charges.inventory_charges or 0,
         charges.asset_damage_charges or 0
     ])
+
+    # Mobile Compatibility Mapping (Support for Modernized Flutter UI)
+    charges.rent = (charges.room_charges or 0) + (charges.package_charges or 0)
+    charges.food = (charges.food_charges or 0)
+    charges.services = (charges.service_charges or 0)
+    charges.penalties = (charges.inventory_charges or 0) + (charges.asset_damage_charges or 0) + (charges.consumables_charges or 0)
+    charges.subtotal = (charges.total_due or 0)
+    charges.gst = (charges.total_gst or 0)
+    charges.grand_total = (charges.total_due or 0) + (charges.total_gst or 0)
     
     # Add advance deposit info to charges
     charges.advance_deposit = getattr(booking, 'advance_deposit', 0.0) or 0.0
@@ -4211,8 +4222,21 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
     if checkout_mode not in ["single", "multiple"]:
         checkout_mode = "multiple"  # Default to multiple if invalid
     
-    # Check if checkout request exists and inventory is verified
-    room = db.query(Room).filter(Room.number == room_number, Room.branch_id == branch_id).first()
+    # Check if checkout request exists and inventory is verified - safely handle global view
+    room_query = db.query(Room).filter(func.trim(Room.number) == str(room_number).strip())
+    if branch_id is not None:
+        room_query = room_query.filter(Room.branch_id == branch_id)
+    room = room_query.first()
+    
+    if not room:
+        # Fallback for enterprise view global lookup
+        room = db.query(Room).filter(func.trim(Room.number) == str(room_number).strip()).first()
+        
+    if not room:
+        raise HTTPException(status_code=404, detail=f"Room {room_number} not found")
+
+    effective_branch_id = room.branch_id
+    
     if room:
         # Find active booking
         booking_link = (db.query(BookingRoom)
@@ -4279,7 +4303,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
     if checkout_mode == "single":
         # Single room checkout
         # Calculate bill first - this will validate that there's an active booking
-        bill_data = _calculate_bill_for_single_room(db, room_number, branch_id)
+        bill_data = _calculate_bill_for_single_room(db, room_number, effective_branch_id)
         booking = bill_data["booking"]
         room = bill_data["room"]
         charges = bill_data["charges"]
@@ -4291,7 +4315,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
         
         # PRE-CHECKOUT CLEANUP: Check for and delete any orphaned checkouts BEFORE attempting checkout
         # This prevents unique constraint violations
-        today = date.today()
+        today = get_ist_today().date()
         existing_room_checkout = db.query(Checkout).filter(
             Checkout.room_number == room_number,
             func.date(Checkout.checkout_date) == today
@@ -4408,7 +4432,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                         key_card_fee = 50.0  # Default lost key fee
             
             # 2. Calculate Late Checkout Fee
-            actual_checkout_time = request.actual_checkout_time or datetime.now()
+            actual_checkout_time = request.actual_checkout_time or get_ist_now()
             late_checkout_fee = calculate_late_checkout_fee(
                 booking.check_out,
                 actual_checkout_time,
@@ -4538,7 +4562,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
             charges_dict = jsonable_encoder(charges)
             
             bill_details_data = jsonable_encoder({
-                "generated_at": datetime.now(),
+                "generated_at": get_ist_now(),
                 "charges_breakdown": charges_dict,
                 "consumables_audit": {
                     "charges": consumables_charges,
@@ -4582,7 +4606,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                 is_b2b=request.is_b2b or False,
                 invoice_number=invoice_number,
                 bill_details=bill_details_data,  # Store the detailed bill
-                branch_id=branch_id
+                branch_id=effective_branch_id
             )
             # Add checkout to session first, then set invoice_number if needed
             db.add(new_checkout)
@@ -4610,7 +4634,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                     None
                 )
                 if room_verification:
-                    create_checkout_verification(db, new_checkout.id, room_verification, room.id, branch_id=branch_id)
+                    create_checkout_verification(db, new_checkout.id, room_verification, room.id, branch_id=effective_branch_id)
             else:
                 # Fallback: Create verification from CheckoutRequest inventory_data
                 # Fetch CheckoutRequest (similar to logic in Step 12)
@@ -4688,18 +4712,18 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                     # Bypass pydantic validation for consumables list to hold our extended objects
                     room_ver_data.consumables = consumables 
                     
-                    create_checkout_verification(db, new_checkout.id, room_ver_data, room.id, branch_id=branch_id)
+                    create_checkout_verification(db, new_checkout.id, room_ver_data, room.id, branch_id=effective_branch_id)
             
             # 10. Process split payments
             if request.split_payments:
-                process_split_payments(db, new_checkout.id, request.split_payments, branch_id=branch_id)
+                process_split_payments(db, new_checkout.id, request.split_payments, branch_id=effective_branch_id)
             elif request.payment_method:
                 # Legacy single payment method
                 payment_record = CheckoutPayment(
                     checkout_id=new_checkout.id,
                     payment_method=request.payment_method,
                     amount=grand_total,
-                    branch_id=branch_id,
+                    branch_id=effective_branch_id,
                     notes="Single payment method"
                 )
                 db.add(payment_record)
@@ -4719,7 +4743,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
             ).update({
                 "billing_status": "billed",
                 "status": "completed",
-                "last_used_at": datetime.utcnow()
+                "last_used_at": datetime.now(__import__("datetime").timezone.utc)
             })
             
             # 12. Inventory Triggers
@@ -4767,7 +4791,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                     deduct_room_consumables(
                         db, room.id, room_verification.consumables, 
                         new_checkout.id, created_by=current_user.id,
-                        branch_id=branch_id
+                        branch_id=effective_branch_id
                     )
 
             # Clear remaining consumables from room inventory
@@ -4776,7 +4800,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
             # room_items = ... (Removed)
             
             # Trigger linen cycle (move bed sheets/towels to laundry)
-            trigger_linen_cycle(db, room.id, new_checkout.id, branch_id=branch_id)
+            trigger_linen_cycle(db, room.id, new_checkout.id, branch_id=effective_branch_id)
             
             # 13. Update room status
             room.status = "Available"  # Room moves to "Dirty" status (ready for housekeeping)
@@ -4810,17 +4834,17 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
             #                     
             #                     if wh_stock:
             #                         wh_stock.quantity += qty
-            #                         wh_stock.last_updated = datetime.utcnow()
+            #                         wh_stock.last_updated = datetime.now(__import__("datetime").timezone.utc)
             #                     else:
             #                         db.add(LocationStock(
             #                             location_id=warehouse.id,
             #                             item_id=item_stock.item_id,
             #                             quantity=qty,
-            #                             last_updated=datetime.utcnow()
+            #                             last_updated=datetime.now(__import__("datetime").timezone.utc)
             #                         ))
             #                     
             #                     item_stock.quantity = 0
-            #                     item_stock.last_updated = datetime.utcnow()
+            #                     item_stock.last_updated = datetime.now(__import__("datetime").timezone.utc)
             #                     print(f"[CLEANUP] Returned {qty} x {item_name} from Room {room.number}")
             # except Exception as e:
             #     print(f"[WARNING] Cleanup failed: {e}")
@@ -4830,7 +4854,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                 from app.curd import service_request as service_request_crud
                 # Create cleaning service request
                 service_request_crud.create_cleaning_service_request(
-                    db, room.id, room.number, booking.guest_name, branch_id=branch_id
+                    db, room.id, room.number, booking.guest_name, branch_id=effective_branch_id
                 )
                 # Create refill service request with checkout_id to get consumables data
                 service_request_crud.create_refill_service_request(
@@ -4849,7 +4873,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
             
             if not remaining_rooms:
                 booking.status = "checked_out"
-                booking.checked_out_at = datetime.utcnow()
+                booking.checked_out_at = datetime.now(__import__("datetime").timezone.utc)
             
             db.commit()
             db.refresh(new_checkout)
@@ -4864,7 +4888,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                 os.makedirs(bills_dir, exist_ok=True)
                 
                 # Generate PDF filename
-                pdf_filename = f"bill_{new_checkout.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                pdf_filename = f"bill_{new_checkout.id}_{get_ist_now().strftime('%Y%m%d_%H%M%S')}.pdf"
                 pdf_path = os.path.join(bills_dir, pdf_filename)
                 
                 # Generate the PDF
@@ -4951,7 +4975,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                     
                     # If not found by booking, check by room number and today
                     if not existing_checkout:
-                        today = date.today()
+                        today = get_ist_today().date()
                         existing_checkout = db.query(Checkout).filter(
                             Checkout.room_number == room_number,
                             func.date(Checkout.checkout_date) == today
@@ -5056,7 +5080,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
     
     else:
         # Multiple room checkout (entire booking)
-        bill_data = _calculate_bill_for_entire_booking(db, room_number, branch_id=branch_id)
+        bill_data = _calculate_bill_for_entire_booking(db, room_number, branch_id=effective_branch_id)
 
         booking = bill_data["booking"]
         all_rooms = bill_data["all_rooms"]
@@ -5073,7 +5097,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
             raise HTTPException(status_code=400, detail=f"Booking cannot be checked out. Current status: {booking.status}")
         
         # Check if a checkout record already exists for this booking TODAY (allow multiple checkouts on different dates)
-        today = date.today()
+        today = get_ist_today().date()
         existing_checkout = None
         if not is_package:
             # First check for today's checkout
@@ -5083,7 +5107,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
             ).first()
             # If not found, check for any recent checkout (within last 7 days)
             if not existing_checkout:
-                week_ago = date.today() - timedelta(days=7)
+                week_ago = get_ist_today().date() - timedelta(days=7)
                 existing_checkout = db.query(Checkout).filter(
                     Checkout.booking_id == booking.id,
                     func.date(Checkout.checkout_date) >= week_ago
@@ -5155,7 +5179,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                         total_key_card_fee += 50.0
             
             # 2. Calculate Late Checkout Fee (based on average room rate)
-            actual_checkout_time = request.actual_checkout_time or datetime.now()
+            actual_checkout_time = request.actual_checkout_time or get_ist_now()
             avg_room_rate = sum((r.price or 0.0) for r in all_rooms) / len(all_rooms) if all_rooms else 0.0
             late_checkout_fee = calculate_late_checkout_fee(
                 booking.check_out,
@@ -5227,7 +5251,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
             from fastapi.encoders import jsonable_encoder
             charges_dict = jsonable_encoder(charges)
             bill_details_data = jsonable_encoder({
-                "generated_at": datetime.now(),
+                "generated_at": get_ist_now(),
                 "charges_breakdown": charges_dict,
                 "consumables_audit": {
                     "charges": total_consumables_charges,
@@ -5271,7 +5295,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                 is_b2b=request.is_b2b or False,
                 invoice_number=invoice_number,
                 bill_details=bill_details_data,
-                branch_id=branch_id
+                branch_id=effective_branch_id
             )
             # If invoice_number wasn't generated, create one based on checkout ID after flush
             if not invoice_number:
@@ -5293,7 +5317,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                         deduct_room_consumables(
                             db, room_obj.id, room_verification.consumables, 
                             new_checkout.id, created_by=current_user.id,
-                            branch_id=branch_id
+                            branch_id=effective_branch_id
                         )
             
             # Deduct from CheckoutRequest if available
@@ -5341,14 +5365,14 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
             
             # 9. Process split payments
             if request.split_payments:
-                process_split_payments(db, new_checkout.id, request.split_payments, branch_id=branch_id)
+                process_split_payments(db, new_checkout.id, request.split_payments, branch_id=effective_branch_id)
             elif request.payment_method:
                 payment_record = CheckoutPayment(
                     checkout_id=new_checkout.id,
                     payment_method=request.payment_method,
                     amount=grand_total,
                     notes="Single payment method",
-                    branch_id=branch_id
+                    branch_id=effective_branch_id
                 )
                 db.add(payment_record)
             
@@ -5367,7 +5391,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
             ).update({
                 "billing_status": "billed",
                 "status": "completed",
-                "last_used_at": datetime.utcnow()
+                "last_used_at": datetime.now(__import__("datetime").timezone.utc)
             })
             
             # 11. Inventory Triggers for all rooms (Linen only, consumables handled in Step 8)
@@ -5375,11 +5399,11 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                 for room_verification in request.room_verifications:
                     room_obj = next((r for r in all_rooms if r.number == room_verification.room_number), None)
                     if room_obj:
-                        trigger_linen_cycle(db, room_obj.id, new_checkout.id, branch_id=branch_id)
+                        trigger_linen_cycle(db, room_obj.id, new_checkout.id, branch_id=effective_branch_id)
             
             # 12. Update booking and room statuses
             booking.status = "checked_out"
-            booking.checked_out_at = datetime.utcnow()
+            booking.checked_out_at = datetime.now(__import__("datetime").timezone.utc)
             booking.total_amount = grand_total
             db.query(Room).filter(Room.id.in_(room_ids)).update({"status": "Available"})
             
@@ -5390,11 +5414,11 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                     try:
                         # Create cleaning service request
                         service_request_crud.create_cleaning_service_request(
-                            db, room.id, room.number, booking.guest_name, branch_id=branch_id
+                            db, room.id, room.number, booking.guest_name, branch_id=effective_branch_id
                         )
                         # Create refill service request with checkout_id to get consumables data
                         service_request_crud.create_refill_service_request(
-                            db, room.id, room.number, booking.guest_name, new_checkout.id, branch_id=branch_id
+                            db, room.id, room.number, booking.guest_name, new_checkout.id, branch_id=effective_branch_id
                         )
                     except Exception as room_service_error:
                         # Don't fail checkout if service request creation fails for one room
@@ -5417,7 +5441,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                 os.makedirs(bills_dir, exist_ok=True)
                 
                 # Generate PDF filename
-                pdf_filename = f"bill_{new_checkout.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                pdf_filename = f"bill_{new_checkout.id}_{get_ist_now().strftime('%Y%m%d_%H%M%S')}.pdf"
                 pdf_path = os.path.join(bills_dir, pdf_filename)
                 
                 # Generate the PDF
@@ -5466,7 +5490,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
                         payment_method=payment_method,
                         created_by=current_user.id if current_user else None,
                         advance_amount=float(new_checkout.advance_deposit or 0),
-                        branch_id=branch_id
+                        branch_id=effective_branch_id
                     )
                     if result is None:
                         print(f"[INFO] Journal entry not created for checkout {new_checkout.id} (ledgers may not be set up yet)")
@@ -5491,3 +5515,62 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
             grand_total=new_checkout.grand_total,
             checkout_date=new_checkout.checkout_date or new_checkout.created_at
         )
+
+@router.get("/{room_number}/print")
+def print_bill_pdf(
+    room_number: str,
+    checkout_mode: str = "multiple",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
+):
+    """
+    Generate and return a PDF bill for the given room.
+    """
+    from types import SimpleNamespace
+    
+    # Use the existing route handler for calculation logic
+    try:
+        bill_summary = get_bill_for_booking(room_number, checkout_mode, db, current_user, branch_id)
+    except HTTPException as e:
+        raise e
+
+    # Create a mock object for the PDF generator which expects model instances/attributes
+    mock_checkout = SimpleNamespace(
+        id=f"PRE-{room_number}-{datetime.now().strftime('%H%M%S')}",
+        guest_name=bill_summary.guest_name,
+        room_number=", ".join(bill_summary.room_numbers),
+        invoice_number=None,
+        room_total=bill_summary.charges.room_charges or 0.0,
+        package_total=bill_summary.charges.package_charges or 0.0,
+        food_total=bill_summary.charges.food_charges or 0.0,
+        service_total=bill_summary.charges.service_charges or 0.0,
+        consumables_charges=bill_summary.charges.consumables_charges or 0.0,
+        inventory_charges=bill_summary.charges.inventory_charges or 0.0,
+        asset_damage_charges=bill_summary.charges.asset_damage_charges or 0.0,
+        late_checkout_fee=0.0,
+        key_card_fee=0.0,
+        tax_amount=bill_summary.charges.total_gst or 0.0,
+        discount_amount=0.0,
+        grand_total=(bill_summary.charges.total_due or 0.0) + (bill_summary.charges.total_gst or 0.0),
+        payment_method="Unspecified"
+    )
+
+    # Convert Pydantic model to dict for generator
+    bill_details = bill_summary.charges.dict()
+    
+    # Generate temporary file
+    fd, temp_path = tempfile.mkstemp(suffix=".pdf", prefix=f"bill_{room_number}_")
+    os.close(fd)
+    
+    try:
+        generate_checkout_bill_pdf(mock_checkout, bill_details, temp_path)
+        return FileResponse(
+            path=temp_path,
+            filename=f"bill_{room_number}.pdf",
+            media_type='application/pdf'
+        )
+    except Exception as e:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        raise HTTPException(status_code=500, detail=f"Failed to generate PDF: {str(e)}")

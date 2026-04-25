@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Float, Date, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
 from app.database import Base
-from datetime import datetime
+from datetime import timezone, datetime
 
 class SalaryPayment(Base):
     """Employee salary payment records"""
@@ -27,9 +27,9 @@ class SalaryPayment(Base):
     payment_status = Column(String, default="pending")  # pending, paid
     
     # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     notes = Column(String, nullable=True)
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 

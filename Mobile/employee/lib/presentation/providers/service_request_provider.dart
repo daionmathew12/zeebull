@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+
 import 'package:dio/dio.dart' as dio_package;
 import 'package:orchid_employee/data/models/service_request_model.dart';
 import 'package:orchid_employee/data/services/api_service.dart';
@@ -145,7 +147,7 @@ class ServiceRequestProvider with ChangeNotifier {
     return false;
   }
 
-  Future<bool> createDamageReport(int roomId, String category, String description, List<String> imagePaths) async {
+  Future<bool> createDamageReport(int roomId, String category, String description, List<XFile> images) async {
     try {
       final formData = dio_package.FormData.fromMap({
         'room_id': roomId,
@@ -153,12 +155,14 @@ class ServiceRequestProvider with ChangeNotifier {
         'description': description,
       });
 
-      if (imagePaths.isNotEmpty) {
+      if (images.isNotEmpty) {
         // For now take the first one if the API only supports one, or loop if it supports multiple
         // Our backend damage endpoint takes one 'image' field
+        final image = images.first;
+        final bytes = await image.readAsBytes();
         formData.files.add(MapEntry(
           'image',
-          await dio_package.MultipartFile.fromFile(imagePaths.first),
+          dio_package.MultipartFile.fromBytes(bytes, filename: image.name),
         ));
       }
 

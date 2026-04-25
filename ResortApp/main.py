@@ -1,4 +1,4 @@
-# app/main.py - Trigger Reload 3
+# app/main.py - Trigger Reload 4 - ROOT FORCE
 from fastapi import FastAPI, Request, HTTPException, Depends
 print(">>> STARTING WITH NEW MAIN.PY - DEBUG VERSION 2 <<<") # Confirm file load
 # Force Reload Fix 14 (Trigger Reload for Bill Filter Fix)
@@ -73,6 +73,7 @@ from app.api import (
     service,
     attendance,
     service_request,
+    service_report,
     account,
     gst_reports,
     branch,
@@ -172,10 +173,15 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """Handle validation errors with proper logging and CORS headers"""
     import sys
-    print(f"Validation error in {request.method} {request.url.path}: {exc.errors()}")
+    errors = exc.errors()
+    # Sanitize bytes from errors
+    for error in errors:
+        if 'input' in error and isinstance(error['input'], bytes):
+            error['input'] = error['input'].decode('utf-8', errors='replace')
+    print(f"Validation error in {request.method} {request.url.path}: {errors}")
     return JSONResponse(
         status_code=422,
-        content={"detail": exc.errors()},
+        content={"detail": errors},
         headers={
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "*",
@@ -250,13 +256,20 @@ class PerformanceMiddleware(BaseHTTPMiddleware):
             elif any(p in path for p in ["/rooms", "/packages", "/services", "/food-items", "/inventory/items"]):
                 response.headers["Cache-Control"] = "public, max-age=300"  # 5 minutes
             else:
-                response.headers["Cache-Control"] = "public, max-age=999"  # Changed to 999 to verify deployment
+                response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         
         # Log slow requests (> 1 second)
         if process_time > 1.0:
             print(f"[PERF] Slow request: {request.method} {request.url.path} took {process_time:.2f}s")
         
         return response
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    print(f"[RECV-LOG] {request.method} {request.url.path}")
+    response = await call_next(request)
+    print(f"[SEND-LOG] {request.method} {request.url.path} -> {response.status_code}")
+    return response
 
 app.add_middleware(PerformanceMiddleware)
 
@@ -341,6 +354,7 @@ app.include_router(gst_reports.router, prefix="/api", tags=["GST Reports"])
 app.include_router(reports_module.router, prefix="/api", tags=["Reports Module"])
 app.include_router(attendance.router, prefix="/api", tags=["Attendance"])
 app.include_router(notification.router, prefix="/api/notifications", tags=["Notifications"])
+app.include_router(service_report.router, prefix="/api", tags=["Service Reports"])
 app.include_router(activity_logs.router, prefix="/api/activity-logs", tags=["Activity Logs"])
 
 # Channel Manager
@@ -480,7 +494,7 @@ async def user_page(request: Request, path: str = ""):
 @app.get("/health")
 async def health_check():
     """Health check endpoint for monitoring"""
-    return {"status": "healthy", "message": "Resort Management System is running"}
+    return {"status": "healthy", "message": "ROOT_MAIN_ACTIVE_V4"}
 
 
 # API documentation redirect
@@ -495,5 +509,5 @@ if __name__ == "__main__":
     import os
 
     # Get port from environment or default to 8012 for Orchid (Avoiding 8011 conflict)
-    port = int(os.getenv("PORT", 8012))
+    port = int(os.getenv("PORT", 8011))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)

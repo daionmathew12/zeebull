@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:orchid_employee/data/services/api_service.dart';
 import 'package:dio/dio.dart';
+import 'dart:ui';
+import 'package:orchid_employee/core/constants/app_colors.dart';
+import 'package:orchid_employee/presentation/widgets/onyx_glass_card.dart';
 
 class ManagerCreateVendorScreen extends StatefulWidget {
   final Map<String, dynamic>? vendor;
@@ -17,7 +20,7 @@ class _ManagerCreateVendorScreenState extends State<ManagerCreateVendorScreen> {
   bool _isEdit = false;
 
   // Controllers
-  final _nameController = TextEditingController(); // Trade Name
+  final _nameController = TextEditingController(); 
   final _companyNameController = TextEditingController();
   final _legalNameController = TextEditingController();
   final _gstNumberController = TextEditingController();
@@ -115,22 +118,16 @@ class _ManagerCreateVendorScreenState extends State<ManagerCreateVendorScreen> {
 
       if (_isEdit) {
         await api.dio.put('/inventory/vendors/${widget.vendor!['id']}', data: payload);
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Vendor Updated"), backgroundColor: Colors.green));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("VENDOR UPDATED", style: TextStyle(fontWeight: FontWeight.w900)), backgroundColor: AppColors.success, behavior: SnackBarBehavior.floating));
       } else {
         await api.dio.post('/inventory/vendors', data: payload);
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Vendor Created"), backgroundColor: Colors.green));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("VENDOR CREATED", style: TextStyle(fontWeight: FontWeight.w900)), backgroundColor: AppColors.success, behavior: SnackBarBehavior.floating));
       }
 
-      if (mounted) {
-        Navigator.pop(context, true);
-      }
+      if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {
-        String msg = "Failed: $e";
-        if (e is DioException && e.response?.statusCode == 422) {
-           msg = "Validation Error: ${e.response?.data}";
-        }
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("FAILED: $e", style: const TextStyle(fontWeight: FontWeight.w900)), backgroundColor: AppColors.error, behavior: SnackBarBehavior.floating));
         setState(() => _isLoading = false);
       }
     }
@@ -139,13 +136,18 @@ class _ManagerCreateVendorScreenState extends State<ManagerCreateVendorScreen> {
   Future<void> _deleteVendor() async {
     final confirm = await showDialog<bool>(
       context: context, 
-      builder: (ctx) => AlertDialog(
-        title: const Text("Delete Vendor"),
-        content: const Text("Are you sure? This action cannot be undone."),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancel")),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Delete", style: TextStyle(color: Colors.red))),
-        ],
+      builder: (ctx) => BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+        child: AlertDialog(
+          backgroundColor: AppColors.onyx.withOpacity(0.9),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24), side: const BorderSide(color: Colors.white10)),
+          title: const Text("DELETE VENDOR", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 16)),
+          content: Text("ARE YOU SURE YOU WANT TO DELETE THIS VENDOR? THIS ACTION CANNOT BE UNDONE.", style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 13, fontWeight: FontWeight.bold)),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text("CANCEL", style: TextStyle(color: Colors.white.withOpacity(0.4), fontWeight: FontWeight.w900))),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("DELETE", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w900))),
+          ],
+        ),
       )
     );
     
@@ -156,12 +158,12 @@ class _ManagerCreateVendorScreenState extends State<ManagerCreateVendorScreen> {
     try {
       await api.dio.delete('/inventory/vendors/${widget.vendor!['id']}');
       if (mounted) {
-         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Vendor Deleted"), backgroundColor: Colors.red));
+         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("VENDOR DELETED", style: TextStyle(fontWeight: FontWeight.w900)), backgroundColor: Colors.redAccent, behavior: SnackBarBehavior.floating));
          Navigator.pop(context, true);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Failed to delete: $e")));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("FAILED TO DELETE: $e")));
         setState(() => _isLoading = false);
       }
     }
@@ -170,92 +172,165 @@ class _ManagerCreateVendorScreenState extends State<ManagerCreateVendorScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_isEdit ? "Edit Vendor" : "Add Vendor"),
-        actions: [
-          if (_isEdit) IconButton(icon: const Icon(Icons.delete, color: Colors.redAccent), onPressed: _deleteVendor),
-          IconButton(icon: const Icon(Icons.check), onPressed: _submit),
-        ],
-      ),
-      body: _isLoading 
-        ? const Center(child: CircularProgressIndicator()) 
-        : SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                   _buildSectionTitle("1. Basic Information"),
-                   _buildTextField(_nameController, "Trade Name *", validator: (v) => v?.isEmpty == true ? "Required" : null),
-                   _buildTextField(_companyNameController, "Company Name"),
-                   _buildTextField(_legalNameController, "Legal Name"),
-                   const SizedBox(height: 20),
-
-                   _buildSectionTitle("2. GST Details"),
-                   DropdownButtonFormField<String>(
-                      value: _gstType,
-                      decoration: const InputDecoration(labelText: "GST Type", border: OutlineInputBorder()),
-                      items: _gstTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-                      onChanged: (val) => setState(() => _gstType = val!),
-                   ),
-                   const SizedBox(height: 12),
-                   _buildTextField(_gstNumberController, "GST Number"),
-                   _buildTextField(_panNumberController, "PAN Number"),
-                   const SizedBox(height: 20),
-
-                   _buildSectionTitle("3. Address & Place of Supply"),
-                   _buildTextField(_billingAddressController, "Billing Address *", maxLines: 3, validator: (v) => v?.isEmpty == true ? "Required" : null),
-                   DropdownButtonFormField<String>(
-                      value: _billingState,
-                      decoration: const InputDecoration(labelText: "Billing State *", border: OutlineInputBorder()),
-                      items: _states.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-                      onChanged: (val) => setState(() => _billingState = val!),
-                   ),
-                   const SizedBox(height: 12),
-                   _buildTextField(_distanceController, "Distance (Km)", keyboardType: TextInputType.number),
-                   _buildTextField(_shippingAddressController, "Shipping Address (if different)", maxLines: 3),
-                   const SizedBox(height: 20),
-
-                   _buildSectionTitle("4. Contact Information"),
-                   _buildTextField(_contactPersonController, "Contact Person"),
-                   _buildTextField(_emailController, "Email", keyboardType: TextInputType.emailAddress),
-                   _buildTextField(_phoneController, "Phone", keyboardType: TextInputType.phone),
-
-                   const SizedBox(height: 40),
-                   SizedBox(
-                     width: double.infinity,
-                     height: 50,
-                     child: ElevatedButton(
-                       onPressed: _submit,
-                       style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo, foregroundColor: Colors.white),
-                       child: Text(_isEdit ? "Update Vendor" : "Create Vendor", style: const TextStyle(fontSize: 16)),
-                     ),
-                   ),
-                ],
+      backgroundColor: AppColors.onyx,
+      body: Stack(
+        children: [
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: AppColors.primaryGradient,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
             ),
+          ),
+          
+          SafeArea(
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 18),
+                        style: IconButton.styleFrom(backgroundColor: Colors.white.withOpacity(0.05)),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text("PARTNER MANAGEMENT", style: TextStyle(color: AppColors.accent, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 2)),
+                            Text(_isEdit ? "EDIT VENDOR" : "ADD NEW VENDOR", style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
+                          ],
+                        ),
+                      ),
+                      if (_isEdit) IconButton(
+                        onPressed: _deleteVendor,
+                        icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 22),
+                        style: IconButton.styleFrom(backgroundColor: Colors.redAccent.withOpacity(0.1)),
+                      ),
+                    ],
+                  ),
+                ),
+                
+                Expanded(
+                  child: _isLoading 
+                    ? const Center(child: CircularProgressIndicator(color: AppColors.accent))
+                    : SingleChildScrollView(
+                        padding: const EdgeInsets.all(20),
+                        child: Form(
+                          key: _formKey,
+                          child: Column(
+                            children: [
+                              _buildFormSection("BASIC INFORMATION", [
+                                _buildGlassTextField(_nameController, "TRADE NAME *", validator: (v) => v?.isEmpty == true ? "REQUIRED" : null),
+                                _buildGlassTextField(_companyNameController, "COMPANY NAME"),
+                                _buildGlassTextField(_legalNameController, "LEGAL NAME"),
+                              ]),
+                              const SizedBox(height: 20),
+                              _buildFormSection("GST & TAX DETAILS", [
+                                _buildGlassDropdown<String>(label: "GST REGISTRATION TYPE", value: _gstType, items: _gstTypes.map((t) => DropdownMenuItem(value: t, child: Text(t.toUpperCase(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)))).toList(), onChanged: (v) => setState(() => _gstType = v!)),
+                                const SizedBox(height: 16),
+                                _buildGlassTextField(_gstNumberController, "GST NUMBER"),
+                                _buildGlassTextField(_panNumberController, "PAN NUMBER"),
+                              ]),
+                              const SizedBox(height: 20),
+                              _buildFormSection("ADDRESS & LOGISTICS", [
+                                _buildGlassTextField(_billingAddressController, "BILLING ADDRESS *", maxLines: 2, validator: (v) => v?.isEmpty == true ? "REQUIRED" : null),
+                                _buildGlassDropdown<String>(label: "BILLING STATE", value: _billingState, items: _states.map((t) => DropdownMenuItem(value: t, child: Text(t.toUpperCase(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)))).toList(), onChanged: (v) => setState(() => _billingState = v!)),
+                                const SizedBox(height: 16),
+                                _buildGlassTextField(_distanceController, "DISTANCE (KM)", keyboardType: TextInputType.number),
+                                _buildGlassTextField(_shippingAddressController, "SHIPPING ADDRESS", maxLines: 2),
+                              ]),
+                              const SizedBox(height: 20),
+                              _buildFormSection("CONTACT INFORMATION", [
+                                _buildGlassTextField(_contactPersonController, "CONTACT PERSON"),
+                                _buildGlassTextField(_emailController, "EMAIL", keyboardType: TextInputType.emailAddress),
+                                _buildGlassTextField(_phoneController, "PHONE", keyboardType: TextInputType.phone),
+                              ]),
+                              const SizedBox(height: 32),
+                              SizedBox(
+                                width: double.infinity,
+                                height: 56,
+                                child: ElevatedButton(
+                                  onPressed: _submit,
+                                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent, foregroundColor: AppColors.onyx, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), elevation: 0),
+                                  child: Text(_isEdit ? "UPDATE VENDOR" : "CREATE VENDOR", style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14, letterSpacing: 1)),
+                                ),
+                              ),
+                              const SizedBox(height: 40),
+                            ],
+                          ),
+                        ),
+                      ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildSectionTitle(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.indigo)),
+  Widget _buildFormSection(String title, List<Widget> children) {
+    return OnyxGlassCard(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: const TextStyle(color: AppColors.accent, fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
+          const SizedBox(height: 20),
+          ...children,
+        ],
+      ),
     );
   }
 
-  Widget _buildTextField(TextEditingController controller, String label, {int maxLines = 1, TextInputType? keyboardType, String? Function(String?)? validator}) {
+  Widget _buildGlassTextField(TextEditingController controller, String label, {int maxLines = 1, TextInputType? keyboardType, String? Function(String?)? validator}) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: TextFormField(
-        controller: controller,
-        decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
-        maxLines: maxLines,
-        keyboardType: keyboardType,
-        validator: validator,
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1)),
+          const SizedBox(height: 6),
+          TextFormField(
+            controller: controller,
+            maxLines: maxLines,
+            keyboardType: keyboardType,
+            validator: validator,
+            style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+            decoration: InputDecoration(
+              isDense: true,
+              filled: true,
+              fillColor: Colors.white.withOpacity(0.05),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              errorStyle: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 10),
+            ),
+          ),
+        ],
       ),
+    );
+  }
+
+  Widget _buildGlassDropdown<T>({required String label, required T? value, required List<DropdownMenuItem<T>> items, required void Function(T?) onChanged}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1)),
+        const SizedBox(height: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white10)),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<T>(value: value, isExpanded: true, dropdownColor: AppColors.onyx, items: items, onChanged: onChanged, icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white24, size: 18)),
+          ),
+        ),
+      ],
     );
   }
 }

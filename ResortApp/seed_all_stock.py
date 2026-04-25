@@ -1,6 +1,6 @@
 import sys
 import os
-from datetime import datetime
+from datetime import timezone, datetime
 sys.path.append(os.getcwd())
 
 from app.database import SessionLocal
@@ -27,7 +27,7 @@ try:
                 if existing:
                     existing.quantity = 100.0
                 else:
-                    db.add(LocationStock(location_id=wh_id, item_id=item.id, quantity=100.0, last_updated=datetime.utcnow()))
+                    db.add(LocationStock(location_id=wh_id, item_id=item.id, quantity=100.0, last_updated=datetime.now(timezone.utc)))
 
         db.commit()
         print("SUCCESS: Stock replenished.")

@@ -1,10 +1,10 @@
 from sqlalchemy.orm import Session
 from app.models.payment import Payment, Voucher
 from app.schemas.payment import PaymentCreate, VoucherCreate
-from datetime import datetime
+from datetime import timezone, datetime
 
 def create_payment(db: Session, payment: PaymentCreate):
-    new_payment = Payment(**payment.dict())
+    new_payment = Payment(**payment.model_dump())
     db.add(new_payment)
     db.commit()
     db.refresh(new_payment)
@@ -14,7 +14,7 @@ def get_all_payments(db: Session, skip: int = 0, limit: int = 100):
     return db.query(Payment).offset(skip).limit(limit).all()
 
 def create_voucher(db: Session, voucher: VoucherCreate):
-    new_voucher = Voucher(**voucher.dict())
+    new_voucher = Voucher(**voucher.model_dump())
     db.add(new_voucher)
     db.commit()
     db.refresh(new_voucher)
@@ -22,6 +22,6 @@ def create_voucher(db: Session, voucher: VoucherCreate):
 
 def get_voucher_by_code(db: Session, code: str):
     voucher = db.query(Voucher).filter(Voucher.code == code).first()
-    if voucher and voucher.expiry_date > datetime.utcnow():
+    if voucher and voucher.expiry_date > datetime.now(timezone.utc):
         return voucher
     return None

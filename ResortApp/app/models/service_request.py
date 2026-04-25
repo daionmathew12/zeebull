@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import timezone, datetime
 from app.database import Base
 from app.models.inventory import Location
 
@@ -17,8 +17,8 @@ class ServiceRequest(Base):
     billing_status = Column(String, nullable=True)  # "paid", "unpaid" for food orders
     refill_data = Column(Text, nullable=True)  # JSON string for refill items data
     image_path = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 

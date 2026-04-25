@@ -2,7 +2,7 @@
 import sys
 import os
 import random
-from datetime import datetime
+from datetime import timezone, datetime
 
 # Add current directory to path
 sys.path.append(os.getcwd())
@@ -172,7 +172,7 @@ def seed_inventory():
                         location_id=warehouse.id,
                         item_id=item.id,
                         quantity=100.0,
-                        last_updated=datetime.utcnow()
+                        last_updated=datetime.now(timezone.utc)
                     )
                     db.add(stock_entry)
                     db.commit()

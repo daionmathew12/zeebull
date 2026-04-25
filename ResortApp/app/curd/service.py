@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session, joinedload, noload
 from sqlalchemy import select, func
 from sqlalchemy.exc import ProgrammingError, SQLAlchemyError, IntegrityError
 from typing import List, Optional
-from datetime import date, datetime
+from datetime import timezone, date, datetime
 from app.models.service import Service, AssignedService, ServiceImage, service_inventory_item
 from app.models.inventory import (
     InventoryItem, 
@@ -104,7 +104,7 @@ def create_service(
                     service_id=db_service.id,
                     inventory_item_id=item_data.inventory_item_id,
                     quantity=item_data.quantity,
-                    created_at=datetime.utcnow()  # Explicitly set created_at
+                    created_at=datetime.now(timezone.utc)  # Explicitly set created_at
                 )
                 result = db.execute(stmt)
                 inserted_count += 1
@@ -268,7 +268,7 @@ def update_service(
                         service_id=service_id,
                         inventory_item_id=item_data.inventory_item_id,
                         quantity=item_data.quantity,
-                        created_at=datetime.utcnow()  # Explicitly set created_at
+                        created_at=datetime.now(timezone.utc)  # Explicitly set created_at
                     )
                     db.execute(insert_stmt)
                     inserted_count += 1
@@ -372,11 +372,11 @@ def delete_service(db: Session, service_id: int):
 def create_assigned_service(db: Session, assigned: AssignedServiceCreate, branch_id: int = 1):
 
     try:
-        # Convert Pydantic model to dict (handle both .dict() and .model_dump())
+        # Convert Pydantic model to dict (handle both .model_dump() and .model_dump())
         if hasattr(assigned, 'model_dump'):
             assigned_dict = assigned.model_dump()
         else:
-            assigned_dict = assigned.dict()
+            assigned_dict = assigned.model_dump()
         assigned_dict['branch_id'] = branch_id if branch_id is not None else 1
 
         
@@ -550,14 +550,14 @@ def create_assigned_service(db: Session, assigned: AssignedServiceCreate, branch
                             if loc_stock.quantity < quantity:
                                 print(f"[WARNING] Insufficient stock at {source_location.name} for {item.name}. Available: {loc_stock.quantity}, Required: {quantity}. Proceeding anyway (negative stock).")
                             loc_stock.quantity -= quantity
-                            loc_stock.last_updated = datetime.utcnow()
+                            loc_stock.last_updated = datetime.now(timezone.utc)
                         else:
                             print(f"[WARNING] No stock record at {source_location.name} for {item.name}. Creating negative entry.")
                             new_stock = LocationStock(
                                 location_id=source_location.id,
                                 item_id=item_id,
                                 quantity=-quantity,
-                                last_updated=datetime.utcnow()
+                                last_updated=datetime.now(timezone.utc)
                             )
                             db.add(new_stock)
                     else:
@@ -615,7 +615,8 @@ def create_assigned_service(db: Session, assigned: AssignedServiceCreate, branch
                                 quantity_assigned=quantity,
                                 quantity_used=0.0,
                                 status="assigned", 
-                                notes=f"Assigned from {source_location.name if source_location else 'Store'} (LocID: {source_location.id if source_location else '0'})"
+                                notes=f"Assigned from {source_location.name if source_location else 'Store'} (LocID: {source_location.id if source_location else '0'})",
+                                branch_id=branch_id
                             )
                             db.add(emp_inv_assignment)
                             print(f"[DEBUG] Added EmployeeInventoryAssignment to session")
@@ -740,7 +741,7 @@ def get_assigned_services(db: Session, skip: int = 0, limit: int = 100, employee
 def update_assigned_service_status(db: Session, assigned_id: int, update_data: AssignedServiceUpdate, updated_by: int = 1, commit: bool = True):
     import traceback
     from app.models.inventory import InventoryItem, InventoryTransaction, Location
-    from datetime import datetime
+    from datetime import timezone, datetime
     
     assigned = db.query(AssignedService).filter(AssignedService.id == assigned_id).first()
     if not assigned:
@@ -764,10 +765,10 @@ def update_assigned_service_status(db: Session, assigned_id: int, update_data: A
         
         # Track started_at and completed_at
         if new_status == "in_progress" and not assigned.started_at:
-            assigned.started_at = datetime.utcnow()
+            assigned.started_at = datetime.now(timezone.utc)
             print(f"[DEBUG] Set started_at for service {assigned_id}: {assigned.started_at}")
         elif new_status == "completed":
-            assigned.completed_at = datetime.utcnow()
+            assigned.completed_at = datetime.now(timezone.utc)
             assigned.last_used_at = assigned.completed_at # Keep legacy field in sync
             print(f"[DEBUG] Set completed_at for service {assigned_id}: {assigned.completed_at}")
     else:
@@ -895,7 +896,7 @@ def update_assigned_service_status(db: Session, assigned_id: int, update_data: A
                                     destination_location_id=laundry_loc.id,
                                     source_location_id=assigned.room.inventory_location_id if assigned.room else None,
                                     notes=f"Auto-collected Dirty Linen from Room {assigned.room.number if assigned.room else 'Unknown'} (Svc: {assigned.service.name})",
-                                    created_by=updated_by, branch_id=assigned.branch_id, created_at=datetime.utcnow()
+                                    created_by=updated_by, branch_id=assigned.branch_id, created_at=datetime.now(timezone.utc)
                                 ))
                                 
                                 # Add to LaundryLog
@@ -925,7 +926,7 @@ def update_assigned_service_status(db: Session, assigned_id: int, update_data: A
                                     reference_number=f"SVC-USAGE-{assigned_id}",
                                     department=item.category.name if item.category else "Housekeeping",
                                     notes=f"Actual Consumption during Service: {assigned.service.name}",
-                                    created_by=updated_by, branch_id=assigned.branch_id, created_at=datetime.utcnow()
+                                    created_by=updated_by, branch_id=assigned.branch_id, created_at=datetime.now(timezone.utc)
                                 ))
 
                         # 4. Handle Clean Returns (Back to Store)
@@ -962,7 +963,7 @@ def update_assigned_service_status(db: Session, assigned_id: int, update_data: A
 
                         # Finalize Status
                         if (assignment.quantity_returned + assignment.quantity_used + quantity_damaged + quantity_missing) >= assignment.quantity_assigned:
-                            assignment.is_returned = True; assignment.status = "returned"; assignment.returned_at = datetime.utcnow()
+                            assignment.is_returned = True; assignment.status = "returned"; assignment.returned_at = datetime.now(timezone.utc)
                         else: assignment.status = "partially_returned"  
 
                     except Exception as loop_err:
@@ -1009,7 +1010,7 @@ def update_assigned_service_status(db: Session, assigned_id: int, update_data: A
             # Check if this request was created recently (last 7 days)
             is_recent = True
             if req.created_at:
-                is_recent = (datetime.utcnow() - req.created_at).total_seconds() < 604800 # 7 days
+                is_recent = (datetime.now(timezone.utc) - req.created_at).total_seconds() < 604800 # 7 days
             
             if type_match and is_recent:
                 # Sync employee assignment if relevant
@@ -1026,9 +1027,9 @@ def update_assigned_service_status(db: Session, assigned_id: int, update_data: A
                         print(f"[DEBUG-SYNC] Syncing Req {req.id} status from {req.status} to {new_status}")
                         req.status = new_status
                         if new_status == "in_progress" and not req.started_at:
-                            req.started_at = datetime.utcnow()
+                            req.started_at = datetime.now(timezone.utc)
                         elif new_status == "completed" and not req.completed_at:
-                            req.completed_at = datetime.utcnow()
+                            req.completed_at = datetime.now(timezone.utc)
                 
                 # ALWAYS propagate billing_status if we have one (Paid/Unpaid)
                 # Priority: 1. Input data 2. Database state (if not default)

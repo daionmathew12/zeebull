@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Query
 import os
 # Absolute project root path (ResortApp/)
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _UPLOAD_ROOT = os.path.join(_BASE_DIR, "uploads")
-from typing import Optional, List
+from typing import Optional, List, Union
 import json
 from app.utils.auth import get_current_user, require_permission
 from sqlalchemy.orm import Session
@@ -18,8 +18,12 @@ from app.utils.branch_scope import get_branch_id
 from app.models.user import User
 from uuid import uuid4
 from app.schemas.room_type import RoomTypeCreate, RoomTypeUpdate, RoomType as RoomTypeOut, RoomTypeAvailability
+from app.models.inventory import InventoryTransaction, InventoryItem, Location
+from app.models.employee import Employee
+from app.models.service_request import ServiceRequest
 
 from datetime import date
+from app.utils.date_utils import get_ist_now, get_ist_today, format_iso_z
 
 router = APIRouter(prefix="/rooms", tags=["Rooms"])
 
@@ -41,6 +45,11 @@ def get_room_types(db: Session = Depends(get_db), branch_id: int = Depends(get_b
     if branch_id:
         query = query.filter(RoomType.branch_id == branch_id)
     return query.all()
+
+@router.get("/types/all", response_model=List[RoomTypeOut])
+def get_room_types_all(db: Session = Depends(get_db), branch_id: int = Depends(get_branch_id)):
+    """Alias for /types to support legacy mobile requests"""
+    return get_room_types(db, branch_id)
 
 @router.post("/types", response_model=RoomTypeOut)
 def create_room_type(
@@ -665,7 +674,7 @@ def update_room_statuses_endpoint(db: Session = Depends(get_db), current_user: U
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error updating room statuses: {str(e)}")
 
-def _get_rooms_impl(db: Session, branch_id: int, skip: int = 0, limit: int = 20):
+def _get_rooms_impl(db: Session, branch_id: int, skip: int = 0, limit: int = 20, status: Optional[str] = None, room_type_id: Optional[Union[int, str]] = None):
 
     """Helper function for get_rooms"""
     try:
@@ -702,6 +711,32 @@ def _get_rooms_impl(db: Session, branch_id: int, skip: int = 0, limit: int = 20)
             q = db.query(Room).options(joinedload(Room.room_type))
             if branch_id is not None:
                 q = q.filter(Room.branch_id == branch_id)
+            
+            if status:
+                q = q.filter(Room.status == status)
+            
+            if room_type_id is not None:
+                if isinstance(room_type_id, str):
+                    if "," in room_type_id:
+                        # Handle comma-separated list
+                        try:
+                            ids = [int(x.strip()) for x in room_type_id.split(",") if x.strip()]
+                            if ids:
+                                q = q.filter(Room.room_type_id.in_(ids))
+                        except ValueError:
+                            # Fallback if malformed
+                            pass
+                    else:
+                        # Single ID string
+                        try:
+                            q = q.filter(Room.room_type_id == int(room_type_id))
+                        except ValueError:
+                            # Ignore if not an integer string
+                            pass
+                else:
+                    # Single ID (int)
+                    q = q.filter(Room.room_type_id == room_type_id)
+
             rooms = q.order_by(Room.number).offset(skip).limit(limit).all()
 
         except Exception as query_error:
@@ -755,13 +790,34 @@ def _get_rooms_impl(db: Session, branch_id: int, skip: int = 0, limit: int = 20)
         raise HTTPException(status_code=500, detail=f"Error fetching rooms: {str(e)}")
 
 @router.get("", response_model=list[RoomOut])
-def get_rooms(db: Session = Depends(get_db), skip: int = 0, limit: int = 20, current_user: User = Depends(require_permission("rooms:view")), branch_id: int = Depends(get_branch_id)):
-    return _get_rooms_impl(db, branch_id, skip, limit)
+def get_rooms(
+    db: Session = Depends(get_db), 
+    skip: int = 0, 
+    limit: int = 20, 
+    status: Optional[str] = None, 
+    room_type_id: Optional[Union[int, str]] = None, 
+    branch_id_query: Optional[int] = Query(None, alias="branch_id"),
+    current_user: User = Depends(require_permission("rooms:view")), 
+    branch_id: int = Depends(get_branch_id)
+):
+    effective_branch_id = branch_id_query if branch_id_query is not None else branch_id
+    print(f"[DEBUG-ROOMS] Fetching rooms for effective_branch_id: {effective_branch_id} (Query: {branch_id_query}, Context: {branch_id})")
+    return _get_rooms_impl(db, effective_branch_id, skip, limit, status, room_type_id)
 
 
 @router.get("/", response_model=list[RoomOut])  # Handle trailing slash
-def get_rooms_slash(db: Session = Depends(get_db), skip: int = 0, limit: int = 20, current_user: User = Depends(get_current_user), branch_id: int = Depends(get_branch_id)):
-    return _get_rooms_impl(db, branch_id, skip, limit)
+def get_rooms_slash(
+    db: Session = Depends(get_db), 
+    skip: int = 0, 
+    limit: int = 20, 
+    status: Optional[str] = None, 
+    room_type_id: Optional[Union[int, str]] = None, 
+    branch_id_query: Optional[int] = Query(None, alias="branch_id"),
+    current_user: User = Depends(get_current_user), 
+    branch_id: int = Depends(get_branch_id)
+):
+    effective_branch_id = branch_id_query if branch_id_query is not None else branch_id
+    return _get_rooms_impl(db, effective_branch_id, skip, limit, status, room_type_id)
 
 
 
@@ -841,7 +897,7 @@ def update_room(
         db_room.room_type_id = room_type_id
     if status:
         if db_room.status == "Maintenance" and status == "Available":
-             db_room.last_maintenance_date = date.today()
+             db_room.last_maintenance_date = get_ist_today().date()
         db_room.status = status
     if housekeeping_status:
         db_room.housekeeping_status = housekeeping_status
@@ -928,3 +984,131 @@ def get_room_stats(db: Session = Depends(get_db), branch_id: int = Depends(get_b
         "maintenance": maintenance,
         "dirty": dirty
     }
+
+
+# ---------------- ROOM ACTIVITY TRACKING ----------------
+@router.get("/{room_id}/inventory-usage")
+def get_room_inventory_usage(
+    room_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get inventory usage history for a specific room.
+    Returns items consumed/used in this room with employee and guest information.
+    """
+    try:
+        # Get room to verify it exists
+        room = db.query(Room).filter(Room.id == room_id).first()
+        if not room:
+            raise HTTPException(status_code=404, detail="Room not found")
+        
+        # Get inventory transactions for this room's location
+        if not room.inventory_location_id:
+            return []
+        
+        from sqlalchemy import or_
+        transactions = db.query(InventoryTransaction).filter(
+            or_(
+                InventoryTransaction.source_location_id == room.inventory_location_id,
+                InventoryTransaction.destination_location_id == room.inventory_location_id
+            )
+        ).order_by(InventoryTransaction.created_at.desc()).limit(100).all()
+        
+        result = []
+        for trans in transactions:
+            item = db.query(InventoryItem).filter(InventoryItem.id == trans.item_id).first()
+            employee = db.query(Employee).filter(Employee.id == trans.employee_id).first() if hasattr(trans, 'employee_id') and trans.employee_id else None
+            
+            # Use created_at if transaction_date doesn't exist
+            timestamp = trans.transaction_date if hasattr(trans, 'transaction_date') else trans.created_at
+
+            result.append({
+                "item_name": item.name if item else "Unknown Item",
+                "quantity": abs(trans.quantity) if trans.transaction_type in ['consumption', 'sale'] else trans.quantity,
+                "used_by_name": employee.name if employee else "System",
+                "used_at": format_iso_z(timestamp),
+                "guest_used": trans.transaction_type == 'sale',  # Sales are typically guest-related
+                "transaction_type": trans.transaction_type,
+                "notes": trans.notes
+            })
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error fetching room inventory usage: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching inventory usage: {str(e)}")
+
+@router.get("/{room_id}/activity-log")
+def get_room_activity_log(
+    room_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get complete activity log for a specific room including:
+    - Service requests
+    - Cleaning/housekeeping
+    - Bookings (check-ins/check-outs)
+    - Maintenance activities
+    """
+    try:
+        # Get room to verify it exists
+        room = db.query(Room).filter(Room.id == room_id).first()
+        if not room:
+            raise HTTPException(status_code=404, detail="Room not found")
+        
+        activities = []
+        
+        # 1. Service Requests
+        service_requests = db.query(ServiceRequest).filter(
+            ServiceRequest.room_id == room_id
+        ).order_by(ServiceRequest.created_at.desc()).limit(50).all()
+        
+        for sr in service_requests:
+            employee = db.query(Employee).filter(Employee.id == sr.employee_id).first() if sr.employee_id else None
+            activities.append({
+                "type": "service",
+                "description": f"{sr.request_type}: {sr.description or 'No description'}",
+                "performed_by": employee.name if employee else "Unassigned",
+                "timestamp": format_iso_z(sr.completed_at) if (hasattr(sr, 'completed_at') and sr.completed_at) else format_iso_z(sr.created_at),
+                "status": sr.status
+            })
+        
+        # 2. Bookings (Check-ins/Check-outs)
+        bookings = db.query(Booking).join(BookingRoom).filter(
+            BookingRoom.room_id == room_id
+        ).order_by(Booking.check_in.desc()).limit(20).all()
+        
+        for booking in bookings:
+            # Check-in activity
+            activities.append({
+                "type": "booking",
+                "description": f"Guest check-in: {booking.guest_name}",
+                "performed_by": "Front Desk",
+                "timestamp": format_iso_z(booking.check_in),
+                "status": booking.status
+            })
+            
+            # Check-out activity (if applicable)
+            if booking.check_out and booking.status in ['checked-out', 'completed']:
+                activities.append({
+                    "type": "booking",
+                    "description": f"Guest check-out: {booking.guest_name}",
+                    "performed_by": "Front Desk",
+                    "timestamp": format_iso_z(booking.check_out),
+                    "status": booking.status
+                })
+        
+        # Sort all activities by timestamp (most recent first)
+        activities.sort(key=lambda x: x['timestamp'] if x['timestamp'] else '', reverse=True)
+        
+        return activities[:100]  # Return top 100 most recent activities
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error fetching room activity log: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching activity log: {str(e)}")

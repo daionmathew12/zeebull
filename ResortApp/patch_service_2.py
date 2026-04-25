@@ -1,6 +1,6 @@
 
 import sys
-from datetime import datetime
+from datetime import timezone, datetime
 
 new_logic = """                            # --- CLEANED UP RETURN/USAGE/LAUNDRY/WASTE PROCESSING ---
                             quantity_returned = float(return_item.quantity_returned or 0.0)
@@ -57,7 +57,7 @@ new_logic = """                            # --- CLEANED UP RETURN/USAGE/LAUNDRY
                                         destination_location_id=laundry_loc.id,
                                         source_location_id=assigned.room.inventory_location_id if assigned.room else None,
                                         notes=f"Auto-collected Dirty Linen from Room {assigned.room.number if assigned.room else 'Unknown'} (Svc: {assigned.service.name})",
-                                        created_by=updated_by, branch_id=assigned.branch_id, created_at=datetime.utcnow()
+                                        created_by=updated_by, branch_id=assigned.branch_id, created_at=datetime.now(timezone.utc)
                                     ))
                                     
                                     # Add to LaundryLog
@@ -84,7 +84,7 @@ new_logic = """                            # --- CLEANED UP RETURN/USAGE/LAUNDRY
                                         reference_number=f"SVC-USAGE-{assigned_id}",
                                         department=item.category.name if item.category else "Housekeeping",
                                         notes=f"Consumed during Service: {assigned.service.name}",
-                                        created_by=updated_by, branch_id=assigned.branch_id, created_at=datetime.utcnow()
+                                        created_by=updated_by, branch_id=assigned.branch_id, created_at=datetime.now(timezone.utc)
                                     ))
 
                             # 3. Handle Clean Returns (Back to Store)
@@ -118,14 +118,14 @@ new_logic = """                            # --- CLEANED UP RETURN/USAGE/LAUNDRY
 
                             # Finalize Status
                             if (assignment.quantity_returned + assignment.quantity_used + quantity_damaged + quantity_missing) >= assignment.quantity_assigned:
-                                assignment.is_returned = True; assignment.status = "returned"; assignment.returned_at = datetime.utcnow()
+                                assignment.is_returned = True; assignment.status = "returned"; assignment.returned_at = datetime.now(timezone.utc)
                             else: assignment.status = "partially_returned" """
 
 with open('app/curd/service.py', 'r', encoding='utf-8') as f:
     content = f.read()
 
 start_marker = '                            # --- CLEANED UP RETURN/USAGE/LAUNDRY/WASTE PROCESSING ---'
-end_marker = '                                assignment.is_returned = True; assignment.status = "returned"; assignment.returned_at = datetime.utcnow()'
+end_marker = '                                assignment.is_returned = True; assignment.status = "returned"; assignment.returned_at = datetime.now(timezone.utc)'
 
 start_idx = content.find(start_marker)
 end_idx = content.find(end_marker, start_idx + 1) + len(end_marker) + 53 # a bit extra for the else

@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, text
-from datetime import datetime
+from datetime import timezone, datetime
 from app.database import Base
 
 class Branch(Base):
@@ -18,7 +18,7 @@ class Branch(Base):
     twitter = Column(String, nullable=True)
     linkedin = Column(String, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True, server_default=text('true'))
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, server_default=text('CURRENT_TIMESTAMP'))
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), server_default=text('CURRENT_TIMESTAMP'))
     
     def __repr__(self):
         return f"<Branch id={self.id} name={self.name} code={self.code}>"

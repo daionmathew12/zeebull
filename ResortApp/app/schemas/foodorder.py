@@ -24,6 +24,8 @@ class FoodOrderItemOut(BaseModel):
     food_item_id: int
     quantity: int
     food_item_name: Optional[str] = None
+    price: Optional[float] = None
+    subtotal: Optional[float] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -47,6 +49,8 @@ class FoodOrderOut(BaseModel):
     created_at: Optional[datetime] = None
     booking_id: Optional[int] = None
     package_booking_id: Optional[int] = None
+    gst_amount: Optional[float] = 0.0
+    total_with_gst: Optional[float] = 0.0
 
     model_config = ConfigDict(from_attributes=True)
 

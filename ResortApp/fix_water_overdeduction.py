@@ -3,7 +3,7 @@ Fix water over-deduction - add back 4 pcs that were deducted twice
 """
 from app.database import SessionLocal
 from app.models.inventory import InventoryItem, InventoryTransaction
-from datetime import datetime
+from datetime import timezone, datetime
 
 
 def fix_water_overdeduction():
@@ -83,7 +83,7 @@ def fix_water_overdeduction():
                 department=water.category.parent_department if water.category else "Housekeeping",
                 notes=f"Adjustment to fix over-deduction - Water was deducted twice for Room 102",
                 created_by=None,
-                created_at=datetime.utcnow()
+                created_at=datetime.now(timezone.utc)
             )
             db.add(transaction)
             db.commit()

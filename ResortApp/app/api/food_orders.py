@@ -57,7 +57,10 @@ def get_orders(
 ):
     crud.trigger_scheduled_orders(db, branch_id=branch_id)
     limit = optimize_limit(limit, MAX_LIMIT_LOW_NETWORK)
-    return crud.get_food_orders(db, branch_id=branch_id, skip=skip, limit=limit, room_id=room_id, booking_id=booking_id, package_booking_id=package_booking_id, user_id=user_id)
+    orders = crud.get_food_orders(db, branch_id=branch_id, skip=skip, limit=limit, room_id=room_id, booking_id=booking_id, package_booking_id=package_booking_id, user_id=user_id)
+    if orders:
+        print(f"[DEBUG-API] Order #{orders[0].id} items: {[(i.food_item_name, getattr(i, 'price', 'N/A'), getattr(i, 'subtotal', 'N/A')) for i in orders[0].items]}")
+    return orders
 
 
 @router.get("/", response_model=List[FoodOrderOut])  # Handle trailing slash
@@ -132,6 +135,17 @@ def update_order(
     return updated
 
 
+@router.put("/{order_id}/", response_model=FoodOrderOut)  # Handle trailing slash
+def update_order_slash(
+    order_id: int, 
+    order_update: FoodOrderUpdate, 
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user),
+    branch_id: int = Depends(get_branch_id)
+):
+    return update_order(order_id, order_update, db, current_user, branch_id)
+
+
 @router.post("/{order_id}/mark-paid")
 def mark_order_paid(
     order_id: int,
@@ -146,7 +160,7 @@ def mark_order_paid(
     Calculates GST (5%) and updates payment details.
     """
     from app.models.foodorder import FoodOrder
-    from datetime import datetime
+    from datetime import timezone, datetime
     
     order = db.query(FoodOrder).filter(FoodOrder.id == order_id, FoodOrder.branch_id == branch_id).first()
 
@@ -164,7 +178,7 @@ def mark_order_paid(
     # Update order with payment details
     order.billing_status = "paid"
     order.payment_method = payment_method
-    order.payment_time = datetime.utcnow()
+    order.payment_time = datetime.now(timezone.utc)
     order.gst_amount = gst_amount
     order.total_with_gst = total_with_gst
     

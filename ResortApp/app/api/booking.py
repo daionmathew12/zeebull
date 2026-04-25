@@ -7,6 +7,7 @@ _UPLOAD_ROOT = os.path.join(_BASE_DIR, "uploads")
 from sqlalchemy.orm import Session, joinedload, load_only
 from sqlalchemy import func, or_, and_
 from typing import List, Union, Optional
+from datetime import date, datetime
 from app.utils.auth import get_db, get_current_user
 from app.utils.api_optimization import optimize_limit, MAX_LIMIT_LOW_NETWORK
 from app.utils.booking_id import parse_display_id, format_display_id
@@ -26,6 +27,7 @@ import uuid
 from app.curd import foodorder as crud_food_order
 from app.schemas.foodorder import FoodOrderCreate, FoodOrderItemCreate
 from app.utils.employee_helpers import get_fallback_employee_id
+from app.utils.date_utils import get_ist_now, get_ist_today
 
 UPLOAD_DIR = os.path.join(_UPLOAD_ROOT, "checkin_proofs")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -35,7 +37,7 @@ from pydantic import BaseModel, ValidationError
 # Detailed Model Imports
 from app.models.foodorder import FoodOrder
 from app.models.service import AssignedService
-from app.models.inventory import StockIssue, StockIssueDetail, InventoryItem, Location
+from app.models.inventory import StockIssue, StockIssueDetail, InventoryItem, Location, AssetMapping, LocationStock
 
 class PaginatedBookingResponse(BaseModel):
     total: int
@@ -53,6 +55,9 @@ def get_bookings(
     order: str = "desc",
     fields: Optional[str] = None,
     room_id: Optional[int] = None,
+    status: Optional[str] = None,
+    guest_name: Optional[str] = None,
+    check_in_date: Optional[str] = None,
     branch_id: int = Depends(get_branch_id)
 ):
 
@@ -67,6 +72,19 @@ def get_bookings(
         if branch_id is not None:
              query = query.filter(Booking.branch_id == branch_id)
 
+        if status:
+            query = query.filter(Booking.status.ilike(status))
+        
+        if guest_name:
+            query = query.filter(Booking.guest_name.ilike(f"%{guest_name}%"))
+            
+        if check_in_date:
+            try:
+                from datetime import datetime
+                d = datetime.strptime(check_in_date, '%Y-%m-%d').date()
+                query = query.filter(Booking.check_in == d)
+            except:
+                pass
 
         if room_id:
             query = query.join(BookingRoom).filter(BookingRoom.room_id == room_id)
@@ -196,10 +214,10 @@ def get_bookings(
                     
                     # Handle potential string dates from unexpected sources
                     if isinstance(d_in, str):
-                        from datetime import datetime
+                        from datetime import timezone, datetime
                         d_in = datetime.strptime(d_in, '%Y-%m-%d').date()
                     if isinstance(d_out, str):
-                        from datetime import datetime
+                        from datetime import timezone, datetime
                         d_out = datetime.strptime(d_out, '%Y-%m-%d').date()
                         
                     stay_days = (d_out - d_in).days
@@ -266,7 +284,10 @@ def _fetch_extras(db: Session, room_ids: List[int], check_in, check_out):
     # Fetch food orders for these rooms created during the stay
     # We use a permissive date filter (created_at >= check_in)
     # Note: check_out is usually noon, so orders on check_out day before checkout are valid.
-    query = db.query(FoodOrder).options(joinedload(FoodOrder.items)).filter(
+    from app.models.foodorder import FoodOrderItem
+    query = db.query(FoodOrder).options(
+        joinedload(FoodOrder.items).joinedload(FoodOrderItem.food_item)
+    ).filter(
         FoodOrder.room_id.in_(room_ids),
         FoodOrder.created_at >= check_in
     )
@@ -289,7 +310,7 @@ def _fetch_extras(db: Session, room_ids: List[int], check_in, check_out):
         result.append({
             "id": o.id,
             "items": items_summary, # Simplified list of strings
-            "amount": o.amount,
+            "amount": o.total_with_gst or o.amount,
             "status": o.status,
             "created_at": o.created_at
         })
@@ -313,14 +334,22 @@ def _fetch_services(db: Session, room_ids: List[int], check_in, check_out):
         "service_name": s.service.name if s.service else "Unknown Service",
         "charges": s.service.charges if s.service else 0.0,
         "status": s.status,
-        "assigned_at": s.assigned_at
+        "assigned_at": s.assigned_at,
+        "is_rental": (s.service.charges > 0 if s.service else False) or ("rental" in (s.service.name.lower() if s.service else ""))
     } for s in services]
 
-def _fetch_inventory(db: Session, room_ids: List[int], check_in, check_out, booking_id: Optional[int] = None):
+def _fetch_inventory(db: Session, room_ids: List[int], check_in: Union[date, datetime], check_out: Optional[Union[date, datetime]], booking_id: int = None, branch_id: int = None):
     if not room_ids and not booking_id:
         return []
         
-    # Fetch stock issues
+    # Get location IDs for rooms
+    rooms = db.query(Room).filter(Room.id.in_(room_ids)).all()
+    location_ids = [r.inventory_location_id for r in rooms if r.inventory_location_id]
+    
+    # Aggregation Logic to prevent duplicates
+    aggregated = {}
+
+    # 1. Fetch stock issues (Temporary usage/consumables)
     query = (
         db.query(StockIssueDetail)
         .join(StockIssue)
@@ -328,62 +357,123 @@ def _fetch_inventory(db: Session, room_ids: List[int], check_in, check_out, book
     )
     
     if booking_id:
-        # If we have booking_id, it is the most reliable filter
         query = query.filter(StockIssue.booking_id == booking_id)
+        if branch_id is not None:
+             query = query.filter(StockIssue.branch_id == branch_id)
     else:
-        # Fallback to room + date logic for legacy data or if booking_id not linked
-        rooms = db.query(Room).filter(Room.id.in_(room_ids)).all()
-        location_ids = [r.inventory_location_id for r in rooms if r.inventory_location_id]
         if not location_ids:
             return []
         query = query.filter(StockIssue.destination_location_id.in_(location_ids))
+        if branch_id is not None:
+             query = query.filter(StockIssue.branch_id == branch_id)
         query = query.filter(StockIssue.issue_date >= check_in)
         if check_out:
             query = query.filter(func.date(StockIssue.issue_date) <= check_out)
 
     query = query.options(joinedload(StockIssueDetail.item).joinedload(InventoryItem.category))
-        
     details = query.all()
     
-    # Aggregation Logic to prevent duplicates
-    aggregated = {}
-    
     for d in details:
-        # Create a unique key for grouping
-        # We group by Item ID ONLY.
-        # This merges "Payable" and "Complimentary" entries for the same item.
-        key = d.item_id
-        
+        key = f"issue_{d.item_id}"
         if key not in aggregated:
+            is_fixed = d.item.is_asset_fixed if d.item else False
             aggregated[key] = {
                 "item_name": d.item.name if d.item else "Unknown",
                 "quantity": 0.0,
-                "complimentary_qty": 0.0, # Added for detailed split
-                "payable_qty": 0.0,       # Added for detailed split
+                "complimentary_qty": 0.0,
+                "payable_qty": 0.0,
                 "unit": d.unit,
                 "category": d.item.category.name if d.item and d.item.category else None,
-                "issued_at": d.issue.issue_date, # Use the first date found
-                "is_payable": False, # Will determine based on content
+                "issued_at": d.issue.issue_date,
+                "is_payable": False,
                 "unit_price": d.unit_price or 0.0,
                 "is_damaged": d.is_damaged or False,
-                "notes": d.damage_notes if d.is_damaged else d.notes
+                "notes": d.damage_notes if d.is_damaged else d.notes,
+                "is_asset_fixed": is_fixed,
+                "is_consumable": not is_fixed,
+                "is_rental": (d.rental_price is not None and d.rental_price > 0),
+                "track_laundry_cycle": d.item.track_laundry_cycle if d.item else False,
+                "v": 2,
+                "type": "asset" if is_fixed else "consumable"
             }
         
-        # Sum quantities
         qty = (d.issued_quantity or 0)
         aggregated[key]["quantity"] += qty
-        
         if d.is_payable:
             aggregated[key]["payable_qty"] += qty
-            aggregated[key]["is_payable"] = True # Mark as having payable component
+            aggregated[key]["is_payable"] = True
         else:
             aggregated[key]["complimentary_qty"] += qty
-
-        # Updates: If current item is damaged, mark aggregate as damaged
         if d.is_damaged:
             aggregated[key]["is_damaged"] = True
-            if d.damage_notes and not aggregated[key]["notes"]:
-                aggregated[key]["notes"] = d.damage_notes
+
+    # 2. Fetch Fixed Asset Mappings (Permanent fixtures)
+    if location_ids:
+        mapping_query = db.query(AssetMapping).join(InventoryItem).filter(
+            AssetMapping.location_id.in_(location_ids),
+            AssetMapping.is_active == True
+        )
+        if branch_id is not None:
+            mapping_query = mapping_query.filter(AssetMapping.branch_id == branch_id)
+            
+        mappings = mapping_query.options(joinedload(AssetMapping.item).joinedload(InventoryItem.category)).all()
+        
+        for m in mappings:
+            # Avoid duplicate if already in aggregated from StockIssue (unlikely for fixed assets but safe)
+            key = f"fixed_{m.item_id}"
+            if key not in aggregated:
+                is_fixed = m.item.is_asset_fixed if m.item else True
+                aggregated[key] = {
+                    "item_name": m.item.name if m.item else "Unknown Asset",
+                    "quantity": m.quantity or 1.0,
+                    "complimentary_qty": m.quantity or 1.0,
+                    "payable_qty": 0.0,
+                    "unit": m.item.unit if m.item else "pcs",
+                    "category": m.item.category.name if m.item and m.item.category else "Fixed Asset",
+                    "issued_at": m.assigned_date,
+                    "is_payable": False,
+                    "unit_price": m.item.unit_price if m.item else 0.0,
+                    "is_damaged": False,
+                    "notes": m.notes,
+                    "is_asset_fixed": is_fixed,
+                    "is_consumable": not is_fixed,
+                    "type": "asset" if is_fixed else "consumable"
+                }
+
+    # 3. Fetch Location Stock (Current items in room/location)
+    if location_ids:
+        stock_query = db.query(LocationStock).join(InventoryItem).filter(
+            LocationStock.location_id.in_(location_ids),
+            LocationStock.quantity > 0
+        )
+        if branch_id is not None:
+            stock_query = stock_query.filter(LocationStock.branch_id == branch_id)
+            
+        stocks = stock_query.options(joinedload(LocationStock.item).joinedload(InventoryItem.category)).all()
+        
+        for s in stocks:
+            # Avoid duplication: if item already in aggregated (from AssetMapping or StockIssue), skip it
+            item_id = s.item_id
+            already_present = any(key.split('_')[-1] == str(item_id) for key in aggregated.keys())
+            
+            if not already_present:
+                is_fixed = s.item.is_asset_fixed if s.item else False
+                aggregated[f"stock_{item_id}"] = {
+                    "item_name": s.item.name if s.item else "Unknown",
+                    "quantity": s.quantity,
+                    "complimentary_qty": s.quantity,
+                    "payable_qty": 0.0,
+                    "unit": s.item.unit if s.item else "pcs",
+                    "category": s.item.category.name if s.item and s.item.category else None,
+                    "issued_at": s.last_updated,
+                    "is_payable": False,
+                    "unit_price": s.item.unit_price or 0.0,
+                    "is_damaged": False,
+                    "notes": "Current Location Stock",
+                    "is_asset_fixed": is_fixed,
+                    "is_consumable": not is_fixed,
+                    "type": "asset" if is_fixed else "consumable"
+                }
 
     return list(aggregated.values())
 
@@ -395,6 +485,7 @@ def get_booking_details(booking_id: Union[str, int], is_package: bool, db: Sessi
 
     # Parse display ID (BK-000001 or PK-000001) or accept numeric ID
     numeric_id, booking_type = parse_display_id(str(booking_id))
+    print(f"[DEBUG-API] get_booking_details for {booking_id} (numeric_id={numeric_id}), branch_id from token={branch_id}")
     if numeric_id is None:
         raise HTTPException(status_code=400, detail=f"Invalid booking ID format: {booking_id}")
     
@@ -451,15 +542,15 @@ def get_booking_details(booking_id: Union[str, int], is_package: bool, db: Sessi
                 is_package=True,
                 total_amount=total_amt,
                 num_rooms=getattr(booking, 'num_rooms', 1) or 1,
-                room_type_id=None,
-                room_type_name="Package Details Implied",
+                room_type_id=booking.package.room_types if booking.package else None,
+                room_type_name=booking.package.title if booking.package else "Package Details Implied",
                 checked_in_at=booking.checked_in_at,
                 checked_out_at=booking.checked_out_at,
                 checkout=booking.checkout,
                 rooms=[pbr.room for pbr in booking.rooms if pbr.room],
                 food_orders=_fetch_extras(db, room_ids, start_filter, booking.check_out),
                 service_requests=_fetch_services(db, room_ids, start_filter, booking.check_out),
-                inventory_usage=_fetch_inventory(db, room_ids, start_filter, booking.check_out, booking_id=booking.id)
+                inventory_usage=_fetch_inventory(db, room_ids, start_filter, booking.check_out, booking_id=booking.id, branch_id=booking.branch_id)
             )
         else: # Regular booking
             query = db.query(Booking).options(
@@ -493,10 +584,10 @@ def get_booking_details(booking_id: Union[str, int], is_package: bool, db: Sessi
                     d_out = booking.check_out
                     
                     if isinstance(d_in, str):
-                        from datetime import datetime
+                        from datetime import timezone, datetime
                         d_in = datetime.strptime(d_in, '%Y-%m-%d').date()
                     if isinstance(d_out, str):
-                        from datetime import datetime
+                        from datetime import timezone, datetime
                         d_out = datetime.strptime(d_out, '%Y-%m-%d').date()
                         
                     stay_days = (d_out - d_in).days
@@ -526,6 +617,10 @@ def get_booking_details(booking_id: Union[str, int], is_package: bool, db: Sessi
             
             room_ids = [r.room_id for r in booking.booking_rooms if r.room_id]
             start_filter = booking.checked_in_at or booking.check_in
+            
+            # If checked-in, don't cap the end date at theoretical check_out 
+            # so that overstays/test-data orders are still visible.
+            end_filter = None if booking.status.lower().strip() == 'checked-in' else booking.check_out
 
             return BookingOut(
                 id=booking.id,
@@ -550,9 +645,9 @@ def get_booking_details(booking_id: Union[str, int], is_package: bool, db: Sessi
                 checked_out_at=booking.checked_out_at,
                 checkout=booking.checkout,
                 rooms=[br.room for br in booking.booking_rooms if br.room],
-                food_orders=_fetch_extras(db, room_ids, start_filter, booking.check_out),
-                service_requests=_fetch_services(db, room_ids, start_filter, booking.check_out),
-                inventory_usage=_fetch_inventory(db, room_ids, start_filter, booking.check_out, booking_id=booking.id)
+                food_orders=_fetch_extras(db, room_ids, start_filter, end_filter),
+                service_requests=_fetch_services(db, room_ids, start_filter, end_filter),
+                inventory_usage=_fetch_inventory(db, room_ids, start_filter, end_filter, booking_id=booking.id, branch_id=booking.branch_id)
             )
     except Exception as e:
         print(f"Error getting booking details: {e}")
@@ -666,6 +761,7 @@ def get_or_create_guest_user(db: Session, email: str, mobile: str, name: str, br
 
 from pydantic import BaseModel
 from datetime import date
+from app.utils.date_utils import get_ist_today
 from typing import List
 
 class PriceCalculationRequest(BaseModel):
@@ -1006,7 +1102,7 @@ def check_in_booking(
                         if conflict:
                             raise HTTPException(status_code=400, detail=f"Room {target_room.number} is already booked for these dates.")
 
-                        new_br = BookingRoom(booking_id=booking.id, room_id=r_id)
+                        new_br = BookingRoom(booking_id=booking.id, room_id=r_id, branch_id=branch_id)
                         db.add(new_br)
                 
                 db.flush()
@@ -1027,7 +1123,7 @@ def check_in_booking(
             import json
             from app.models.foodorder import FoodOrder, FoodOrderItem
             from app.models.food_item import FoodItem
-            from datetime import datetime, timedelta, date, time
+            from datetime import timezone, datetime, timedelta, date, time
             
             alloc_data = json.loads(amenityAllocation)
             items = alloc_data.get("items", [])
@@ -1038,7 +1134,7 @@ def check_in_booking(
                 room_id = booking.booking_rooms[0].room_id
             
             if items and room_id:
-                check_in_date = date.today()
+                check_in_date = get_ist_today().date()
                 
                 for item in items:
                     name = item.get("name")
@@ -1062,7 +1158,7 @@ def check_in_booking(
                                  s_year, s_month, s_day = map(int, scheduled_date_str.split("-"))
                                  scheduled_dt = datetime(s_year, s_month, s_day, sh, sm)
                              else:
-                                 now = datetime.now()
+                                 now = get_ist_now()
                                  scheduled_dt = datetime.combine(check_in_date, time(sh, sm))
                                  if scheduled_dt < now:
                                      scheduled_dt = scheduled_dt + timedelta(days=1)
@@ -1168,8 +1264,8 @@ def check_in_booking(
 
     booking.status = "checked-in"
     # Set the actual check-in timestamp for strict bill scoping
-    from datetime import datetime
-    booking.checked_in_at = datetime.utcnow()
+    from datetime import timezone, datetime
+    booking.checked_in_at = datetime.now(timezone.utc)
 
     # Save the ID of the user who performed the check-in
     booking.user_id = current_user.id
@@ -1189,14 +1285,15 @@ def check_in_booking(
         formatted_booking_id = format_display_id(booking_id, branch_id=branch_id)
         
         notification = Notification(
-            user_id=current_user.id,
+            recipient_id=current_user.id,
+            branch_id=branch_id,
             title=f"Guest Checked In - {formatted_booking_id}",
             message=f"Guest {booking.guest_name} has successfully checked in. Booking ID: {formatted_booking_id}, Room(s): {room_numbers}",
             type="check_in",
             reference_id=booking_id,
             reference_type="booking",
             is_read=False,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         db.add(notification)
     except Exception as e:
@@ -1236,7 +1333,7 @@ def check_in_booking(
                         stock_issue = StockIssue(
                             source_location_id=source_id,
                             destination_location_id=room.inventory_location_id,
-                            issue_date=datetime.utcnow(),
+                            issue_date=datetime.now(timezone.utc),
                             status="approved", # Auto-approve system issues
                             issued_by_id=current_user.id,
                             reference_number=f"CHK-IN-{booking_id}-{room.number}",
@@ -1257,7 +1354,7 @@ def check_in_booking(
                             qty_per_stay = float(item.get("complimentaryPerStay", 0))
                             
                             # Stay duration
-                            from datetime import date
+                            from datetime import timezone, date
                             check_in_dt = booking.check_in if isinstance(booking.check_in, date) else datetime.strptime(str(booking.check_in), '%Y-%m-%d').date()
                             check_out_dt = booking.check_out if isinstance(booking.check_out, date) else datetime.strptime(str(booking.check_out), '%Y-%m-%d').date()
                             nights = max(1, (check_out_dt - check_in_dt).days)
@@ -1290,13 +1387,13 @@ def check_in_booking(
                                 
                                 if loc_stock:
                                     loc_stock.quantity = (loc_stock.quantity or 0) + total_qty
-                                    loc_stock.last_updated = datetime.utcnow()
+                                    loc_stock.last_updated = datetime.now(timezone.utc)
                                 else:
                                     loc_stock = LocationStock(
                                         location_id=room.inventory_location_id,
                                         item_id=item_id,
                                         quantity=total_qty,
-                                        last_updated=datetime.utcnow()
+                                        last_updated=datetime.now(timezone.utc)
                                     )
                                     db.add(loc_stock)
         except Exception as e:
@@ -1378,7 +1475,7 @@ def extend_checkout(
     and checks for conflicts with other bookings on the same rooms.
     Accepts both display ID (BK-000001) and numeric ID.
     """
-    from datetime import datetime
+    from datetime import timezone, datetime
     
     # Parse display ID (BK-000001) or accept numeric ID
     numeric_id, booking_type = parse_display_id(str(booking_id))

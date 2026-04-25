@@ -3,7 +3,7 @@ Helper functions for comprehensive checkout system
 """
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from datetime import datetime, date, time
+from datetime import timezone, datetime, date, time
 from typing import List, Dict, Optional
 from app.models.inventory import InventoryItem, InventoryTransaction, Location
 from app.models.room import Room
@@ -167,14 +167,14 @@ def deduct_room_consumables(db: Session, room_id: int, consumables: List[Consuma
             if loc_stock:
                 if loc_stock.quantity >= quantity_to_deduct:
                     loc_stock.quantity -= quantity_to_deduct
-                    loc_stock.last_updated = datetime.utcnow()
+                    loc_stock.last_updated = datetime.now(timezone.utc)
                 else:
                     # Logic if consumed more than stock (possible if stock tracking was off)
                     # Force update or just set to 0? Let's allow negative or just zero out?
                     # Safer to just deduct and let it go negative if needed to track discrepancy, 
                     # but for now let's just deduct.
                     loc_stock.quantity -= quantity_to_deduct
-                    loc_stock.last_updated = datetime.utcnow()
+                    loc_stock.last_updated = datetime.now(timezone.utc)
             
             # Create inventory transaction
             # Transaction type "out" implies consumption/removal from asset list
@@ -238,7 +238,7 @@ def trigger_linen_cycle(db: Session, room_id: int, checkout_id: int, branch_id: 
             room_number=room.number,
             quantity=qty,
             status="Incomplete Washing",
-            sent_at=datetime.utcnow(),
+            sent_at=datetime.now(timezone.utc),
             branch_id=branch_id
         )
         db.add(laundry_log)

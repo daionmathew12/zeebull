@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum, Table, Boolean
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import timezone, datetime
 from app.database import Base
 import enum
 
@@ -17,7 +17,7 @@ service_inventory_item = Table(
     Column('service_id', Integer, ForeignKey('services.id'), primary_key=True),
     Column('inventory_item_id', Integer, ForeignKey('inventory_items.id'), primary_key=True),
     Column('quantity', Float, default=1.0, nullable=False),  # Quantity of item needed for this service
-    Column('created_at', DateTime, default=datetime.utcnow)
+    Column('created_at', DateTime, default=lambda: datetime.now(timezone.utc))
 )
 
 class Service(Base):
@@ -29,8 +29,8 @@ class Service(Base):
     gst_rate = Column(Float, default=0.18)  # GST rate for this service (default 18%)
     is_visible_to_guest = Column(Boolean, default=False, nullable=False)  # Toggle for guest visibility
     average_completion_time = Column(String, nullable=True)  # e.g., "30 minutes", "1 hour"
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     
     # Relationships
     images = relationship("ServiceImage", back_populates="service", cascade="all, delete-orphan")
@@ -48,10 +48,10 @@ class AssignedService(Base):
     room_id = Column(Integer, ForeignKey("rooms.id"))
     booking_id = Column(Integer, ForeignKey("bookings.id"), nullable=True)
     package_booking_id = Column(Integer, ForeignKey("package_bookings.id"), nullable=True)
-    assigned_at = Column(DateTime, default=datetime.utcnow)
+    assigned_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     status = Column(Enum(ServiceStatus), default=ServiceStatus.pending)
     billing_status = Column(String, default="unbilled")
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 

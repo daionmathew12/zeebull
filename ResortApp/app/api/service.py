@@ -503,6 +503,7 @@ def _list_services_impl(db: Session, skip: int = 0, limit: int = 20, branch_id: 
 
 
 @router.get("", response_model=List[service_schema.ServiceOut])
+@router.get("/", response_model=List[service_schema.ServiceOut])
 def list_services(db: Session = Depends(get_db), current_user: User = Depends(get_current_user), skip: int = 0, limit: int = 20, branch_id: Optional[int] = Depends(get_branch_id)):
     try:
         print(f"[DEBUG] list_services called with skip={skip}, limit={limit}, branch_id={branch_id}")
@@ -728,6 +729,7 @@ def assign_service(
         raise HTTPException(status_code=500, detail=error_detail)
 
 @router.get("/assigned", response_model=List[service_schema.AssignedServiceOut])
+@router.get("/assigned/", response_model=List[service_schema.AssignedServiceOut])
 def get_all_assigned_services(
     db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_user), 
@@ -841,7 +843,7 @@ def update_assigned_status(
     branch_id: int = Depends(get_branch_id)
 ):
     try:
-        updated_service = service_crud.update_assigned_service_status(db, assigned_id, update_data)
+        updated_service = service_crud.update_assigned_service_status(db, assigned_id, update_data, updated_by=current_user.id)
         if not updated_service:
             raise HTTPException(status_code=404, detail="Assigned service not found")
         

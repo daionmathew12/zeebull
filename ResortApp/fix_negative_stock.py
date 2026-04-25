@@ -2,7 +2,7 @@ import sys
 import os
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-from datetime import datetime
+from datetime import timezone, datetime
 
 # Add parent directory to path
 sys.path.append(os.getcwd())
@@ -32,7 +32,7 @@ def fix_negative_stock():
             
             # 1. Update stock to 0
             stock.quantity = 0
-            stock.last_updated = datetime.utcnow()
+            stock.last_updated = datetime.now(timezone.utc)
             
             # 2. Record Transaction
             txn = InventoryTransaction(

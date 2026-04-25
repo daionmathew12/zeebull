@@ -15,7 +15,7 @@ class ActivityLog(Base):
     user_id = Column(Integer, nullable=True) # If authenticated
     details = Column(Text, nullable=True)    # JSON string or text details
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=True, index=True, server_default="1")
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=True, index=True)
     
     branch = relationship("Branch")
 

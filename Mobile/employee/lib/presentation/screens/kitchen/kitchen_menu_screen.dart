@@ -148,7 +148,7 @@ class _KitchenMenuScreenState extends State<KitchenMenuScreen> {
                 borderRadius: BorderRadius.circular(12),
                 image: imageUrl != null && imageUrl.isNotEmpty
                     ? DecorationImage(
-                        image: NetworkImage("https://teqmates.com/orchidapi$imageUrl"),
+                        image: NetworkImage("${ApiConstants.imageBaseUrl}$imageUrl"),
                         fit: BoxFit.cover,
                       )
                     : null,

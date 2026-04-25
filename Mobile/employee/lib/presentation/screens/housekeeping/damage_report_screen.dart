@@ -1,10 +1,11 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:orchid_employee/core/constants/app_colors.dart';
 import 'package:orchid_employee/presentation/providers/service_request_provider.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart';
+import 'dart:typed_data';
+
 
 class DamageReportScreen extends StatefulWidget {
   final String roomNumber;
@@ -25,6 +26,8 @@ class _DamageReportScreenState extends State<DamageReportScreen> {
   final _descriptionController = TextEditingController();
   String _selectedCategory = 'Furniture';
   final List<XFile> _images = [];
+  final Map<int, Uint8List> _imageBytes = {};
+
   bool _isSubmitting = false;
 
   final List<String> _categories = [
@@ -46,8 +49,11 @@ class _DamageReportScreenState extends State<DamageReportScreen> {
         imageQuality: 85,
       );
       if (image != null) {
+        final bytes = await image.readAsBytes();
         setState(() {
+          final index = _images.length;
           _images.add(image);
+          _imageBytes[index] = bytes;
         });
       }
     } catch (e) {
@@ -60,7 +66,25 @@ class _DamageReportScreenState extends State<DamageReportScreen> {
   void _removeImage(int index) {
     setState(() {
       _images.removeAt(index);
+      // Rebuild the bytes map to keep indices in sync
+      final newBytes = <int, Uint8List>{};
+      for (int i = 0; i < _images.length; i++) {
+        // This is a bit inefficient but safe for a few images
+        // Or we could just store XFile and Bytes together in a class
+      }
+      // Simpler: just clear and let the next pick handle it, or better:
+      _imageBytes.clear();
+      _fetchBytesForAll(); // Helper to re-read or just store them together
     });
+  }
+
+  Future<void> _fetchBytesForAll() async {
+    for (int i = 0; i < _images.length; i++) {
+       final bytes = await _images[i].readAsBytes();
+       setState(() {
+         _imageBytes[i] = bytes;
+       });
+    }
   }
 
   Future<void> _submitReport() async {
@@ -75,13 +99,11 @@ class _DamageReportScreenState extends State<DamageReportScreen> {
 
     setState(() => _isSubmitting = true);
 
-    final imagePaths = _images.map((img) => img.path).toList();
-    
     final success = await context.read<ServiceRequestProvider>().createDamageReport(
       widget.roomId,
       _selectedCategory,
       _descriptionController.text,
-      imagePaths,
+      _images,
     );
 
     if (mounted) {
@@ -242,24 +264,16 @@ class _DamageReportScreenState extends State<DamageReportScreen> {
                     children: [
                       ClipRRect(
                         borderRadius: BorderRadius.circular(12),
-                        child: kIsWeb
-                            ? Image.network(
-                                _images[index].path,
+                        child: _imageBytes[index] != null
+                            ? Image.memory(
+                                _imageBytes[index]!,
                                 width: double.infinity,
                                 height: double.infinity,
                                 fit: BoxFit.cover,
-                                errorBuilder: (context, error, stackTrace) {
-                                  return Container(
-                                    color: Colors.grey[300],
-                                    child: const Icon(Icons.image, size: 40),
-                                  );
-                                },
                               )
-                            : Image.file(
-                                File(_images[index].path),
-                                width: double.infinity,
-                                height: double.infinity,
-                                fit: BoxFit.cover,
+                            : Container(
+                                color: Colors.grey[300],
+                                child: const Icon(Icons.image, size: 40),
                               ),
                       ),
                       Positioned(

@@ -1,5 +1,5 @@
-from pydantic import BaseModel, validator, field_validator, model_validator
-from typing import List, Optional
+from pydantic import BaseModel, validator, field_validator, model_validator, EmailStr
+from typing import List, Optional, Union
 from datetime import date, datetime
 from .user import UserOut
 from .checkout import CheckoutFull
@@ -34,7 +34,7 @@ class BookingCreate(BaseModel):
     external_id: Optional[str] = None
     guest_name: str
     guest_mobile: str
-    guest_email: str
+    guest_email: EmailStr
     check_in: date
     check_out: date
     adults: int
@@ -77,7 +77,7 @@ class BookingOut(BaseModel):
     advance_deposit: float = 0.0
     source: Optional[str] = "Direct"
     package_name: Optional[str] = None
-    room_type_id: Optional[int] = None       # For soft-allocation bookings
+    room_type_id: Optional[Union[int, str]] = None       # For soft-allocation bookings
     room_type_name: Optional[str] = None     # Resolved room type name
     
     is_id_verified: bool = False

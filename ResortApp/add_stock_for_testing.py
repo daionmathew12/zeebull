@@ -2,7 +2,7 @@ import sys
 import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from datetime import datetime
+from datetime import timezone, datetime
 
 # Add parent directory to path
 sys.path.append(os.getcwd())
@@ -48,14 +48,14 @@ def add_stock():
                 if stock:
                     old_qty = stock.quantity
                     stock.quantity += qty_to_add
-                    stock.last_updated = datetime.utcnow()
+                    stock.last_updated = datetime.now(timezone.utc)
                     print(f"Updated {item.name}: {old_qty} -> {stock.quantity}")
                 else:
                     new_stock = LocationStock(
                         location_id=warehouse.id,
                         item_id=item.id,
                         quantity=qty_to_add,
-                        last_updated=datetime.utcnow()
+                        last_updated=datetime.now(timezone.utc)
                     )
                     db.add(new_stock)
                     print(f"Created stock for {item.name}: {qty_to_add}")
@@ -74,7 +74,7 @@ def add_stock():
                     reference_number="TEST-STOCK-ADD",
                     notes=f"Test stock added to unblock allocation testing",
                     created_by=user_id,
-                    created_at=datetime.utcnow()
+                    created_at=datetime.now(timezone.utc)
                 )
                 db.add(txn)
             else:

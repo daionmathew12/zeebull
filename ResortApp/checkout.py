@@ -214,8 +214,8 @@ def update_checkout_request_status(
     if status == "completed":
         checkout_request.inventory_checked = True
         checkout_request.inventory_checked_by = getattr(current_user, 'name', None) or getattr(current_user, 'email', None) or "system"
-        checkout_request.inventory_checked_at = datetime.utcnow()
-        checkout_request.completed_at = datetime.utcnow()
+        checkout_request.inventory_checked_at = datetime.now(__import__("datetime").timezone.utc)
+        checkout_request.completed_at = datetime.now(__import__("datetime").timezone.utc)
     
     db.commit()
     db.refresh(checkout_request)
@@ -275,7 +275,7 @@ def get_checkout_request_inventory_details(
     def debug_log(msg):
         try:
             with open("checkout_debug.log", "a") as f:
-                f.write(f"[{datetime.utcnow()}] {msg}\n")
+                f.write(f"[{datetime.now(__import__("datetime").timezone.utc)}] {msg}\n")
         except: pass
 
     debug_log(f"START Processing Req {request_id}")
@@ -682,7 +682,7 @@ async def handleCompleteCheckoutRequest(
     
     checkout_request.inventory_checked = True
     checkout_request.inventory_checked_by = getattr(current_user, 'name', None) or getattr(current_user, 'email', None) or "system"
-    checkout_request.inventory_checked_at = datetime.utcnow()
+    checkout_request.inventory_checked_at = datetime.now(__import__("datetime").timezone.utc)
     checkout_request.inventory_notes = payload.inventory_notes
     
     # Store inventory data and calculate charges for missing items
@@ -700,7 +700,7 @@ async def handleCompleteCheckoutRequest(
 
         if payload.items:
             for item in payload.items:
-                item_dict = item.dict()
+                item_dict = item.model_dump()
                 
                 # Populate item details even if missing_qty is 0
                 inv_item = db.query(InventoryItem).options(joinedload(InventoryItem.category)).filter(InventoryItem.id == item.item_id).first()
@@ -858,7 +858,7 @@ async def handleCompleteCheckoutRequest(
                             total_deduct = used_qty + missing_qty
                             if total_deduct > 0:
                                 room_stock_record.quantity = max(0, room_stock_record.quantity - total_deduct)
-                                room_stock_record.last_updated = datetime.utcnow()
+                                room_stock_record.last_updated = datetime.now(__import__("datetime").timezone.utc)
                                 print(f"[CHECKOUT] Deducted used/missing from room stock: {total_deduct} units. Remaining: {room_stock_record.quantity}")
                             
                             # STEP 3: Return Unused From Pool to Warehouse - DISABLED PER USER REQUEST
@@ -919,7 +919,7 @@ async def handleCompleteCheckoutRequest(
                                         location_id=source_loc_id,
                                         item_id=item.item_id,
                                         quantity=unused_qty,
-                                        last_updated=datetime.utcnow()
+                                        last_updated=datetime.now(__import__("datetime").timezone.utc)
                                     )
                                     db.add(new_source_stock)
                                     
@@ -997,7 +997,7 @@ async def handleCompleteCheckoutRequest(
                                         action_taken="Charged to Guest",
                                         notes=f"Checkout Room {checkout_request.room_number}",
                                         reported_by=current_user.id,
-                                        waste_date=datetime.utcnow()
+                                        waste_date=datetime.now(__import__("datetime").timezone.utc)
                                     )
                                     db.add(waste_log)
                                     db.flush()
@@ -1183,7 +1183,7 @@ async def handleCompleteCheckoutRequest(
         room_obj = db.query(Room).filter(Room.number == checkout_request.room_number).first()
         
         for asset in payload.asset_damages:
-            asset_dict = asset.dict()
+            asset_dict = asset.model_dump()
             # Asset damage is always charged
             asset_charge = asset.replacement_cost
             total_missing_charges += asset_charge
@@ -1257,7 +1257,7 @@ async def handleCompleteCheckoutRequest(
                         action_taken="Charged to Guest",
                         notes=f"Damaged asset during checkout - Room {checkout_request.room_number}. {asset.notes or ''}",
                         reported_by=current_user.id,
-                        waste_date=datetime.utcnow()
+                        waste_date=datetime.now(__import__("datetime").timezone.utc)
                     )
                     db.add(waste_log)
                     db.flush() # Ensure visible for next ID generation
@@ -1303,7 +1303,7 @@ async def handleCompleteCheckoutRequest(
                 ).first()
                 if loc_stock:
                     loc_stock.quantity = max(0, loc_stock.quantity - 1)
-                    loc_stock.last_updated = datetime.utcnow()
+                    loc_stock.last_updated = datetime.now(__import__("datetime").timezone.utc)
                     print(f"[CHECKOUT] Deducted LocationStock for damaged asset: {loc_stock.quantity + 1} -> {loc_stock.quantity}")
 
                 # 4b. Deactivate Asset Mapping (DISABLED - User wants persistence until completion)
@@ -1327,7 +1327,7 @@ async def handleCompleteCheckoutRequest(
         checkout_request.inventory_data = []
         
     checkout_request.status = "completed"
-    checkout_request.completed_at = datetime.utcnow()
+    checkout_request.completed_at = datetime.now(__import__("datetime").timezone.utc)
     
     db.commit()
     db.refresh(checkout_request)
@@ -1857,13 +1857,13 @@ def repair_room_checkout_status(room_number: str, db: Session = Depends(get_db),
                                 
                                 if dest_stock:
                                     dest_stock.quantity += qty
-                                    dest_stock.last_updated = datetime.utcnow()
+                                    dest_stock.last_updated = datetime.now(__import__("datetime").timezone.utc)
                                 else:
                                     db.add(LocationStock(
                                         location_id=target_location.id,
                                         item_id=item_stock.item_id,
                                         quantity=qty,
-                                        last_updated=datetime.utcnow()
+                                        last_updated=datetime.now(__import__("datetime").timezone.utc)
                                     ))
                                 
                                 db.add(InventoryTransaction(
@@ -1875,7 +1875,7 @@ def repair_room_checkout_status(room_number: str, db: Session = Depends(get_db),
                                 ))
                                 
                                 item_stock.quantity = 0
-                                item_stock.last_updated = datetime.utcnow()
+                                item_stock.last_updated = datetime.now(__import__("datetime").timezone.utc)
                                 print(f"[CLEANUP] Returned {qty} x {item_name} from Room {room.number}")
             except Exception as e:
                 print(f"[WARNING] Cleanup failed: {e}")
@@ -4194,7 +4194,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
             ).update({
                 "billing_status": "billed",
                 "status": "completed",
-                "last_used_at": datetime.utcnow()
+                "last_used_at": datetime.now(__import__("datetime").timezone.utc)
             })
             
             # 12. Inventory Triggers
@@ -4284,17 +4284,17 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
             #                     
             #                     if wh_stock:
             #                         wh_stock.quantity += qty
-            #                         wh_stock.last_updated = datetime.utcnow()
+            #                         wh_stock.last_updated = datetime.now(__import__("datetime").timezone.utc)
             #                     else:
             #                         db.add(LocationStock(
             #                             location_id=warehouse.id,
             #                             item_id=item_stock.item_id,
             #                             quantity=qty,
-            #                             last_updated=datetime.utcnow()
+            #                             last_updated=datetime.now(__import__("datetime").timezone.utc)
             #                         ))
             #                     
             #                     item_stock.quantity = 0
-            #                     item_stock.last_updated = datetime.utcnow()
+            #                     item_stock.last_updated = datetime.now(__import__("datetime").timezone.utc)
             #                     print(f"[CLEANUP] Returned {qty} x {item_name} from Room {room.number}")
             # except Exception as e:
             #     print(f"[WARNING] Cleanup failed: {e}")
@@ -4786,7 +4786,7 @@ def process_booking_checkout(room_number: str, request: CheckoutRequest, db: Ses
             ).update({
                 "billing_status": "billed",
                 "status": "completed",
-                "last_used_at": datetime.utcnow()
+                "last_used_at": datetime.now(__import__("datetime").timezone.utc)
             })
             
             # 11. Inventory Triggers for all rooms

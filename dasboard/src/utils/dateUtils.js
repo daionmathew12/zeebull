@@ -6,6 +6,21 @@
 const IST_TIMEZONE = 'Asia/Kolkata';
 
 /**
+ * Ensures a date string has a timezone indicator. 
+ * If it's an ISO string missing one, appends 'Z' to treat as UTC.
+ */
+export const ensureUTC = (dateString) => {
+  if (typeof dateString !== 'string') return dateString;
+  if (!dateString.includes('T')) return dateString;
+  
+  // If it contains T but no Z and no + offset after the T
+  if (!dateString.endsWith('Z') && !dateString.includes('+', dateString.indexOf('T'))) {
+    return dateString + 'Z';
+  }
+  return dateString;
+};
+
+/**
  * Helper to ensure we have a valid Date object, treating naive ISO strings as UTC
  * @param {string|Date} dateSource - Input date
  * @returns {Date}

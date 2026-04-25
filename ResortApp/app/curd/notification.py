@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import List, Optional
 from app.models.notification import Notification, NotificationType
 from app.schemas.notification import NotificationCreate
@@ -52,7 +52,7 @@ def mark_notification_as_read(db: Session, notification_id: int) -> Optional[Not
     notification = get_notification(db, notification_id)
     if notification:
         notification.is_read = True
-        notification.read_at = datetime.utcnow()
+        notification.read_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(notification)
     return notification
@@ -61,7 +61,7 @@ def mark_all_as_read(db: Session) -> int:
     """Mark all notifications as read"""
     count = db.query(Notification).filter(Notification.is_read == False).update({
         "is_read": True,
-        "read_at": datetime.utcnow()
+        "read_at": datetime.now(timezone.utc)
     })
     db.commit()
     return count

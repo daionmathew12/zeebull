@@ -30,7 +30,7 @@ class Notification(Base):
     entity_type = Column(String(50), nullable=True)  # e.g., "booking", "service", "expense"
     entity_id = Column(Integer, nullable=True)  # ID of the related entity
     recipient_id = Column(Integer, nullable=True) # ID of the user who receives this notification (NULL for global)
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 

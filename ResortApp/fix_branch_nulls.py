@@ -1,5 +1,5 @@
 import psycopg2
-from datetime import datetime
+from datetime import timezone, datetime
 
 conn = psycopg2.connect("dbname=zeebulldb user=orchid_user password=admin123 host=localhost")
 cur = conn.cursor()
@@ -10,7 +10,7 @@ try:
         UPDATE branches 
         SET is_active = TRUE, created_at = %s 
         WHERE is_active IS NULL OR created_at IS NULL
-    """, (datetime.utcnow(),))
+    """, (datetime.now(timezone.utc),))
     print(f"Updated {cur.rowcount} branch rows")
     
     # Verify

@@ -59,6 +59,15 @@ class BillBreakdown(BaseModel):
     fixed_assets: List[dict] = []  # Fixed assets in room (for clarity)
     
     total_due: float = 0.0
+    
+    # Mobile Compatibility Aliases (Modernized UI expects these specific keys)
+    rent: Optional[float] = 0.0 # maps to room_charges
+    food: Optional[float] = 0.0 # maps to food_charges
+    services: Optional[float] = 0.0 # maps to service_charges
+    penalties: Optional[float] = 0.0 # maps to inventory_charges + asset_damage_charges
+    subtotal: Optional[float] = 0.0 # maps to total_due
+    gst: Optional[float] = 0.0 # maps to total_gst
+    grand_total: Optional[float] = 0.0 # maps to total_due + total_gst before discount
 
 class BillSummary(BaseModel):
     guest_name: str

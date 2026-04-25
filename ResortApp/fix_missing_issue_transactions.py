@@ -1,7 +1,7 @@
 
 import sys
 import os
-from datetime import datetime
+from datetime import timezone, datetime
 
 # Add current directory to path
 sys.path.append(os.getcwd())
@@ -58,7 +58,7 @@ def fix_missing_issue_transactions():
                     department=dest_name, # Where it went
                     notes=f"Stock Issue: {issue.issue_number} -> {dest_name}",
                     created_by=issue.issued_by,
-                    created_at=issue.issue_date or datetime.utcnow()
+                    created_at=issue.issue_date or datetime.now(timezone.utc)
                 )
                 db.add(tx_out)
                 
@@ -73,7 +73,7 @@ def fix_missing_issue_transactions():
                     department=dest_name, 
                     notes=f"Stock Received from {source_name} (Issue: {issue.issue_number})",
                     created_by=issue.issued_by,
-                    created_at=issue.issue_date or datetime.utcnow()
+                    created_at=issue.issue_date or datetime.now(timezone.utc)
                 )
                 db.add(tx_in)
                 

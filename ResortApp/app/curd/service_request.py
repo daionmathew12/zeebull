@@ -5,7 +5,7 @@ from app.models.room import Room
 from app.models.employee import Employee
 from app.schemas.service_request import ServiceRequestCreate, ServiceRequestUpdate
 from typing import List, Optional
-from datetime import datetime
+from datetime import timezone, datetime
 from app.curd.notification import notify_service_request_created, notify_service_request_status_changed
 
 def create_service_request(db: Session, request_data: ServiceRequestCreate, branch_id: int = 1):
@@ -336,10 +336,10 @@ def update_service_request(db: Session, request_id: int, update_data: ServiceReq
         request.billing_status = update_data.billing_status
 
     if update_data.status == "in_progress" and not request.started_at:
-        request.started_at = datetime.utcnow()
+        request.started_at = datetime.now(timezone.utc)
         print(f"[DEBUG] Set started_at for ServiceRequest {request_id}: {request.started_at}")
     elif update_data.status == "completed":
-        request.completed_at = datetime.utcnow()
+        request.completed_at = datetime.now(timezone.utc)
             
         # Resolve linked user for transaction logging (avoid FK violation if employee_id != user_id)
         acting_user_id = None
@@ -512,7 +512,7 @@ def update_service_request(db: Session, request_id: int, update_data: ServiceReq
                                             location_id=room.inventory_location_id,
                                             item_id=item_id,
                                             quantity=qty_to_move,
-                                            last_updated=datetime.utcnow()
+                                            last_updated=datetime.now(timezone.utc)
                                         ))
                                     
                                     # Log Transaction
@@ -563,7 +563,7 @@ def update_service_request(db: Session, request_id: int, update_data: ServiceReq
                             query = db.query(AssignedService).join(Service).filter(
                                 AssignedService.room_id == request.room_id,
                                 AssignedService.employee_id == target_employee_id,
-                                AssignedService.status.notin_(['completed', 'cancelled', 'rejected'])
+                                AssignedService.status.notin_(['completed', 'cancelled'])
                             )
                             
                             # Apply name filter based on request type to avoid false positives
@@ -590,8 +590,8 @@ def update_service_request(db: Session, request_id: int, update_data: ServiceReq
                             
                             for svc in matching_services:
                                 # Verify timestamp safely
-                                assigned_time = svc.assigned_at or datetime.utcnow()
-                                time_diff = datetime.utcnow() - assigned_time
+                                assigned_time = svc.assigned_at or datetime.now(timezone.utc)
+                                time_diff = datetime.now(timezone.utc) - assigned_time
                                 if time_diff.total_seconds() < 172800: # 48 hours
                                     print(f"[INFO] Auto-completing linked AssignedService {svc.id} ({svc.service.name}) matching ServiceRequest {request.id}")
                                     update_assigned_service_status(db, svc.id, AssignedServiceUpdate(status='completed'), commit=False)

@@ -12,6 +12,7 @@ from app.schemas.expenses import ExpenseOut
 from app.models.user import User
 from app.models.employee import Employee
 from app.utils.api_optimization import optimize_limit, MAX_LIMIT_LOW_NETWORK
+from app.utils.date_utils import get_ist_now, get_ist_today
 import shutil
 from fastapi.responses import FileResponse
 import uuid
@@ -326,7 +327,7 @@ def get_budget_analysis(
     from sqlalchemy import func, extract
     from app.models.expense import Expense
 
-    today = date.today()
+    today = get_ist_today().date()
     current_month = today.month
     current_year = today.year
 

@@ -4,7 +4,7 @@ CRUD operations for Accounting Module
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
 from typing import List, Optional
-from datetime import datetime
+from datetime import timezone, datetime
 from app.models.account import AccountGroup, AccountLedger, JournalEntry, JournalEntryLine
 from app.schemas.account import (
     AccountGroupCreate, AccountGroupUpdate,
@@ -16,7 +16,7 @@ from app.schemas.account import (
 # Account Group CRUD
 def create_account_group(db: Session, group: AccountGroupCreate, branch_id: int) -> AccountGroup:
     """Create a new account group"""
-    db_group = AccountGroup(**group.dict(), branch_id=branch_id)
+    db_group = AccountGroup(**group.model_dump(), branch_id=branch_id)
 
     db.add(db_group)
     db.commit()
@@ -56,7 +56,7 @@ def update_account_group(db: Session, group_id: int, group_update: AccountGroupU
     if not db_group:
         return None
     
-    update_data = group_update.dict(exclude_unset=True)
+    update_data = group_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(db_group, field, value)
     
@@ -80,7 +80,7 @@ def delete_account_group(db: Session, group_id: int, branch_id: int) -> bool:
 # Account Ledger CRUD
 def create_account_ledger(db: Session, ledger: AccountLedgerCreate, branch_id: int) -> AccountLedger:
     """Create a new account ledger"""
-    db_ledger = AccountLedger(**ledger.dict(), branch_id=branch_id)
+    db_ledger = AccountLedger(**ledger.model_dump(), branch_id=branch_id)
 
     db.add(db_ledger)
     db.commit()
@@ -172,7 +172,7 @@ def update_account_ledger(db: Session, ledger_id: int, ledger_update: AccountLed
     if not db_ledger:
         return None
     
-    update_data = ledger_update.dict(exclude_unset=True)
+    update_data = ledger_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(db_ledger, field, value)
     
@@ -197,7 +197,7 @@ def delete_account_ledger(db: Session, ledger_id: int, branch_id: int) -> bool:
 def generate_entry_number(db: Session, branch_id: int) -> str:
 
     """Generate unique journal entry number"""
-    today = datetime.utcnow().date()
+    today = datetime.now(timezone.utc).date()
     year = today.year
     month = today.month
     
@@ -248,8 +248,8 @@ def create_journal_entry(db: Session, entry: JournalEntryCreate, branch_id: int,
     entry_number = generate_entry_number(db, branch_id=branch_id)
 
     
-    # Calculate total amount
-    total_amount = sum(line.amount for line in entry.lines)
+    # Calculate total amount (Sum of debits OR sum of credits, not both)
+    total_amount = total_debits
     
     # Create journal entry
     db_entry = JournalEntry(

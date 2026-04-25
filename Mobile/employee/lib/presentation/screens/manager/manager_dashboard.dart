@@ -1,28 +1,42 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:orchid_employee/presentation/providers/management_provider.dart';
 import 'package:orchid_employee/presentation/providers/auth_provider.dart';
-import 'package:orchid_employee/data/models/management_models.dart';
-import 'package:orchid_employee/presentation/screens/manager/department_detail_screen.dart';
-import 'package:orchid_employee/presentation/screens/manager/manager_inventory_screen.dart';
-import 'package:orchid_employee/presentation/screens/manager/manager_staff_screen.dart';
-import 'package:orchid_employee/presentation/screens/manager/financial_reports_screen.dart';
-import 'package:orchid_employee/presentation/screens/manager/booking_analysis_screen.dart';
-import 'package:orchid_employee/presentation/screens/manager/manager_purchase_screen.dart';
-import 'package:orchid_employee/presentation/screens/manager/manager_create_purchase_screen.dart';
-import 'package:orchid_employee/presentation/screens/manager/manager_room_mgmt_screen.dart';
-import 'package:orchid_employee/presentation/screens/manager/manager_bookings_screen.dart';
-import 'package:orchid_employee/presentation/screens/manager/manager_packages_screen.dart';
-import 'package:orchid_employee/presentation/screens/manager/manager_food_orders_screen.dart';
-import 'package:orchid_employee/presentation/screens/manager/manager_food_management_screen.dart';
-import 'package:orchid_employee/presentation/screens/manager/manager_service_assignment_screen.dart';
-import 'package:orchid_employee/presentation/screens/manager/manager_expenses_screen.dart';
-import 'package:orchid_employee/presentation/screens/manager/manager_accounting_screen.dart';
-import 'package:orchid_employee/presentation/screens/manager/manager_reports_screen.dart';
 import 'package:orchid_employee/presentation/providers/attendance_provider.dart';
-import 'package:orchid_employee/presentation/widgets/skeleton_loaders.dart';
-import 'package:intl/intl.dart';
+import 'package:orchid_employee/presentation/providers/management_provider.dart';
+import 'package:orchid_employee/presentation/widgets/attendance_helper.dart';
+import 'package:orchid_employee/presentation/widgets/onyx_glass_card.dart';
+import 'package:orchid_employee/core/constants/app_colors.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:intl/intl.dart';
+import 'dart:ui';
+
+// Management Screens
+import 'package:orchid_employee/presentation/widgets/skeleton_loaders.dart';
+import 'manager_bookings_screen.dart';
+import 'manager_staff_screen.dart';
+import 'manager_service_assignment_screen.dart';
+import 'manager_room_mgmt_screen.dart';
+import 'manager_reports_screen.dart';
+import 'manager_purchase_screen.dart';
+import 'manager_packages_screen.dart';
+import 'manager_inventory_screen.dart';
+import 'manager_food_orders_screen.dart';
+import 'manager_expenses_screen.dart';
+import 'financial_reports_screen.dart';
+import 'department_detail_screen.dart';
+import 'booking_analysis_screen.dart';
+import 'manager_create_purchase_screen.dart';
+import 'manager_checkin_screen.dart';
+import 'manager_checkout_workflow.dart';
+import 'manager_transactions_screen.dart';
+
+// Modals
+import 'package:orchid_employee/presentation/widgets/modals/add_inventory_item_modal.dart';
+import 'package:orchid_employee/presentation/widgets/modals/add_service_modal.dart';
+import 'package:orchid_employee/presentation/widgets/modals/add_food_order_modal.dart';
+
+// Models
+import 'package:orchid_employee/data/models/management_models.dart';
 
 class ManagerDashboardScreen extends StatefulWidget {
   const ManagerDashboardScreen({super.key});
@@ -97,124 +111,211 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
     final currencyFormat = NumberFormat.currency(symbol: "₹", decimalDigits: 0);
 
     return Scaffold(
-      backgroundColor: Colors.grey[50],
-      appBar: AppBar(
-        title: const Text("Manager Dashboard", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
-        backgroundColor: Colors.white,
-        elevation: 0,
-        actions: [
-          if (isClockedIn)
-            Container(
-              margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(color: Colors.indigo[50], borderRadius: BorderRadius.circular(12)),
-              child: DropdownButton<String>(
-                value: _selectedPeriod,
-                underline: Container(),
-                icon: const Icon(Icons.keyboard_arrow_down, color: Colors.indigo),
-                items: const [
-                  DropdownMenuItem(value: "day", child: Text("Today", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold))),
-                  DropdownMenuItem(value: "week", child: Text("Weekly", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold))),
-                  DropdownMenuItem(value: "month", child: Text("Monthly", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold))),
-                ],
-                onChanged: _onPeriodChanged,
+      backgroundColor: AppColors.onyx,
+      body: Stack(
+        children: [
+          // Background Gradient
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: AppColors.primaryGradient,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
             ),
-          IconButton(
-            icon: const Icon(Icons.logout, color: Colors.red),
-            onPressed: () async {
-              final auth = context.read<AuthProvider>();
-              await auth.logout();
-              if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
-            },
           ),
-          const SizedBox(width: 8),
+
+          // Ambient Glows
+          Positioned(
+            top: -100,
+            right: -50,
+            child: Container(
+              width: 300,
+              height: 300,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.accent.withOpacity(0.1),
+              ),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 100, sigmaY: 100),
+                child: Container(color: Colors.transparent),
+              ),
+            ),
+          ),
+
+          SafeArea(
+            child: Column(
+              children: [
+                // Premium Header
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.05),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: IconButton(
+                          icon: const Icon(Icons.menu_rounded, color: AppColors.accent, size: 20),
+                          onPressed: () => Scaffold.of(context).openDrawer(),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              "MANAGER",
+                              style: TextStyle(color: AppColors.accent, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 2),
+                            ),
+                            Text(
+                              "DASHBOARD",
+                              style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: 0.5),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (isClockedIn)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.05),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.white.withOpacity(0.1))
+                          ),
+                          child: DropdownButton<String>(
+                            value: _selectedPeriod,
+                            underline: Container(),
+                            dropdownColor: AppColors.onyx,
+                            icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70, size: 16),
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 11),
+                            items: const [
+                              DropdownMenuItem(value: "day", child: Text("TODAY")),
+                              DropdownMenuItem(value: "week", child: Text("WEEKLY")),
+                              DropdownMenuItem(value: "month", child: Text("MONTHLY")),
+                            ],
+                            onChanged: _onPeriodChanged,
+                          ),
+                        ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: const Icon(Icons.logout, color: Colors.white38, size: 20),
+                        onPressed: () async {
+                          final auth = context.read<AuthProvider>();
+                          await auth.logout();
+                          if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+                        },
+                        style: IconButton.styleFrom(backgroundColor: Colors.white.withOpacity(0.05)),
+                      ),
+                    ],
+                  ),
+                ),
+
+                Expanded(
+                  child: provider.isLoading && summary == null
+                      ? const DashboardSkeleton()
+                      : RefreshIndicator(
+                          backgroundColor: AppColors.onyx,
+                          color: AppColors.accent,
+                          onRefresh: () async {
+                            await Future.wait([
+                              provider.loadDashboardData(period: _selectedPeriod),
+                              attendance.checkTodayStatus(auth.employeeId),
+                            ]);
+                          },
+                          child: ListView(
+                            padding: const EdgeInsets.all(20),
+                            children: [
+                              _buildAttendanceCard(attendance, auth.employeeId),
+                              const SizedBox(height: 24),
+                              _buildPremiumFinancialOverview(summary, currencyFormat),
+                              const SizedBox(height: 32),
+                              _buildModuleGrid(summary, isClockedIn),
+                              const SizedBox(height: 32),
+                              _buildStaffPerformanceHeader(),
+                              const SizedBox(height: 16),
+                              _buildStaffHeadcount(provider.employeeStatus),
+                              const SizedBox(height: 32),
+                              _buildDepartmentPerformance(summary),
+                              const SizedBox(height: 32),
+                              _buildRecentTransactions(provider.recentTransactions, currencyFormat),
+                              const SizedBox(height: 100),
+                            ],
+                          ),
+                        ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
-      body: provider.isLoading && summary == null
-          ? const DashboardSkeleton()
-          : RefreshIndicator(
-              onRefresh: () async {
-                await Future.wait([
-                  provider.loadDashboardData(period: _selectedPeriod),
-                  attendance.checkTodayStatus(auth.employeeId),
-                ]);
-              },
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  _buildAttendanceCard(attendance, auth.employeeId),
-                  const SizedBox(height: 16),
-                  _buildPremiumFinancialOverview(summary, currencyFormat),
-                  const SizedBox(height: 24),
-                  _buildModuleGrid(summary, isClockedIn),
-                  const SizedBox(height: 24),
-                  _buildStaffPerformanceHeader(),
-                  const SizedBox(height: 12),
-                  _buildStaffHeadcount(provider.employeeStatus),
-                  const SizedBox(height: 24),
-                  _buildDepartmentPerformance(summary),
-                  const SizedBox(height: 24),
-                  _buildRecentTransactions(provider.recentTransactions, currencyFormat),
-                  const SizedBox(height: 80),
-                ],
-              ),
-            ),
       floatingActionButton: isClockedIn 
           ? FloatingActionButton(
               onPressed: _showQuickActionMenu,
-              backgroundColor: Colors.indigo[900],
-              child: const Icon(Icons.bolt, color: Colors.white),
+              backgroundColor: AppColors.accent,
+              foregroundColor: AppColors.onyx,
+              elevation: 4,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: const Icon(Icons.bolt_rounded, size: 28),
             )
           : null,
     );
+
   }
 
   Widget _buildAttendanceCard(AttendanceProvider attendance, int? empId) {
     final isClockedIn = attendance.isClockedIn;
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))],
-      ),
+    return OnyxGlassCard(
+      padding: const EdgeInsets.all(20),
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: isClockedIn ? Colors.green[50] : Colors.red[50], shape: BoxShape.circle),
-            child: Icon(isClockedIn ? Icons.timer : Icons.timer_off, color: isClockedIn ? Colors.green : Colors.red, size: 24),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isClockedIn ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1), 
+              shape: BoxShape.circle,
+              border: Border.all(color: (isClockedIn ? Colors.green : Colors.red).withOpacity(0.2))
+            ),
+            child: Icon(
+              isClockedIn ? Icons.timer : Icons.timer_off, 
+              color: isClockedIn ? Colors.greenAccent : Colors.redAccent, 
+              size: 24
+            ),
           ),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(isClockedIn ? "Logged In" : "Logged Out", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                Text(isClockedIn ? "Duty ongoing • Tap to clock out" : "Clock in to start your shift", style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                Text(
+                  isClockedIn ? "Duty Active" : "Off Duty", 
+                  style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: Colors.white, letterSpacing: 0.5)
+                ),
+                Text(
+                  isClockedIn ? "Shift ongoing • Tap to end" : "Clock in to start your shift", 
+                  style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11, fontWeight: FontWeight.w600),
+                ),
               ],
             ),
           ),
           Switch.adaptive(
             value: isClockedIn,
             onChanged: (val) async {
-              if (empId == null) return;
-              if (val) {
-                Position? position = await _getCurrentLocation();
-                final success = await attendance.clockIn(
-                  empId, 
-                  latitude: position?.latitude, 
-                  longitude: position?.longitude,
-                );
-                if (mounted && success) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Clocked in successfully"), backgroundColor: Colors.green));
-                }
-              } else {
-                _confirmClockOut(attendance, empId);
+              await AttendanceHelper.performAttendanceAction(
+                context: context, 
+                isClockingIn: val,
+              );
+              if (mounted && empId != null) {
+                attendance.checkTodayStatus(empId);
               }
             },
-            activeColor: Colors.green,
+            activeColor: AppColors.accent,
+            activeTrackColor: AppColors.accent.withOpacity(0.3),
           ),
         ],
       ),
@@ -226,48 +327,84 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
     final expenses = (summary?.kpis['total_expenses'] as num?)?.toDouble() ?? 0.0;
     final profit = revenue - expenses;
 
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Colors.indigo[900]!, Colors.indigo[700]!],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [BoxShadow(color: Colors.indigo.withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 8))],
-      ),
+    return OnyxGlassCard(
+      padding: const EdgeInsets.all(28),
+      color: Colors.white.withOpacity(0.12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("Projected Net Profit", style: TextStyle(color: Colors.white70, fontSize: 14, letterSpacing: 0.5)),
-          const SizedBox(height: 6),
-          Text(format.format(profit), style: const TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 24),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(16)),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _buildSimpleStat("Total Revenue", revenue, Colors.greenAccent, format),
-                Container(width: 1, height: 30, color: Colors.white12),
-                _buildSimpleStat("Total Expenses", expenses, Colors.orangeAccent, format),
-              ],
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                "PROJECTED NET PROFIT",
+                style: TextStyle(
+                  color: Colors.white60,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 2,
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.accent.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.accent.withOpacity(0.3))
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.trending_up, color: AppColors.accent, size: 14),
+                    SizedBox(width: 6),
+                    Text(
+                      "LIVE",
+                      style: TextStyle(color: AppColors.accent, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.5),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            format.format(profit),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 44,
+              fontWeight: FontWeight.w100,
+              letterSpacing: -1.5,
             ),
+          ),
+          const SizedBox(height: 32),
+          Row(
+            children: [
+              Expanded(child: _buildSimpleStat("TOTAL REVENUE", revenue, Colors.white, format)),
+              Container(width: 1, height: 40, color: Colors.white.withOpacity(0.1)),
+              Expanded(child: _buildSimpleStat("TOTAL EXPENSES", expenses, Colors.white.withOpacity(0.6), format)),
+            ],
           ),
         ],
       ),
     );
   }
 
-  Widget _buildSimpleStat(String label, dynamic value, Color color, NumberFormat format) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: const TextStyle(color: Colors.white60, fontSize: 11)),
-        Text(format.format(value), style: TextStyle(color: color, fontSize: 17, fontWeight: FontWeight.bold)),
-      ],
+  Widget _buildSimpleStat(String label, dynamic value, Color valueColor, NumberFormat format) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(color: Colors.white60, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            format.format(value),
+            style: TextStyle(color: valueColor, fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
     );
   }
 
@@ -289,7 +426,7 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
         _buildModuleCard("Expenses", Icons.money_off_outlined, "Operational", Colors.red,
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ManagerExpensesScreen(isClockedIn: isClockedIn)))),
         _buildModuleCard("Accounting", Icons.account_balance_outlined, "P&L / GST", Colors.indigo,
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ManagerAccountingScreen()))),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FinancialReportsScreen()))),
         _buildModuleCard("More", Icons.apps_outlined, "All Tools", Colors.blueGrey,
             onTap: () => _showAllModules(summary, isClockedIn)),
       ],
@@ -299,23 +436,34 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
   Widget _buildModuleCard(String title, IconData icon, String subtitle, Color color, {VoidCallback? onTap}) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(20),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 2))],
-          border: Border.all(color: Colors.grey[200]!),
-        ),
+      borderRadius: BorderRadius.circular(32),
+      child: OnyxGlassCard(
+        padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: color, size: 28),
-            const SizedBox(height: 12),
-            Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            Text(subtitle, style: TextStyle(color: Colors.grey[500], fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: color.withOpacity(0.3))
+              ),
+              child: Icon(icon, color: color, size: 24),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              title.toUpperCase(), 
+              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15, color: Colors.white, letterSpacing: 0.5)
+            ),
+            const SizedBox(height: 2),
+            Text(
+              subtitle, 
+              style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 10, fontWeight: FontWeight.bold), 
+              maxLines: 1, 
+              overflow: TextOverflow.ellipsis
+            ),
           ],
         ),
       ),
@@ -327,39 +475,54 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(width: 40, height: 4, margin: const EdgeInsets.only(bottom: 24), decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
-            const Text("Management Console", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 24),
-            GridView.count(
-              shrinkWrap: true,
-              crossAxisCount: 3,
-              mainAxisSpacing: 20,
-              crossAxisSpacing: 16,
-              childAspectRatio: 0.9,
-              children: [
-                _buildCircleModule("Rooms", Icons.meeting_room, Colors.green, () => _nav(const ManagerRoomMgmtScreen())),
-                _buildCircleModule("Menu", Icons.fastfood, Colors.green[800]!, () => _nav(const ManagerFoodOrdersScreen(initialTab: 3))),
-                _buildCircleModule("Dining", Icons.restaurant, Colors.deepOrange, () => _nav(const ManagerFoodOrdersScreen(initialTab: 1))),
-                _buildCircleModule("Services", Icons.assignment_ind, Colors.cyan, () => _nav(const ManagerServiceAssignmentScreen())),
-                _buildCircleModule("Supply", Icons.shopping_cart, Colors.orange, () => _nav(const ManagerPurchaseScreen())),
-                _buildCircleModule("Analytics", Icons.analytics, Colors.deepPurple, () => _nav(const ManagerReportsScreen())),
-                _buildCircleModule("Trends", Icons.insights, Colors.blueGrey, () => _nav(const BookingAnalysisScreen())),
-                _buildCircleModule("Offers", Icons.card_giftcard, Colors.pink, () => _nav(const ManagerPackagesScreen())),
-                _buildCircleModule("Finance", Icons.trending_up, Colors.blue, () => _nav(const FinancialReportsScreen())),
-              ],
-            ),
-            const SizedBox(height: 32),
-          ],
+      builder: (context) => BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppColors.onyx.withOpacity(0.95),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+            border: Border.all(color: Colors.white10),
+          ),
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40, height: 4,
+                margin: const EdgeInsets.only(bottom: 24),
+                decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(2)),
+              ),
+              const Text(
+                "MANAGEMENT CONSOLE",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 2),
+              ),
+              const SizedBox(height: 32),
+              GridView.count(
+                shrinkWrap: true,
+                crossAxisCount: 3,
+                mainAxisSpacing: 24,
+                crossAxisSpacing: 16,
+                childAspectRatio: 0.85,
+                children: [
+                  _buildCircleModule("ROOMS", Icons.meeting_room, Colors.greenAccent, () => _nav(ManagerRoomMgmtScreen())),
+                  _buildCircleModule("MENU", Icons.fastfood, Colors.orangeAccent, () => _nav(ManagerFoodOrdersScreen(initialTab: 3))),
+                  _buildCircleModule("DINING", Icons.restaurant, Colors.deepOrangeAccent, () => _nav(ManagerFoodOrdersScreen(initialTab: 1))),
+                  _buildCircleModule("SERVICES", Icons.assignment_ind, Colors.cyanAccent, () => _nav(ManagerServiceAssignmentScreen())),
+                  _buildCircleModule("SUPPLY", Icons.shopping_cart, Colors.amberAccent, () => _nav(ManagerPurchaseScreen())),
+                  _buildCircleModule("ANALYTICS", Icons.analytics, Colors.purpleAccent, () => _nav(ManagerReportsScreen())),
+                  _buildCircleModule("TRENDS", Icons.insights, Colors.blueGrey, () => _nav(BookingAnalysisScreen())),
+                  _buildCircleModule("OFFERS", Icons.card_giftcard, Colors.pinkAccent, () => _nav(ManagerPackagesScreen())),
+                  _buildCircleModule("FINANCE", Icons.trending_up, Colors.blueAccent, () => _nav(FinancialReportsScreen())),
+                ],
+              ),
+              const SizedBox(height: 48),
+            ],
+          ),
         ),
       ),
     );
   }
+
 
   void _nav(Widget screen) {
     Navigator.pop(context);
@@ -372,23 +535,38 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
       child: Column(
         children: [
           Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: color.withOpacity(0.2)),
+            ),
             child: Icon(icon, color: color, size: 24),
           ),
-          const SizedBox(height: 8),
-          Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500), textAlign: TextAlign.center),
+          const SizedBox(height: 12),
+          Text(
+            label,
+            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: Colors.white60, letterSpacing: 1),
+            textAlign: TextAlign.center,
+          ),
         ],
       ),
     );
   }
 
+
   Widget _buildStaffPerformanceHeader() {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        const Text("Staff Presence", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-        TextButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ManagerStaffScreen())), child: const Text("Directory")),
+        const Text(
+          "STAFF PRESENCE", 
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 1.5)
+        ),
+        TextButton(
+          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ManagerStaffScreen())), 
+          child: const Text("DIRECTORY", style: TextStyle(color: AppColors.accent, fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 1))
+        ),
       ],
     );
   }
@@ -399,15 +577,14 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
     final onLeave = (status['on_paid_leave']?.length ?? 0) + (status['on_sick_leave']?.length ?? 0) + (status['on_unpaid_leave']?.length ?? 0);
     final total = active + onLeave + (status['inactive_employees']?.length ?? 0);
 
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.grey[200]!)),
+    return OnyxGlassCard(
+      padding: const EdgeInsets.all(24),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _buildHeadcountItem("On-Duty", active, Colors.green),
-          _buildHeadcountItem("Leave", onLeave, Colors.orange),
-          _buildHeadcountItem("Total", total, Colors.indigo),
+          _buildHeadcountItem("ON-DUTY", active, Colors.greenAccent),
+          _buildHeadcountItem("LEAVE", onLeave, Colors.orangeAccent),
+          _buildHeadcountItem("TOTAL", total, Colors.blueAccent),
         ],
       ),
     );
@@ -416,8 +593,14 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
   Widget _buildHeadcountItem(String label, int count, Color color) {
     return Column(
       children: [
-        Text(count.toString(), style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: color)),
-        Text(label, style: TextStyle(color: Colors.grey[500], fontSize: 12, fontWeight: FontWeight.w500)),
+        Text(
+          count.toString(), 
+          style: TextStyle(fontSize: 28, fontWeight: FontWeight.w100, color: Colors.white)
+        ),
+        Text(
+          label, 
+          style: TextStyle(color: color.withOpacity(0.7), fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1.5)
+        ),
       ],
     );
   }
@@ -427,8 +610,11 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text("Departmental P&L", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 12),
+        const Text(
+          "DEPARTMENTAL P&L", 
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 1.5)
+        ),
+        const SizedBox(height: 16),
         ...summary.departmentKpis.entries.map((entry) => _buildDeptCard(entry.key, entry.value)),
       ],
     );
@@ -439,28 +625,53 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
     final format = NumberFormat.compact();
     return InkWell(
       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => DepartmentDetailScreen(departmentName: name))),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
+      child: OnyxGlassCard(
+        borderRadius: 20,
         padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey[200]!)),
         child: Row(
           children: [
-            CircleAvatar(backgroundColor: Colors.indigo[50], child: Text(name[0], style: TextStyle(color: Colors.indigo[800], fontWeight: FontWeight.bold))),
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.05),
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white.withOpacity(0.1))
+              ),
+              child: Center(
+                child: Text(
+                  name[0], 
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 18)
+                )
+              ),
+            ),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  Text("Rev: ₹${format.format(kpi.income)}", style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+                  Text(
+                    name.toUpperCase(), 
+                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14, color: Colors.white, letterSpacing: 0.5)
+                  ),
+                  Text(
+                    "Rev: ₹${format.format(kpi.income)}", 
+                    style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11, fontWeight: FontWeight.bold)
+                  ),
                 ],
               ),
             ),
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text("₹${format.format(profit)}", style: TextStyle(color: profit >= 0 ? Colors.green[700] : Colors.red[700], fontWeight: FontWeight.bold, fontSize: 15)),
-                Text(profit >= 0 ? "Profit" : "Loss", style: TextStyle(fontSize: 10, color: Colors.grey[400])),
+                Text(
+                  "₹${format.format(profit)}", 
+                  style: TextStyle(color: profit >= 0 ? Colors.greenAccent : Colors.redAccent, fontWeight: FontWeight.w900, fontSize: 15)
+                ),
+                Text(
+                  profit >= 0 ? "PROFIT" : "LOSS", 
+                  style: TextStyle(fontSize: 9, color: Colors.white.withOpacity(0.3), fontWeight: FontWeight.w900, letterSpacing: 1)
+                ),
               ],
             ),
           ],
@@ -476,24 +687,49 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text("Latest Activity", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            TextButton(onPressed: () {}, child: const Text("See All")),
+            const Text(
+              "LATEST ACTIVITY", 
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 1.5)
+            ),
+            TextButton(
+              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ManagerTransactionsScreen())), 
+              child: const Text("VIEW ALL", style: TextStyle(color: AppColors.accent, fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 1))
+            ),
           ],
         ),
         const SizedBox(height: 8),
         ...transactions.take(5).map((t) => Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey[100]!)),
-          child: ListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            leading: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: t.isIncome ? Colors.green[50] : Colors.red[50], shape: BoxShape.circle),
-              child: Icon(t.isIncome ? Icons.add_circle_outline : Icons.remove_circle_outline, color: t.isIncome ? Colors.green : Colors.red, size: 20),
+          margin: const EdgeInsets.only(bottom: 12),
+          child: OnyxGlassCard(
+            borderRadius: 20,
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+              leading: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: (t.isIncome ? Colors.green : Colors.red).withOpacity(0.1), 
+                  shape: BoxShape.circle
+                ),
+                child: Icon(
+                  t.isIncome ? Icons.add_circle_outline : Icons.remove_circle_outline, 
+                  color: t.isIncome ? Colors.greenAccent : Colors.redAccent, 
+                  size: 20
+                ),
+              ),
+              title: Text(
+                t.description, 
+                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14, color: Colors.white)
+              ),
+              subtitle: Text(
+                "${t.category.toUpperCase()} • ${t.date}", 
+                style: TextStyle(fontSize: 10, color: Colors.white.withOpacity(0.4), fontWeight: FontWeight.bold, letterSpacing: 0.5)
+              ),
+              trailing: Text(
+                "${t.isIncome ? "+" : "-"} ₹${format.format(t.amount)}", 
+                style: TextStyle(color: t.isIncome ? Colors.greenAccent : Colors.redAccent, fontWeight: FontWeight.w900, fontSize: 15)
+              ),
             ),
-            title: Text(t.description, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-            subtitle: Text("${t.category} • ${DateFormat('dd MMM').format(DateTime.parse(t.date))}", style: const TextStyle(fontSize: 11)),
-            trailing: Text("${t.isIncome ? "+" : "-"} ₹${format.format(t.amount)}", style: TextStyle(color: t.isIncome ? Colors.green[700] : Colors.red[700], fontWeight: FontWeight.bold)),
           ),
         )),
       ],
@@ -501,16 +737,9 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
   }
 
   void _confirmClockOut(AttendanceProvider attendance, int empId) {
-     showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Clock Out?"),
-        content: const Text("You will lose access to management features until your next shift."),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Stay Online")),
-          ElevatedButton(onPressed: () { attendance.clockOut(empId); Navigator.pop(ctx); }, style: ElevatedButton.styleFrom(backgroundColor: Colors.red), child: const Text("Clock Out")),
-        ],
-      ),
+    AttendanceHelper.performAttendanceAction(
+      context: context, 
+      isClockingIn: false,
     );
   }
 
@@ -518,32 +747,85 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text("Global Actions", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 24),
-            _buildQuickActionItem(Icons.add_shopping_cart, "New Purchase Order", "Supply acquisition", Colors.blue, () => _nav(const ManagerCreatePurchaseScreen())),
-            _buildQuickActionItem(Icons.note_add_outlined, "Employee Memo", "Broadcase to staff", Colors.teal, () { Navigator.pop(context); _showStaffMemoDialog(); }),
-            _buildQuickActionItem(Icons.warning_amber_rounded, "Critical Alert", "Emergency broadcast", Colors.red, () { Navigator.pop(context); _showEmergencyAlertDialog(); }),
-          ],
+      builder: (context) => BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppColors.onyx.withOpacity(0.95),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+            border: Border.all(color: Colors.white10),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40, height: 4,
+                    margin: const EdgeInsets.only(bottom: 24),
+                    decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(2)),
+                  ),
+                ),
+                const Text(
+                  "QUICK ACTIONS",
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 1.5),
+                ),
+                const SizedBox(height: 32),
+                _buildQuickActionItem(Icons.add_shopping_cart, "NEW PURCHASE ORDER", "Supply acquisition", Colors.blueAccent, () => _nav(ManagerCreatePurchaseScreen())),
+                _buildQuickActionItem(Icons.note_add_outlined, "EMPLOYEE MEMO", "Broadcast to staff", Colors.tealAccent, () { Navigator.pop(context); _showStaffMemoDialog(); }),
+                _buildQuickActionItem(Icons.warning_amber_rounded, "CRITICAL ALERT", "Emergency broadcast", Colors.redAccent, () { Navigator.pop(context); _showEmergencyAlertDialog(); }),
+                _buildQuickActionItem(Icons.login_rounded, "GUEST CHECK-IN", "Capture ID & Assign Room", Colors.greenAccent, () { 
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const ManagerCheckInScreen()));
+                }),
+                _buildQuickActionItem(Icons.logout_rounded, "GUEST CHECK-OUT", "Inspect & Bill", Colors.orangeAccent, () { 
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const ManagerCheckoutWorkflow()));
+                }),
+                _buildQuickActionItem(Icons.add_box_outlined, "ADD INVENTORY", "New item or consumable", Colors.blueAccent, () { 
+                  Navigator.pop(context);
+                  showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: Colors.transparent, builder: (_) => const AddInventoryItemModal());
+                }),
+                _buildQuickActionItem(Icons.room_service_outlined, "ADD SERVICE", "Define new hotel service", Colors.cyanAccent, () { 
+                  Navigator.pop(context);
+                  showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: Colors.transparent, builder: (_) => const AddServiceModal());
+                }),
+                _buildQuickActionItem(Icons.restaurant_menu_rounded, "ADD FOOD ORDER", "Process F&B request", Colors.deepOrangeAccent, () { 
+                  Navigator.pop(context);
+                  showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: Colors.transparent, builder: (_) => const AddFoodOrderModal());
+                }),
+                const SizedBox(height: 24),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
 
+
   Widget _buildQuickActionItem(IconData icon, String title, String sub, Color color, VoidCallback onTap) {
-    return ListTile(
-      onTap: onTap,
-      leading: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(icon, color: color)),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-      subtitle: Text(sub, style: const TextStyle(fontSize: 12)),
-      trailing: const Icon(Icons.chevron_right, size: 20),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: OnyxGlassCard(
+        padding: EdgeInsets.zero,
+        child: ListTile(
+          onTap: onTap,
+          leading: Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+            child: Icon(icon, color: color),
+          ),
+          title: Text(title, style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.white, fontSize: 13, letterSpacing: 0.5)),
+          subtitle: Text(sub, style: TextStyle(fontSize: 10, color: Colors.white.withOpacity(0.4), fontWeight: FontWeight.bold)),
+          trailing: const Icon(Icons.chevron_right, size: 18, color: Colors.white24),
+        ),
+      ),
     );
   }
+
 
   void _showStaffMemoDialog() {
     final controller = TextEditingController();
@@ -553,4 +835,5 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
   void _showEmergencyAlertDialog() {
     showDialog(context: context, builder: (ctx) => AlertDialog(title: const Row(children: [Icon(Icons.warning, color: Colors.red), SizedBox(width: 8), Text("Emergency Alert")]), content: const Text("This will notify all logged-in staff immediately. Continue?"), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")), ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white), onPressed: () { Navigator.pop(ctx); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Emergency Alert Broadcasted"), backgroundColor: Colors.red)); }, child: const Text("Confirm"))]));
   }
+
 }

@@ -4,6 +4,9 @@ import 'package:orchid_employee/data/services/api_service.dart';
 import 'package:intl/intl.dart';
 import 'package:dio/dio.dart';
 import 'dart:math';
+import 'dart:ui';
+import 'package:orchid_employee/core/constants/app_colors.dart';
+import 'package:orchid_employee/presentation/widgets/onyx_glass_card.dart';
 import 'manager_create_vendor_screen.dart';
 
 class ManagerCreatePurchaseScreen extends StatefulWidget {
@@ -66,7 +69,6 @@ class _ManagerCreatePurchaseScreenState extends State<ManagerCreatePurchaseScree
           if (_isEdit) {
              _populateData();
           } else {
-             // Default location
              try {
                 final defaultLoc = _locations.firstWhere((l) => ['WAREHOUSE', 'CENTRAL_WAREHOUSE', 'BRANCH_STORE'].contains(l['location_type']), orElse: () => null);
                 if (defaultLoc != null) _destinationLocationId = defaultLoc['id'];
@@ -94,25 +96,19 @@ class _ManagerCreatePurchaseScreenState extends State<ManagerCreatePurchaseScree
     if (!_statuses.map((s) => s.toLowerCase()).contains(_status)) _status = 'draft';
     
     _invoiceController.text = p['invoice_number'] ?? '';
-    
-    // Payment fields might be missing in PurchaseMasterOut if not explicitly returned or distinct
     _paymentMethod = p['payment_method'] ?? 'Bank Transfer';
     if (!_paymentMethods.contains(_paymentMethod)) _paymentMethod = 'Bank Transfer';
     
     _paymentStatus = p['payment_status']?.toString().toLowerCase() ?? 'pending';
-    // Capitalize first letter strictly
     final psIndex = _paymentStatuses.indexWhere((s) => s.toLowerCase() == _paymentStatus);
     if (psIndex != -1) _paymentStatus = _paymentStatuses[psIndex];
     else _paymentStatus = 'Pending';
 
-    // Details/Line Items
     if (p['details'] != null) {
        for (var d in (p['details'] as List)) {
           final itemId = d['item_id'];
-          // Find item object
           final itemObj = _items.firstWhere((i) => i['id'] == itemId, orElse: () => null);
           
-          // Parse notes for batch/expiry
           String? batch;
           DateTime? expiry;
           String notes = d['notes'] ?? '';
@@ -125,7 +121,6 @@ class _ManagerCreatePurchaseScreenState extends State<ManagerCreatePurchaseScree
                 else batch = after;
              }
           }
-          // Simple parsing, might need regex if complex. Assuming my format: Batch: XYZ Expiry: YYYY-MM-DD
           
           _lineItems.add({
              'key': UniqueKey(),
@@ -133,9 +128,9 @@ class _ManagerCreatePurchaseScreenState extends State<ManagerCreatePurchaseScree
              'quantity': double.tryParse(d['quantity'].toString()) ?? 0.0,
              'unit_price': double.tryParse(d['unit_price'].toString()) ?? 0.0,
              'gst_rate': double.tryParse(d['gst_rate'].toString()) ?? 0.0,
-             'tax_included': false, // Backend stores excluded price usually, or I can't know Easily.
+             'tax_included': false,
              'batch_number': batch,
-             'expiry_date': expiry, // Parsing date from notes is hard without regex, skipping for now unless needed
+             'expiry_date': expiry,
              'item_obj': itemObj,
           });
        }
@@ -184,22 +179,16 @@ class _ManagerCreatePurchaseScreenState extends State<ManagerCreatePurchaseScree
 
   Future<void> _submit() async {
     if (_selectedVendorId == null) {
-      _showError("Please select a vendor");
+      _showError("PLEASE SELECT A VENDOR");
       return;
     }
     if (_destinationLocationId == null) {
-      _showError("Please select a destination location");
+      _showError("PLEASE SELECT A DESTINATION");
       return;
     }
     if (_lineItems.isEmpty) {
-      _showError("Please add at least one item");
+      _showError("PLEASE ADD AT LEAST ONE ITEM");
       return;
-    }
-    for (var item in _lineItems) {
-      if (item['item_id'] == null) {
-        _showError("Please select items for all rows");
-        return;
-      }
     }
 
     setState(() => _isLoading = true);
@@ -248,10 +237,10 @@ class _ManagerCreatePurchaseScreenState extends State<ManagerCreatePurchaseScree
 
       if (_isEdit) {
          await api.dio.put('/inventory/purchases/${widget.purchase!['id']}', data: payload);
-         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("PO Updated Successfully"), backgroundColor: Colors.green));
+         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("PURCHASE ORDER UPDATED", style: TextStyle(fontWeight: FontWeight.w900)), backgroundColor: AppColors.success, behavior: SnackBarBehavior.floating));
       } else {
          await api.dio.post('/inventory/purchases', data: payload);
-         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("PO Created Successfully"), backgroundColor: Colors.green));
+         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("PURCHASE ORDER CREATED", style: TextStyle(fontWeight: FontWeight.w900)), backgroundColor: AppColors.success, behavior: SnackBarBehavior.floating));
       }
       
       if (mounted) {
@@ -259,194 +248,247 @@ class _ManagerCreatePurchaseScreenState extends State<ManagerCreatePurchaseScree
       }
     } catch (e) {
       if (mounted) {
-        String msg = "Failed: $e";
-        if (e is DioException && e.response?.statusCode == 422) {
-           msg = "Validation Error: ${e.response?.data}";
-        }
-        _showError(msg);
+        _showError("FAILED: $e");
         setState(() => _isLoading = false);
       }
     }
   }
 
   void _showError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg.toUpperCase(), style: const TextStyle(fontWeight: FontWeight.w900)), backgroundColor: AppColors.error, behavior: SnackBarBehavior.floating));
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
-
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_isEdit ? "Edit Purchase Order" : "New Purchase Order"),
-        actions: [
-          IconButton(icon: const Icon(Icons.check), onPressed: _submit),
+      backgroundColor: AppColors.onyx,
+      body: Stack(
+        children: [
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: AppColors.primaryGradient,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+          ),
+          
+          SafeArea(
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 18),
+                        style: IconButton.styleFrom(backgroundColor: Colors.white.withOpacity(0.05)),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text("INVENTORY MANAGEMENT", style: TextStyle(color: AppColors.accent, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 2)),
+                            Text(_isEdit ? "EDIT PURCHASE ORDER" : "NEW PURCHASE ORDER", style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: _submit,
+                        icon: const Icon(Icons.check, color: AppColors.accent, size: 22),
+                        style: IconButton.styleFrom(backgroundColor: AppColors.accent.withOpacity(0.1)),
+                      ),
+                    ],
+                  ),
+                ),
+                
+                Expanded(
+                  child: _isLoading 
+                    ? const Center(child: CircularProgressIndicator(color: AppColors.accent))
+                    : SingleChildScrollView(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          children: [
+                            _buildHeaderForm(),
+                            const SizedBox(height: 24),
+                            _buildItemsHeader(),
+                            const SizedBox(height: 12),
+                            ..._lineItems.asMap().entries.map((entry) {
+                              final index = entry.key;
+                              final item = entry.value;
+                              return _PurchaseItemRow(
+                                key: item['key'],
+                                index: index,
+                                item: item,
+                                allItems: _items,
+                                onRemove: () => _removeItem(index),
+                                onUpdate: () => setState(() {}),
+                              );
+                            }).toList(),
+                            const SizedBox(height: 32),
+                            _buildFooterSummary(),
+                            const SizedBox(height: 40),
+                          ],
+                        ),
+                      ),
+                ),
+              ],
+            ),
+          ),
         ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            _buildHeaderForm(),
-            const SizedBox(height: 20),
-            _buildItemsHeader(),
-            const SizedBox(height: 10),
-            ..._lineItems.asMap().entries.map((entry) {
-              final index = entry.key;
-              final item = entry.value;
-              return _PurchaseItemRow(
-                key: item['key'],
-                index: index,
-                item: item,
-                allItems: _items,
-                onRemove: () => _removeItem(index),
-                onUpdate: () => setState(() {}),
-              );
-            }).toList(),
-            const SizedBox(height: 20),
-            _buildFooterSummary(),
-            const SizedBox(height: 40),
-            _buildSubmitButton(),
-          ],
-        ),
       ),
     );
   }
 
   Widget _buildHeaderForm() {
-    return Card(
-      elevation: 2,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<int>(
-                    value: _selectedVendorId,
-                    decoration: const InputDecoration(labelText: "Vendor *", border: OutlineInputBorder()),
-                    items: _vendors.map<DropdownMenuItem<int>>((v) => DropdownMenuItem(value: v['id'], child: Text(v['name'], overflow: TextOverflow.ellipsis))).toList(),
-                    onChanged: (val) => setState(() => _selectedVendorId = val),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton(
-                  icon: const Icon(Icons.add_circle, color: Colors.indigo, size: 30),
-                  onPressed: () async {
-                    final res = await Navigator.push(context, MaterialPageRoute(builder: (_) => const ManagerCreateVendorScreen()));
-                    if (res == true) {
-                      _loadDependencies();
-                    }
-                  },
-                  tooltip: "Add Vendor",
-                )
-              ],
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<int>(
-              value: _destinationLocationId,
-              decoration: const InputDecoration(labelText: "Destination *", border: OutlineInputBorder()),
-              items: _locations.map<DropdownMenuItem<int>>((l) => DropdownMenuItem(value: l['id'], child: Text(l['name'], overflow: TextOverflow.ellipsis))).toList(),
-              onChanged: (val) => setState(() => _destinationLocationId = val),
-            ),
-            const SizedBox(height: 12),
-            InkWell(
-              onTap: () async {
-                final d = await showDatePicker(context: context, initialDate: _purchaseDate, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365)));
-                if (d != null) setState(() => _purchaseDate = d);
-              },
-              child: InputDecorator(
-                decoration: const InputDecoration(labelText: "Purchase Date *", border: OutlineInputBorder()),
-                child: Text(DateFormat('yyyy-MM-dd').format(_purchaseDate)),
+    return OnyxGlassCard(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text("GENERAL INFORMATION", style: TextStyle(color: AppColors.accent, fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
+          const SizedBox(height: 20),
+          
+          Row(
+            children: [
+              Expanded(child: _buildGlassDropdown<int>(label: "VENDOR", value: _selectedVendorId, items: _vendors.map((v) => DropdownMenuItem<int>(value: v['id'], child: Text(v['name'].toString().toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)))).toList(), onChanged: (v) => setState(() => _selectedVendorId = v))),
+              const SizedBox(width: 12),
+              IconButton(onPressed: () async {
+                final res = await Navigator.push(context, MaterialPageRoute(builder: (_) => const ManagerCreateVendorScreen()));
+                if (res == true) _loadDependencies();
+              }, icon: const Icon(Icons.add_business, color: AppColors.accent), style: IconButton.styleFrom(backgroundColor: AppColors.accent.withOpacity(0.1))),
+            ],
+          ),
+          
+          const SizedBox(height: 16),
+          _buildGlassDropdown<int>(label: "DESTINATION", value: _destinationLocationId, items: _locations.map((l) => DropdownMenuItem<int>(value: l['id'], child: Text(l['name'].toString().toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)))).toList(), onChanged: (v) => setState(() => _destinationLocationId = v)),
+          
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: _buildGlassDatePicker(label: "DATE", value: _purchaseDate, onChanged: (d) => setState(() => _purchaseDate = d)),
               ),
-            ),
-            const SizedBox(height: 12),
-            InkWell(
-              onTap: () async {
-                final d = await showDatePicker(context: context, initialDate: _expectedDeliveryDate ?? DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365)));
-                if (d != null) setState(() => _expectedDeliveryDate = d);
-              },
-              child: InputDecorator(
-                decoration: const InputDecoration(labelText: "Expected Delivery", border: OutlineInputBorder()),
-                child: Text(_expectedDeliveryDate != null ? DateFormat('yyyy-MM-dd').format(_expectedDeliveryDate!) : "Select Date", style: TextStyle(color: _expectedDeliveryDate == null ? Colors.grey : Colors.black)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildGlassDatePicker(label: "EXPECTED DELIVERY", value: _expectedDeliveryDate, onChanged: (d) => setState(() => _expectedDeliveryDate = d), isNullable: true),
               ),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: _status,
-              decoration: const InputDecoration(labelText: "Status", border: OutlineInputBorder()),
-              items: _statuses.map((s) => DropdownMenuItem(value: s.toLowerCase(), child: Text(s))).toList(),
-              onChanged: (val) => setState(() => _status = val!),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _invoiceController,
-              decoration: const InputDecoration(labelText: "Invoice Number", border: OutlineInputBorder()),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: _paymentMethod,
-              decoration: const InputDecoration(labelText: "Payment Method", border: OutlineInputBorder()),
-              items: _paymentMethods.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
-              onChanged: (val) => setState(() => _paymentMethod = val!),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: _paymentStatus,
-              decoration: const InputDecoration(labelText: "Payment Status", border: OutlineInputBorder()),
-              items: _paymentStatuses.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
-              onChanged: (val) => setState(() => _paymentStatus = val!),
-            ),
-          ],
-        ),
+            ],
+          ),
+          
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(child: _buildGlassDropdown<String>(label: "STATUS", value: _status, items: _statuses.map((s) => DropdownMenuItem<String>(value: s.toLowerCase(), child: Text(s.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)))).toList(), onChanged: (v) => setState(() => _status = v!))),
+              const SizedBox(width: 12),
+              Expanded(child: _buildGlassTextField(controller: _invoiceController, label: "INVOICE #")),
+            ],
+          ),
+          
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(child: _buildGlassDropdown<String>(label: "PAYMENT", value: _paymentMethod, items: _paymentMethods.map((s) => DropdownMenuItem<String>(value: s, child: Text(s.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)))).toList(), onChanged: (v) => setState(() => _paymentMethod = v!))),
+              const SizedBox(width: 12),
+              Expanded(child: _buildGlassDropdown<String>(label: "P. STATUS", value: _paymentStatus, items: _paymentStatuses.map((s) => DropdownMenuItem<String>(value: s, child: Text(s.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)))).toList(), onChanged: (v) => setState(() => _paymentStatus = v!))),
+            ],
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildItemsHeader() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  Widget _buildGlassDropdown<T>({required String label, required T? value, required List<DropdownMenuItem<T>> items, required void Function(T?) onChanged}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text("Purchase Items", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-        ElevatedButton.icon(
-          onPressed: _addItem, 
-          icon: const Icon(Icons.add), 
-          label: const Text("Add"),
-          style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo, foregroundColor: Colors.white),
+        Text(label, style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1)),
+        const SizedBox(height: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white10)),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<T>(value: value, isExpanded: true, dropdownColor: AppColors.onyx, items: items, onChanged: onChanged, icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white24, size: 18)),
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildFooterSummary() {
-    return Card(
-      color: Colors.grey[50],
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text("Grand Total", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-            Text("₹${_grandTotal.toStringAsFixed(2)}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 22, color: Colors.indigo)),
-          ],
+  Widget _buildGlassDatePicker({required String label, required DateTime? value, required void Function(DateTime) onChanged, bool isNullable = false}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1)),
+        const SizedBox(height: 6),
+        InkWell(
+          onTap: () async {
+            final d = await showDatePicker(context: context, initialDate: value ?? DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365)));
+            if (d != null) onChanged(d);
+          },
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            width: double.infinity,
+            decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white10)),
+            child: Text(value != null ? DateFormat('yyyy-MM-dd').format(value) : "SELECT", style: TextStyle(color: value != null ? Colors.white : Colors.white24, fontSize: 12, fontWeight: FontWeight.bold)),
+          ),
         ),
+      ],
+    );
+  }
+
+  Widget _buildGlassTextField({required TextEditingController controller, required String label}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1)),
+        const SizedBox(height: 6),
+        TextField(
+          controller: controller,
+          style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+          decoration: InputDecoration(
+            isDense: true,
+            filled: true,
+            fillColor: Colors.white.withOpacity(0.05),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildItemsHeader() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const Text("PURCHASE ITEMS", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 1)),
+          ElevatedButton.icon(
+            onPressed: _addItem, 
+            icon: const Icon(Icons.add, size: 16), 
+            label: const Text("ADD ITEM", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 11)),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent, foregroundColor: AppColors.onyx, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
+          ),
+        ],
       ),
     );
   }
-  
-  Widget _buildSubmitButton() {
-    return SizedBox(
-      width: double.infinity,
-      height: 50,
-      child: ElevatedButton(
-        onPressed: _submit,
-        style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-        child: Text(_isEdit ? "Update Purchase Order" : "Create Purchase Order", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+
+  Widget _buildFooterSummary() {
+    return OnyxGlassCard(
+      padding: const EdgeInsets.all(24),
+      color: AppColors.accent.withOpacity(0.1),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const Text("GRAND TOTAL", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14, color: Colors.white, letterSpacing: 1)),
+          Text("₹${NumberFormat.currency(symbol: '', decimalDigits: 2).format(_grandTotal)}", style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 24, color: AppColors.accent)),
+        ],
       ),
     );
   }
@@ -473,20 +515,6 @@ class _PurchaseItemRow extends StatefulWidget {
 }
 
 class _PurchaseItemRowState extends State<_PurchaseItemRow> {
-  late TextEditingController _autocompleteController;
-  
-  @override
-  void initState() {
-    super.initState();
-    _autocompleteController = TextEditingController(text: widget.item['item_obj']?['name'] ?? '');
-  }
-
-  @override
-  void dispose() {
-    _autocompleteController.dispose();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
@@ -507,34 +535,27 @@ class _PurchaseItemRowState extends State<_PurchaseItemRow> {
        netTotal = (qty * price) + taxAmt;
     }
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      elevation: 2,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      child: OnyxGlassCard(
+        padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                  Expanded(
                   child: Autocomplete<Map<String, dynamic>>(
                     initialValue: TextEditingValue(text: widget.item['item_obj']?['name'] ?? ''),
                     optionsBuilder: (TextEditingValue textEditingValue) {
-                      if (textEditingValue.text.isEmpty) {
-                        return const Iterable<Map<String, dynamic>>.empty();
-                      }
-                      return widget.allItems.cast<Map<String, dynamic>>().where((option) {
-                        return option['name'].toString().toLowerCase().contains(textEditingValue.text.toLowerCase());
-                      });
+                      if (textEditingValue.text.isEmpty) return const Iterable<Map<String, dynamic>>.empty();
+                      return widget.allItems.cast<Map<String, dynamic>>().where((option) => option['name'].toString().toLowerCase().contains(textEditingValue.text.toLowerCase()));
                     },
                     displayStringForOption: (Map<String, dynamic> option) => option['name'],
-                    onSelected: (Map<String, dynamic> selection) {
+                    onSelected: (selection) {
                       setState(() {
                          widget.item['item_id'] = selection['id'];
                          widget.item['item_obj'] = selection;
-                         // Force update price/gst from selection
                          widget.item['unit_price'] = (selection['last_purchase_price'] ?? 0.0);
                          widget.item['gst_rate'] = (selection['gst_rate'] != null ? double.tryParse(selection['gst_rate'].toString()) : 0.0);
                       });
@@ -544,81 +565,54 @@ class _PurchaseItemRowState extends State<_PurchaseItemRow> {
                       return TextField(
                         controller: textEditingController,
                         focusNode: focusNode,
-                        decoration: const InputDecoration(
-                          labelText: "Search Item *",
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-                          suffixIcon: Icon(Icons.search),
+                        style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                        decoration: InputDecoration(
+                          labelText: "SEARCH ITEM",
+                          labelStyle: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 10, fontWeight: FontWeight.w900),
+                          filled: true,
+                          fillColor: Colors.white.withOpacity(0.05),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                          suffixIcon: const Icon(Icons.search, color: Colors.white24, size: 18),
                         ),
                       );
                     },
                   ),
                 ),
                 const SizedBox(width: 8),
-                IconButton(icon: const Icon(Icons.close, color: Colors.red), onPressed: widget.onRemove),
+                IconButton(icon: const Icon(Icons.close, color: Colors.redAccent, size: 20), onPressed: widget.onRemove, style: IconButton.styleFrom(backgroundColor: Colors.redAccent.withOpacity(0.1))),
               ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 16),
             
             Row(
               children: [
-                Expanded(
-                  child: TextFormField(
-                    key: ValueKey("qty_${item['item_id']}"),
-                    initialValue: item['quantity'].toString(),
-                    decoration: InputDecoration(labelText: "Qty", border: const OutlineInputBorder(), suffixText: item['item_obj']?['unit'] ?? ''),
-                    keyboardType: TextInputType.number,
-                    onChanged: (val) {
-                      widget.item['quantity'] = double.tryParse(val) ?? 0;
-                      widget.onUpdate();
-                    },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextFormField(
-                    key: ValueKey("price_${item['item_id']}"),
-                    initialValue: item['unit_price'].toString(),
-                    decoration: const InputDecoration(labelText: "Price", border: OutlineInputBorder(), prefixText: "₹"),
-                    keyboardType: TextInputType.number,
-                    onChanged: (val) {
-                      widget.item['unit_price'] = double.tryParse(val) ?? 0;
-                      widget.onUpdate();
-                    },
-                  ),
-                ),
+                Expanded(child: _buildInlineField(label: "QTY", initialValue: item['quantity'].toString(), onChanged: (v) { widget.item['quantity'] = double.tryParse(v) ?? 0; widget.onUpdate(); }, suffix: item['item_obj']?['unit'] ?? '')),
+                const SizedBox(width: 12),
+                Expanded(child: _buildInlineField(label: "UNIT PRICE", initialValue: item['unit_price'].toString(), onChanged: (v) { widget.item['unit_price'] = double.tryParse(v) ?? 0; widget.onUpdate(); }, prefix: "₹")),
               ],
             ),
-             const SizedBox(height: 10),
+             const SizedBox(height: 16),
              
             Row(
               children: [
-                Expanded(
-                  child: TextFormField(
-                    key: ValueKey("gst_${item['item_id']}"),
-                    initialValue: item['gst_rate'].toString(),
-                    decoration: const InputDecoration(labelText: "GST %", border: OutlineInputBorder()),
-                    keyboardType: TextInputType.number,
-                    onChanged: (val) {
-                       widget.item['gst_rate'] = double.tryParse(val) ?? 0;
-                       widget.onUpdate();
-                    },
-                  ),
-                ),
-                const SizedBox(width: 8),
+                Expanded(child: _buildInlineField(label: "GST %", initialValue: item['gst_rate'].toString(), onChanged: (v) { widget.item['gst_rate'] = double.tryParse(v) ?? 0; widget.onUpdate(); })),
+                const SizedBox(width: 12),
                 Container(
-                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                   decoration: BoxDecoration(border: Border.all(color: Colors.grey), borderRadius: BorderRadius.circular(4)),
+                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                   decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white10)),
                    child: Row(
                      children: [
-                       const Text("Tax Inc", style: TextStyle(fontSize: 12)),
-                       Checkbox(
-                         value: taxIncluded, 
-                         onChanged: (v) {
-                            setState(() => widget.item['tax_included'] = v ?? false);
-                            widget.onUpdate();
-                         },
-                         visualDensity: VisualDensity.compact,
+                       const Text("TAX INC", style: TextStyle(color: Colors.white60, fontSize: 10, fontWeight: FontWeight.w900)),
+                       const SizedBox(width: 4),
+                       SizedBox(
+                         width: 24, height: 24,
+                         child: Checkbox(
+                           value: taxIncluded, 
+                           onChanged: (v) { setState(() => widget.item['tax_included'] = v ?? false); widget.onUpdate(); },
+                           activeColor: AppColors.accent,
+                           checkColor: AppColors.onyx,
+                           side: const BorderSide(color: Colors.white24),
+                         ),
                        ),
                      ],
                    ),
@@ -626,61 +620,43 @@ class _PurchaseItemRowState extends State<_PurchaseItemRow> {
               ],
             ),
             
-            if (item['item_obj']?['is_perishable'] == true || item['item_obj']?['track_serial_number'] == true) ...[
-              const SizedBox(height: 10),
-               if (item['item_obj']?['track_serial_number'] == true)
-                 TextFormField(
-                    key: ValueKey("batch_${widget.item['item_id']}"),
-                    initialValue: item['batch_number'],
-                    decoration: const InputDecoration(labelText: "Batch/Serial", border: OutlineInputBorder()),
-                    onChanged: (v) => widget.item['batch_number'] = v,
-                 ),
-               if (item['item_obj']?['is_perishable'] == true) ...[
-                 const SizedBox(height: 10),
-                 InkWell(
-                    onTap: () async {
-                      final d = await showDatePicker(context: context, initialDate: DateTime.now().add(const Duration(days: 90)), firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 3650)));
-                      if (d != null) {
-                         setState(() => widget.item['expiry_date'] = d);
-                         widget.onUpdate();
-                      }
-                    },
-                    child: InputDecorator(
-                      decoration: const InputDecoration(labelText: "Expiry", border: OutlineInputBorder()),
-                      child: Text(item['expiry_date'] != null ? DateFormat('MM/yyyy').format(item['expiry_date']) : "Select Date"),
-                    ),
-                 ),
-               ]
-            ],
-            
-            const SizedBox(height: 10),
+            const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                 Row(
-                   children: [
-                     Icon(Icons.category, size: 14, color: Colors.grey[600]),
-                     const SizedBox(width: 4),
-                     SizedBox(
-                       width: 80, 
-                       child: Text(item['item_obj']?['category_name'] ?? 'General', style: TextStyle(fontSize: 12, color: Colors.grey[600]), overflow: TextOverflow.ellipsis)
-                     ),
-                   ],
-                 ),
-                 Flexible(
-                   child: Column(
-                     crossAxisAlignment: CrossAxisAlignment.end,
-                     children: [
-                       Text("Tax: ₹${taxAmt.toStringAsFixed(2)}", style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-                       Text("Total: ₹${netTotal.toStringAsFixed(2)}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.indigo)),
-                     ],
-                   ),
-                 )
+                 Text("TAX: ₹${taxAmt.toStringAsFixed(2)}", style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 11, fontWeight: FontWeight.bold)),
+                 Text("TOTAL: ₹${netTotal.toStringAsFixed(2)}", style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: AppColors.accent)),
               ],
             )
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildInlineField({required String label, required String initialValue, required void Function(String) onChanged, String? prefix, String? suffix}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1)),
+        const SizedBox(height: 6),
+        TextFormField(
+          initialValue: initialValue,
+          style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(
+            isDense: true,
+            filled: true,
+            fillColor: Colors.white.withOpacity(0.05),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+            prefixText: prefix,
+            suffixText: suffix,
+            prefixStyle: const TextStyle(color: Colors.white24),
+            suffixStyle: const TextStyle(color: Colors.white24),
+          ),
+          onChanged: onChanged,
+        ),
+      ],
     );
   }
 }

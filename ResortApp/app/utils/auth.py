@@ -1,9 +1,10 @@
-from datetime import datetime, timedelta
+from datetime import timezone, datetime, timedelta
 from jose import JWTError, jwt
 import bcrypt
 from app.models.user import User
 from sqlalchemy.orm import Session, joinedload
 from fastapi import Depends, HTTPException, status, Request
+from typing import Optional, List, Any
 from app.database import SessionLocal
 from fastapi.security import OAuth2PasswordBearer
 import os
@@ -42,7 +43,7 @@ def verify_password(plain, hashed):
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(days=100))
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(days=100))
     to_encode.update({"exp": expire})
     encoded = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     # Handle both string and bytes return from jwt.encode (version compatibility)
@@ -63,8 +64,12 @@ def get_db():
 
 def get_current_user(
     request: Request,
-    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+    token: Optional[str] = Depends(oauth2_scheme), db: Session = Depends(get_db)
 ):
+    # Support token as query parameter for PDF downloads/prints from mobile
+    if not token:
+        token = request.query_params.get("token")
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -126,7 +131,7 @@ def get_current_user(
         print(f"[AUTH DEBUG] DB Error during auth: {str(e)}\n{traceback.format_exc()}")
         raise credentials_exception
 
-from typing import Optional
+
 
 def get_branch_id(
     request: Request,

@@ -8,13 +8,13 @@ REM Start Backend
 start "Backend (8011)" cmd /k "cd ResortApp && venv\Scripts\activate && python main.py"
 
 REM Wait for backend
-timeout /t 5 /nobreak >nul
+ping 127.0.0.1 -n 6 >nul
 
 REM Start Admin Dashboard
 start "Admin Dashboard (3000)" cmd /k "cd dasboard && npm start"
 
 REM Wait a bit
-timeout /t 2 /nobreak >nul
+ping 127.0.0.1 -n 3 >nul
 
 REM Start User End
 start "User End (3002)" cmd /k "cd userend && npm start"

@@ -41,13 +41,13 @@ cleanup_code = '''
                                 
                                 if wh_stock:
                                     wh_stock.quantity += qty
-                                    wh_stock.last_updated = datetime.utcnow()
+                                    wh_stock.last_updated = datetime.now(__import__("datetime").timezone.utc)
                                 else:
                                     db.add(LocationStock(
                                         location_id=warehouse.id,
                                         item_id=item_stock.item_id,
                                         quantity=qty,
-                                        last_updated=datetime.utcnow()
+                                        last_updated=datetime.now(__import__("datetime").timezone.utc)
                                     ))
                                 
                                 db.add(InventoryTransaction(
@@ -56,13 +56,13 @@ cleanup_code = '''
                                     quantity=-qty,
                                     location_id=room.inventory_location_id,
                                     destination_location_id=warehouse.id,
-                                    transaction_date=datetime.utcnow(),
+                                    transaction_date=datetime.now(__import__("datetime").timezone.utc),
                                     notes=f"Checkout cleanup - returned from Room {room.number}",
                                     user_id=current_user.id if current_user else None
                                 ))
                                 
                                 item_stock.quantity = 0
-                                item_stock.last_updated = datetime.utcnow()
+                                item_stock.last_updated = datetime.now(__import__("datetime").timezone.utc)
                                 print(f"[CLEANUP] Returned {qty} x {item_name} from Room {room.number}")
             except Exception as e:
                 print(f"[WARNING] Cleanup failed: {e}")

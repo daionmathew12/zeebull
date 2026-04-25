@@ -465,7 +465,7 @@ async def user_page(request: Request, path: str = ""):
 @app.get("/health")
 async def health_check():
     """Health check endpoint for monitoring"""
-    return {"status": "healthy", "message": "Resort Management System is running"}
+    return {"status": "healthy", "message": "Resort Management System is running", "debug": "RELOAD_TEST_V4"}
 
 
 # API documentation redirect

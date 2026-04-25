@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional, Any
 import shutil
 from datetime import datetime
+from app.utils.date_utils import get_ist_now, get_ist_today
 from app.database import get_db
 from app.utils.auth import get_current_user
 from app.models.legal import LegalDocument
@@ -43,7 +44,7 @@ async def upload_legal_document(
 ):
     print(f"[DEBUG] Uploading legal document: {name} for branch {x_branch_id}")
     # Generate unique filename
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    timestamp = get_ist_now().strftime("%Y%m%d%H%M%S")
     filename = f"{timestamp}_{file.filename}"
     file_path = os.path.join(UPLOAD_DIR, filename)
     

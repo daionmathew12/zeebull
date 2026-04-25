@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, Float, String, ForeignKey, DateTime, Date, Enum, func, Boolean, Text, JSON
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import timezone, datetime
 from app.database import Base
 import enum
 
@@ -14,7 +14,7 @@ class CheckoutRequest(Base):
     package_booking_id = Column(Integer, ForeignKey("package_bookings.id"), nullable=True)
     room_number = Column(String, nullable=False)
     guest_name = Column(String, nullable=False)
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 
@@ -59,7 +59,7 @@ class CheckoutVerification(Base):
     checkout_id = Column(Integer, ForeignKey("checkouts.id"), nullable=False)
     checkout_request_id = Column(Integer, ForeignKey("checkout_requests.id"), nullable=True)  # Link to original request
     room_number = Column(String, nullable=False)
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 
@@ -98,7 +98,7 @@ class CheckoutPayment(Base):
     transaction_id = Column(String, nullable=True)
     notes = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 
@@ -120,7 +120,7 @@ class Checkout(Base):
     guest_name = Column(String, default="")
     room_number = Column(String, default="")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    checkout_date = Column(DateTime, default=datetime.utcnow)
+    checkout_date = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     payment_method = Column(String, default="")
     
     # Enhanced fields
@@ -149,7 +149,7 @@ class Checkout(Base):
     package_booking_id = Column(Integer, ForeignKey("package_bookings.id"), nullable=True, unique=True)
     payment_status = Column(String) 
     notes = Column(Text, nullable=True) # General notes for the checkout record
-    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True, server_default="1")
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=False, index=True)
     
     branch = relationship("Branch")
 

@@ -23,6 +23,7 @@ from app.models import (
 from app.models.checkout import CheckoutPayment, CheckoutVerification
 from app.models.employee import WorkingLog, Leave
 from app.utils.api_optimization import apply_api_optimizations
+from app.utils.date_utils import get_ist_now, get_ist_today, ist_to_utc
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
@@ -44,7 +45,7 @@ def get_daily_arrival_report(
     """Daily Arrival Report: List of guests checking in today"""
     try:
         if not report_date:
-            report_date = date.today()
+            report_date = get_ist_today().date()
         
         bookings = (db.query(Booking).filter(Booking.branch_id == branch_id) if branch_id is not None else db.query(Booking)).filter(
             Booking.check_in == report_date
@@ -129,10 +130,18 @@ def get_daily_departure_report(
 ):
     """Daily Departure Report: List of guests checking out"""
     if not report_date:
-        report_date = date.today()
+        report_date = get_ist_today().date()
     
-    checkouts = (db.query(Checkout).filter(Checkout.branch_id == branch_id) if branch_id is not None else db.query(Checkout)).filter(
-        func.date(Checkout.checkout_date) == report_date
+    # Calculate UTC range for the IST report date
+    start_ist = datetime.combine(report_date, datetime.min.time())
+    end_ist = start_ist + timedelta(days=1)
+    start_utc = ist_to_utc(start_ist)
+    end_utc = ist_to_utc(end_ist)
+    
+    checkouts_query = (db.query(Checkout).filter(Checkout.branch_id == branch_id) if branch_id is not None else db.query(Checkout))
+    checkouts = checkouts_query.filter(
+        Checkout.checkout_date >= start_utc,
+        Checkout.checkout_date < end_utc
     ).options(
         joinedload(Checkout.booking),
         joinedload(Checkout.package_booking),
@@ -145,7 +154,7 @@ def get_daily_departure_report(
         result.append({
             "room_number": checkout.room_number,
             "guest_name": checkout.guest_name,
-            "checkout_time": checkout.checkout_date.isoformat() + "Z" if checkout.checkout_date else None,
+            "checkout_time": checkout.checkout_date.isoformat() + "Z" if (checkout.checkout_date and not checkout.checkout_date.tzinfo) else (checkout.checkout_date.isoformat().replace("+00:00", "Z") if checkout.checkout_date else None),
             "room_total": checkout.room_total,
             "food_total": checkout.food_total,
             "service_total": checkout.service_total,
@@ -170,7 +179,7 @@ def get_occupancy_report(
 ):
     """Occupancy Report: % of rooms occupied vs vacant"""
     if not report_date:
-        report_date = date.today()
+        report_date = get_ist_today().date()
     
     total_rooms = (db.query(Room).filter(Room.branch_id == branch_id) if branch_id is not None else db.query(Room)).count()
     
@@ -235,8 +244,8 @@ def get_police_c_form_report(
             "guest_name": booking.guest_name,
             "guest_mobile": booking.guest_mobile,
             "guest_email": booking.guest_email,
-            "check_in": booking.check_in.isoformat() + "Z",
-            "check_out": booking.check_out.isoformat() + "Z",
+            "check_in": booking.check_in.isoformat() + "Z" if (booking.check_in and not hasattr(booking.check_in, 'tzinfo')) or (hasattr(booking.check_in, 'tzinfo') and not booking.check_in.tzinfo) else (booking.check_in.isoformat().replace("+00:00", "Z") if booking.check_in else None),
+            "check_out": booking.check_out.isoformat() + "Z" if (booking.check_out and not hasattr(booking.check_out, 'tzinfo')) or (hasattr(booking.check_out, 'tzinfo') and not booking.check_out.tzinfo) else (booking.check_out.isoformat().replace("+00:00", "Z") if booking.check_out else None),
             "passport_number": "N/A",  # Add passport field to Booking model
             "visa_number": "N/A",  # Add visa field to Booking model
             "nationality": "N/A",  # Add nationality field to Booking model
@@ -256,35 +265,41 @@ def get_night_audit_report(
 ):
     """Night Audit Report: Summary of day's total business closed at midnight"""
     if not audit_date:
-        audit_date = date.today() - timedelta(days=1)
+        audit_date = get_ist_today().date() - timedelta(days=1)
     
+    # Calculate UTC range for the IST audit date
+    start_ist = datetime.combine(audit_date, datetime.min.time())
+    end_ist = start_ist + timedelta(days=1)
+    start_utc = ist_to_utc(start_ist)
+    end_utc = ist_to_utc(end_ist)
+        
     # Room revenue
-    room_revenue = (db.query(func.sum(Checkout.room_total)).filter(Checkout.branch_id == branch_id) if branch_id is not None else db.query(func.sum(Checkout.room_total))).filter(
-        func.date(Checkout.checkout_date) == audit_date
-    ).scalar() or 0
+    rev_q = db.query(func.sum(Checkout.room_total))
+    if branch_id is not None: rev_q = rev_q.filter(Checkout.branch_id == branch_id)
+    room_revenue = rev_q.filter(Checkout.checkout_date >= start_utc, Checkout.checkout_date < end_utc).scalar() or 0
     
     # Food & Beverage revenue
-    food_revenue = (db.query(func.sum(Checkout.food_total)).filter(Checkout.branch_id == branch_id) if branch_id is not None else db.query(func.sum(Checkout.food_total))).filter(
-        func.date(Checkout.checkout_date) == audit_date
-    ).scalar() or 0
+    food_q = db.query(func.sum(Checkout.food_total))
+    if branch_id is not None: food_q = food_q.filter(Checkout.branch_id == branch_id)
+    food_revenue = food_q.filter(Checkout.checkout_date >= start_utc, Checkout.checkout_date < end_utc).scalar() or 0
     
     # Service revenue
-    service_revenue = (db.query(func.sum(Checkout.service_total)).filter(Checkout.branch_id == branch_id) if branch_id is not None else db.query(func.sum(Checkout.service_total))).filter(
-        func.date(Checkout.checkout_date) == audit_date
-    ).scalar() or 0
+    svc_q = db.query(func.sum(Checkout.service_total))
+    if branch_id is not None: svc_q = svc_q.filter(Checkout.branch_id == branch_id)
+    service_revenue = svc_q.filter(Checkout.checkout_date >= start_utc, Checkout.checkout_date < end_utc).scalar() or 0
     
     # Tax collected
-    tax_collected = (db.query(func.sum(Checkout.tax_amount)).filter(Checkout.branch_id == branch_id) if branch_id is not None else db.query(func.sum(Checkout.tax_amount))).filter(
-        func.date(Checkout.checkout_date) == audit_date
-    ).scalar() or 0
+    tax_q = db.query(func.sum(Checkout.tax_amount))
+    if branch_id is not None: tax_q = tax_q.filter(Checkout.branch_id == branch_id)
+    tax_collected = tax_q.filter(Checkout.checkout_date >= start_utc, Checkout.checkout_date < end_utc).scalar() or 0
     
     # Total revenue
     total_revenue = room_revenue + food_revenue + service_revenue + tax_collected
     
     # Checkouts count
-    checkouts_count = (db.query(Checkout).filter(Checkout.branch_id == branch_id) if branch_id is not None else db.query(Checkout)).filter(
-        func.date(Checkout.checkout_date) == audit_date
-    ).count()
+    co_count_q = db.query(Checkout)
+    if branch_id is not None: co_count_q = co_count_q.filter(Checkout.branch_id == branch_id)
+    checkouts_count = co_count_q.filter(Checkout.checkout_date >= start_utc, Checkout.checkout_date < end_utc).count()
     
     return {
         "audit_date": audit_date.isoformat() + "Z",
@@ -356,7 +371,7 @@ def get_in_house_guest_list(
 ):
     """In-House Guest List: Currently checked-in guests (Emergency evacuation list)"""
     try:
-        today = date.today()
+        today = get_ist_today().date()
         
         bookings = (db.query(Booking).filter(Booking.branch_id == branch_id) if branch_id is not None else db.query(Booking)).filter(
             and_(
@@ -386,8 +401,8 @@ def get_in_house_guest_list(
                     "guest_name": booking.guest_name,
                     "guest_mobile": booking.guest_mobile,
                     "room_number": br.room.number if br.room else "N/A",
-                    "check_in": booking.check_in.isoformat() + "Z",
-                    "check_out": booking.check_out.isoformat() + "Z",
+                    "check_in": booking.check_in.isoformat() + "Z" if (booking.check_in and not hasattr(booking.check_in, 'tzinfo')) or (hasattr(booking.check_in, 'tzinfo') and not booking.check_in.tzinfo) else (booking.check_in.isoformat().replace("+00:00", "Z") if booking.check_in else None),
+                    "check_out": booking.check_out.isoformat() + "Z" if (booking.check_out and not hasattr(booking.check_out, 'tzinfo')) or (hasattr(booking.check_out, 'tzinfo') and not booking.check_out.tzinfo) else (booking.check_out.isoformat().replace("+00:00", "Z") if booking.check_out else None),
                     "adults": booking.adults,
                     "children": booking.children,
                     "booking_type": "Regular"
@@ -399,8 +414,8 @@ def get_in_house_guest_list(
                     "guest_name": pkg_booking.guest_name,
                     "guest_mobile": pkg_booking.guest_mobile,
                     "room_number": pbr.room.number if pbr.room else "N/A",
-                    "check_in": pkg_booking.check_in.isoformat() + "Z",
-                    "check_out": pkg_booking.check_out.isoformat() + "Z",
+                    "check_in": pkg_booking.check_in.isoformat() + "Z" if (pkg_booking.check_in and not hasattr(pkg_booking.check_in, 'tzinfo')) or (hasattr(pkg_booking.check_in, 'tzinfo') and not pkg_booking.check_in.tzinfo) else (pkg_booking.check_in.isoformat().replace("+00:00", "Z") if pkg_booking.check_in else None),
+                    "check_out": pkg_booking.check_out.isoformat() + "Z" if (pkg_booking.check_out and not hasattr(pkg_booking.check_out, 'tzinfo')) or (hasattr(pkg_booking.check_out, 'tzinfo') and not pkg_booking.check_out.tzinfo) else (pkg_booking.check_out.isoformat().replace("+00:00", "Z") if pkg_booking.check_out else None),
                     "adults": pkg_booking.adults,
                     "children": pkg_booking.children,
                     "booking_type": "Package"
@@ -425,11 +440,19 @@ def get_daily_sales_summary(
 ):
     """Daily Sales Summary: Food vs Beverage vs Alcohol sales by meal period"""
     if not report_date:
-        report_date = date.today()
+        report_date = get_ist_today().date()
     
-    # Get all food orders for the date
-    orders = (db.query(FoodOrder).filter(FoodOrder.branch_id == branch_id) if branch_id is not None else db.query(FoodOrder)).filter(
-        func.date(FoodOrder.created_at) == report_date
+    # Calculate UTC range for the IST report date
+    start_ist = datetime.combine(report_date, datetime.min.time())
+    end_ist = start_ist + timedelta(days=1)
+    start_utc = ist_to_utc(start_ist)
+    end_utc = ist_to_utc(end_ist)
+    
+    # Get all food orders for the date range
+    orders_query = (db.query(FoodOrder).filter(FoodOrder.branch_id == branch_id) if branch_id is not None else db.query(FoodOrder))
+    orders = orders_query.filter(
+        FoodOrder.created_at >= start_utc,
+        FoodOrder.created_at < end_utc
     ).options(
         joinedload(FoodOrder.items).joinedload(FoodOrderItem.food_item)
     ).all()
@@ -504,9 +527,11 @@ def get_item_wise_sales_report(
     )
     
     if start_date:
-        query = query.filter(func.date(FoodOrder.created_at) >= start_date)
+        start_utc = ist_to_utc(datetime.combine(start_date, datetime.min.time()))
+        query = query.filter(FoodOrder.created_at >= start_utc)
     if end_date:
-        query = query.filter(func.date(FoodOrder.created_at) <= end_date)
+        end_utc = ist_to_utc(datetime.combine(end_date, datetime.min.time()) + timedelta(days=1))
+        query = query.filter(FoodOrder.created_at < end_utc)
     
     query = query.group_by(FoodItem.id, FoodItem.name).order_by(
         func.sum(FoodOrderItem.quantity * FoodItem.price).desc()
@@ -544,9 +569,11 @@ def get_kot_analysis(
     query = (db.query(FoodOrder).filter(FoodOrder.branch_id == branch_id) if branch_id is not None else db.query(FoodOrder)).filter(FoodOrder.status == "completed")
     
     if start_date:
-        query = query.filter(func.date(FoodOrder.created_at) >= start_date)
+        start_utc = ist_to_utc(datetime.combine(start_date, datetime.min.time()))
+        query = query.filter(FoodOrder.created_at >= start_utc)
     if end_date:
-        query = query.filter(func.date(FoodOrder.created_at) <= end_date)
+        end_utc = ist_to_utc(datetime.combine(end_date, datetime.min.time()) + timedelta(days=1))
+        query = query.filter(FoodOrder.created_at < end_utc)
     
     orders = query.options(
         joinedload(FoodOrder.room),
@@ -567,8 +594,8 @@ def get_kot_analysis(
         result.append({
             "kot_number": f"KOT-{order.id}",
             "room_number": order.room.number if order.room else "Dine-in",
-            "order_time": order_time.isoformat() + "Z" if order_time else None,
-            "service_time": service_time.isoformat() + "Z" if service_time else None,
+            "order_time": order_time.isoformat() + "Z" if (order_time and not order_time.tzinfo) else (order_time.isoformat().replace("+00:00", "Z") if order_time else None),
+            "service_time": service_time.isoformat() + "Z" if (service_time and not service_time.tzinfo) else (service_time.isoformat().replace("+00:00", "Z") if service_time else None),
             "time_taken_minutes": round(time_taken, 2),
             "items_count": len(order.items),
             "status": order.status
@@ -596,9 +623,11 @@ def get_void_cancellation_report(
     )
     
     if start_date:
-        query = query.filter(func.date(FoodOrder.created_at) >= start_date)
+        start_utc = ist_to_utc(datetime.combine(start_date, datetime.min.time()))
+        query = query.filter(FoodOrder.created_at >= start_utc)
     if end_date:
-        query = query.filter(func.date(FoodOrder.created_at) <= end_date)
+        end_utc = ist_to_utc(datetime.combine(end_date, datetime.min.time()) + timedelta(days=1))
+        query = query.filter(FoodOrder.created_at < end_utc)
     
     orders = query.options(
         joinedload(FoodOrder.room),
@@ -611,7 +640,7 @@ def get_void_cancellation_report(
         result.append({
             "order_id": order.id,
             "room_number": order.room.number if order.room else "Dine-in",
-            "order_time": order.created_at.isoformat() + "Z" if order.created_at else None,
+            "order_time": order.created_at.isoformat() + "Z" if (order.created_at and not order.created_at.tzinfo) else (order.created_at.isoformat().replace("+00:00", "Z") if order.created_at else None),
             "amount": order.amount,
             "status": order.status,
             "employee_name": order.employee.name if order.employee else "N/A",
@@ -643,9 +672,11 @@ def get_discount_complimentary_report(
     )
     
     if start_date:
-        query = query.filter(func.date(FoodOrder.created_at) >= start_date)
+        start_utc = ist_to_utc(datetime.combine(start_date, datetime.min.time()))
+        query = query.filter(FoodOrder.created_at >= start_utc)
     if end_date:
-        query = query.filter(func.date(FoodOrder.created_at) <= end_date)
+        end_utc = ist_to_utc(datetime.combine(end_date, datetime.min.time()) + timedelta(days=1))
+        query = query.filter(FoodOrder.created_at < end_utc)
     
     orders = query.options(
         joinedload(FoodOrder.room),
@@ -687,9 +718,11 @@ def get_nc_report(
     )
     
     if start_date:
-        query = query.filter(func.date(FoodOrder.created_at) >= start_date)
+        start_utc = ist_to_utc(datetime.combine(start_date, datetime.min.time()))
+        query = query.filter(FoodOrder.created_at >= start_utc)
     if end_date:
-        query = query.filter(func.date(FoodOrder.created_at) <= end_date)
+        end_utc = ist_to_utc(datetime.combine(end_date, datetime.min.time()) + timedelta(days=1))
+        query = query.filter(FoodOrder.created_at < end_utc)
     
     orders = query.options(
         joinedload(FoodOrder.employee),
@@ -852,7 +885,7 @@ def get_expiry_aging_report(
     """Expiry / Aging Report: Perishable items expiring in next N days"""
     # Note: Requires expiry_date field in InventoryTransaction or InventoryItem
     # For now, checking perishable items
-    cutoff_date = date.today() + timedelta(days=days_ahead)
+    cutoff_date = get_ist_today().date() + timedelta(days=days_ahead)
     
     # Get perishable items with transactions
     items = db.query(InventoryItem).filter(
@@ -868,7 +901,7 @@ def get_expiry_aging_report(
         for transaction in item.transactions:
             expiry_date = getattr(transaction, 'expiry_date', None)
             if expiry_date and expiry_date <= cutoff_date:
-                days_until_expiry = (expiry_date - date.today()).days
+                days_until_expiry = (expiry_date - get_ist_today().date()).days
                 result.append({
                     "item_name": item.name,
                     "item_code": item.item_code,
@@ -903,9 +936,11 @@ def get_stock_movement_register(
     if item_id:
         query = query.filter(InventoryTransaction.item_id == item_id)
     if start_date:
-        query = query.filter(func.date(InventoryTransaction.created_at) >= start_date)
+        start_utc = ist_to_utc(datetime.combine(start_date, datetime.min.time()))
+        query = query.filter(InventoryTransaction.created_at >= start_utc)
     if end_date:
-        query = query.filter(func.date(InventoryTransaction.created_at) <= end_date)
+        end_utc = ist_to_utc(datetime.combine(end_date, datetime.min.time()) + timedelta(days=1))
+        query = query.filter(InventoryTransaction.created_at < end_utc)
     
     transactions = query.order_by(InventoryTransaction.created_at.desc()).offset(skip).limit(limit).all()
     
@@ -945,9 +980,11 @@ def get_waste_spoilage_report(
         )
         
         if start_date:
-            query = query.filter(func.date(WasteLog.created_at) >= start_date)
+            start_utc = ist_to_utc(datetime.combine(start_date, datetime.min.time()))
+            query = query.filter(WasteLog.created_at >= start_utc)
         if end_date:
-            query = query.filter(func.date(WasteLog.created_at) <= end_date)
+            end_utc = ist_to_utc(datetime.combine(end_date, datetime.min.time()) + timedelta(days=1))
+            query = query.filter(WasteLog.created_at < end_utc)
         
         waste_logs = query.order_by(WasteLog.created_at.desc()).offset(skip).limit(limit).all()
         
@@ -1097,8 +1134,8 @@ def get_room_discrepancy_report(
         booking = (db.query(Booking).filter(Booking.branch_id == branch_id) if branch_id is not None else db.query(Booking)).join(BookingRoom).filter(
             and_(
                 BookingRoom.room_id == room.id,
-                Booking.check_in <= date.today(),
-                Booking.check_out > date.today(),
+                Booking.check_in <= get_ist_today().date(),
+                Booking.check_out > get_ist_today().date(),
                 Booking.status == "checked-in"
             )
         ).first()
@@ -1419,9 +1456,9 @@ def get_payroll_register(
 ):
     """Payroll Register: Salary calculation (Basic + OT - Deductions)"""
     if not year:
-        year = date.today().year
+        year = get_ist_today().date().year
     if not month:
-        month = date.today().month
+        month = get_ist_today().date().month
     
     # Get employees
     employees = (db.query(Employee).filter(Employee.branch_id == branch_id) if branch_id is not None else db.query(Employee)).offset(skip).limit(limit).all()
@@ -1506,7 +1543,7 @@ def get_management_dashboard(
 ):
     """Management Dashboard: ADR, RevPAR, Food Cost %, Occupancy %"""
     if not report_date:
-        report_date = date.today()
+        report_date = get_ist_today().date()
     
     # Total rooms
     total_rooms = (db.query(Room).filter(Room.branch_id == branch_id) if branch_id is not None else db.query(Room)).count()

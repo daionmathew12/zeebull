@@ -6,7 +6,7 @@ This is a one-time fix for purchases that were received before the location stoc
 
 from app.database import SessionLocal
 from app.models.inventory import PurchaseMaster, PurchaseDetail, LocationStock
-from datetime import datetime
+from datetime import timezone, datetime
 
 db = SessionLocal()
 
@@ -49,7 +49,7 @@ for purchase in received_purchases:
                 location_id=purchase.destination_location_id,
                 item_id=detail.item_id,
                 quantity=detail.quantity,
-                last_updated=datetime.utcnow()
+                last_updated=datetime.now(timezone.utc)
             )
             db.add(loc_stock)
             print(f"   ✅ {item_name}: Added {detail.quantity} to location stock")

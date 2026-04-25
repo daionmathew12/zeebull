@@ -4,7 +4,8 @@ API endpoints for Accounting Module
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime
+from datetime import timezone, datetime
+from app.utils.date_utils import get_ist_now, get_ist_today
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 import functools
 
@@ -296,7 +297,7 @@ def fix_missing_journal_entries(
     from app.models.checkout import Checkout
     from app.models.account import JournalEntry
     from app.utils.accounting_helpers import create_complete_checkout_journal_entry
-    from datetime import datetime, timedelta
+    from datetime import timezone, datetime, timedelta
     
     try:
         checkouts_to_fix = []
@@ -311,7 +312,7 @@ def fix_missing_journal_entries(
                 checkouts_to_fix = [checkout]
         else:
             # Fix all checkouts in last N days
-            cutoff_date = datetime.now() - timedelta(days=days)
+            cutoff_date = get_ist_now() - timedelta(days=days)
             checkouts = db.query(Checkout).filter(Checkout.created_at >= cutoff_date).all()
             checkouts_to_fix = checkouts
         
@@ -408,7 +409,7 @@ def get_comprehensive_report(
         from app.models.employee import Employee, Attendance, Leave, WorkingLog
         from sqlalchemy import and_, or_
         from sqlalchemy.orm import joinedload
-        from datetime import datetime, date as date_type
+        from datetime import timezone, datetime, date as date_type
         
         # Parse dates
         start_dt = None
@@ -449,7 +450,7 @@ def get_comprehensive_report(
                 "start_date": start_date,
                 "end_date": end_date
             },
-            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "generated_at": get_ist_now().isoformat() + "Z",
             "data": {}
         }
         
@@ -904,7 +905,7 @@ def get_automatic_accounting_report(
                 if isinstance(start_date, str):
                     # Try parsing as date first (YYYY-MM-DD)
                     if len(start_date) == 10 and start_date.count('-') == 2:
-                        from datetime import date as date_type
+                        from datetime import timezone, date as date_type
                         date_obj = date_type.fromisoformat(start_date)
                         start_dt = datetime.combine(date_obj, datetime.min.time())
                     else:
@@ -920,7 +921,7 @@ def get_automatic_accounting_report(
                 if isinstance(end_date, str):
                     # Try parsing as date first (YYYY-MM-DD)
                     if len(end_date) == 10 and end_date.count('-') == 2:
-                        from datetime import date as date_type
+                        from datetime import timezone, date as date_type
                         date_obj = date_type.fromisoformat(end_date)
                         end_dt = datetime.combine(date_obj, datetime.max.time())
                     else:
@@ -1296,7 +1297,7 @@ def get_automatic_accounting_report(
                 "net_profit": net_profit,
                 "profit_margin": (net_profit / total_revenue * 100) if total_revenue > 0 else 0,
             },
-            "calculated_at": datetime.utcnow().isoformat() + "Z",
+            "calculated_at": datetime.now(timezone.utc).isoformat() + "Z",
         }
     except Exception as e:
         import traceback

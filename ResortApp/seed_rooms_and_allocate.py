@@ -2,7 +2,7 @@
 import sys
 import os
 import random
-from datetime import datetime
+from datetime import timezone, datetime
 
 # Add current directory to path
 sys.path.append(os.getcwd())
@@ -87,7 +87,7 @@ def seed_rooms_and_allocate():
                 issued_by=admin_id,
                 source_location_id=warehouse.id,
                 destination_location_id=room.id,
-                issue_date=datetime.utcnow(),
+                issue_date=datetime.now(timezone.utc),
                 notes="Initial Room Setup / Allocation"
             )
             db.add(issue)
@@ -120,7 +120,7 @@ def seed_rooms_and_allocate():
                             location_id=room.id,
                             item_id=item.id,
                             quantity=qty,
-                            last_updated=datetime.utcnow()
+                            last_updated=datetime.now(timezone.utc)
                         )
                         db.add(room_stock)
                         

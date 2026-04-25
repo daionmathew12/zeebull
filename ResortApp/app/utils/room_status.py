@@ -3,6 +3,7 @@ from sqlalchemy.exc import OperationalError, DisconnectionError
 from app.models.room import Room
 from app.models.booking import Booking, BookingRoom
 from datetime import date
+from app.utils.date_utils import get_ist_today
 import time
 
 def update_room_statuses(db: Session):
@@ -16,7 +17,7 @@ def update_room_statuses(db: Session):
     
     for attempt in range(max_retries):
         try:
-            today = date.today()
+            today = get_ist_today().date()
             
             # Use with_for_update(nowait=True) to prevent deadlocks, but fallback if it fails
             try:

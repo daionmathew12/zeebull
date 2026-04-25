@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import func
 from decimal import Decimal
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Optional, List
 from fastapi import HTTPException
 from app.models.inventory import (
@@ -16,7 +16,7 @@ from app.schemas.inventory import (
 
 # Category CRUD
 def create_category(db: Session, data: InventoryCategoryCreate):
-    category = InventoryCategory(**data.dict())
+    category = InventoryCategory(**data.model_dump())
     db.add(category)
     db.commit()
     db.refresh(category)
@@ -41,7 +41,7 @@ def update_category(db: Session, category_id: int, data: InventoryCategoryUpdate
     if not category:
         return None
     
-    for field, value in data.dict(exclude_unset=True).items():
+    for field, value in data.model_dump(exclude_unset=True).items():
         setattr(category, field, value)
     
     db.commit()
@@ -51,7 +51,7 @@ def update_category(db: Session, category_id: int, data: InventoryCategoryUpdate
 
 # Item CRUD
 def create_item(db: Session, data: InventoryItemCreate):
-    item = InventoryItem(**data.dict())
+    item = InventoryItem(**data.model_dump())
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -83,7 +83,7 @@ def update_item(db: Session, item_id: int, data: InventoryItemUpdate):
     if not item:
         return None
     
-    for field, value in data.dict(exclude_unset=True).items():
+    for field, value in data.model_dump(exclude_unset=True).items():
         if value is not None:
             setattr(item, field, value)
     
@@ -278,7 +278,7 @@ def create_purchase_master(db: Session, data: PurchaseMasterCreate, branch_id: i
     total_discount = Decimal("0.00")
     
     # Create purchase master
-    master_data = data.dict(exclude={"details"})
+    master_data = data.model_dump(exclude={"details"})
     purchase_master = PurchaseMaster(**master_data, created_by=created_by, branch_id=branch_id)
 
     db.add(purchase_master)
@@ -389,7 +389,7 @@ def get_item_stocks(db: Session, item_id: int, branch_id: Optional[int] = None):
 def update_location_stock(db: Session, location_id: int, item_id: int, quantity: float):
     """Helper to update stock at a specific location and synchronize global item stock"""
     from app.models.inventory import LocationStock, Location, InventoryItem
-    from datetime import datetime
+    from datetime import timezone, datetime
     
     # 1. Update Location-Specific Stock
     stock = db.query(LocationStock).filter(
@@ -399,7 +399,7 @@ def update_location_stock(db: Session, location_id: int, item_id: int, quantity:
     
     if stock:
         stock.quantity += quantity
-        stock.last_updated = datetime.utcnow()
+        stock.last_updated = datetime.now(timezone.utc)
     else:
         # Get branch_id from location
         loc = db.query(Location).filter(Location.id == location_id).first()
@@ -410,7 +410,7 @@ def update_location_stock(db: Session, location_id: int, item_id: int, quantity:
             item_id=item_id,
             quantity=quantity,
             branch_id=branch_id,
-            last_updated=datetime.utcnow()
+            last_updated=datetime.now(timezone.utc)
         )
         db.add(stock)
     
@@ -437,11 +437,11 @@ def update_purchase_master(db: Session, purchase_id: int, data: PurchaseMasterUp
         # If trying to update other fields but not cancelling, restrict it
         # But if just updating payment status, allow it
         allowed_fields = ["payment_status", "payment_terms", "notes"]
-        update_data = data.dict(exclude_unset=True)
+        update_data = data.model_dump(exclude_unset=True)
         if any(field not in allowed_fields for field in update_data.keys()):
              return None # Or raise error in API
     
-    for field, value in data.dict(exclude_unset=True, exclude={"details"}).items():
+    for field, value in data.model_dump(exclude_unset=True, exclude={"details"}).items():
         setattr(purchase, field, value)
     
     # Handle details update if provided
@@ -530,7 +530,7 @@ def update_purchase_status(db: Session, purchase_id: int, status: str, current_u
     if old_status == new_status:
         return purchase
 
-    from datetime import datetime
+    from datetime import timezone, datetime
     from app.models.inventory import LocationStock, InventoryTransaction
         
     # CASE 1: Transition TO RECEIVED (Stock In)
@@ -552,13 +552,13 @@ def update_purchase_status(db: Session, purchase_id: int, status: str, current_u
                 qty = float(detail.quantity or 0)
                 if loc_stock:
                     loc_stock.quantity += qty
-                    loc_stock.last_updated = datetime.utcnow()
+                    loc_stock.last_updated = datetime.now(timezone.utc)
                 else:
                     loc_stock = LocationStock(
                         location_id=purchase.destination_location_id,
                         item_id=detail.item_id,
                         quantity=qty,
-                        last_updated=datetime.utcnow(),
+                        last_updated=datetime.now(timezone.utc),
                         branch_id=purchase.branch_id
                     )
                     db.add(loc_stock)
@@ -671,8 +671,8 @@ def update_purchase_status(db: Session, purchase_id: int, status: str, current_u
 
 # Stock Requisition CRUD
 def generate_requisition_number(db: Session, branch_id: int):
-    from datetime import datetime
-    today = datetime.utcnow()
+    from datetime import timezone, datetime
+    today = datetime.now(timezone.utc)
     date_str = today.strftime("%Y%m%d")
     start_count = db.query(StockRequisition).filter(
         StockRequisition.requisition_number.like(f"REQ-{date_str}-%")
@@ -697,7 +697,7 @@ def generate_requisition_number(db: Session, branch_id: int):
 def create_stock_requisition(db: Session, data: dict, branch_id: int, created_by: int):
 
     from app.models.inventory import StockRequisition, StockRequisitionDetail
-    from datetime import datetime
+    from datetime import timezone, datetime
     
     requisition_number = generate_requisition_number(db, branch_id)
 
@@ -751,7 +751,7 @@ def get_requisition_by_id(db: Session, requisition_id: int):
 
 def update_requisition_status(db: Session, requisition_id: int, status: str, approved_by: Optional[int] = None):
     from app.models.inventory import StockRequisition
-    from datetime import datetime
+    from datetime import timezone, datetime
     
     requisition = get_requisition_by_id(db, requisition_id)
     if not requisition:
@@ -760,7 +760,7 @@ def update_requisition_status(db: Session, requisition_id: int, status: str, app
     requisition.status = status
     if status == "approved" and approved_by:
         requisition.approved_by = approved_by
-        requisition.approved_at = datetime.utcnow()
+        requisition.approved_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(requisition)
@@ -768,10 +768,10 @@ def update_requisition_status(db: Session, requisition_id: int, status: str, app
 
 
 def generate_issue_number(db: Session, branch_id: int):
-    from datetime import datetime
+    from datetime import timezone, datetime
     from app.models.inventory import StockIssue
     
-    today = datetime.utcnow()
+    today = datetime.now(timezone.utc)
     date_str = today.strftime("%Y%m%d")
     
     # Get the last issue number for today to continue sequence
@@ -816,7 +816,7 @@ def generate_issue_number(db: Session, branch_id: int):
 def create_stock_issue(db: Session, data: dict, branch_id: int, issued_by: int):
 
     from app.models.inventory import StockIssue, StockIssueDetail, InventoryTransaction, InventoryItem, Location, LocationStock
-    from datetime import datetime
+    from datetime import timezone, datetime
     from sqlalchemy.exc import IntegrityError
     
     max_retries = 3
@@ -831,9 +831,9 @@ def create_stock_issue(db: Session, data: dict, branch_id: int, issued_by: int):
                 try:
                     issue_date = datetime.fromisoformat(issue_date.replace('Z', '+00:00'))
                 except (ValueError, AttributeError):
-                    issue_date = datetime.utcnow()
+                    issue_date = datetime.now(timezone.utc)
             elif not issue_date:
-                issue_date = datetime.utcnow()
+                issue_date = datetime.now(timezone.utc)
             
             issue = StockIssue(
                 issue_number=issue_number,
@@ -1045,13 +1045,13 @@ def create_stock_issue(db: Session, data: dict, branch_id: int, issued_by: int):
                      
                      if loc_stock:
                          loc_stock.quantity += i_qty
-                         loc_stock.last_updated = datetime.utcnow()
+                         loc_stock.last_updated = datetime.now(timezone.utc)
                      else:
                          new_stock = LocationStock(
                              location_id=dest_loc_id,
                              item_id=detail_data["item_id"],
                              quantity=i_qty,
-                             last_updated=datetime.utcnow(),
+                             last_updated=datetime.now(timezone.utc),
                              branch_id=branch_id
                          )
                          db.add(new_stock)
@@ -1074,7 +1074,7 @@ def create_stock_issue(db: Session, data: dict, branch_id: int, issued_by: int):
                              location_id=source_loc_id,
                              item_id=detail_data["item_id"],
                              quantity= -i_qty if i_qty > 0 else 0, # Initialize negative if we believe we owe it
-                             last_updated=datetime.utcnow(),
+                             last_updated=datetime.now(timezone.utc),
                              branch_id=branch_id
                          )
                          db.add(new_source_stock)
@@ -1117,9 +1117,9 @@ def get_issue_by_id(db: Session, issue_id: int):
 
 # Waste Log CRUD
 def generate_waste_log_number(db: Session, branch_id: int):
-    from datetime import datetime
+    from datetime import timezone, datetime
     from app.models.inventory import WasteLog
-    today = datetime.utcnow()
+    today = datetime.now(timezone.utc)
     date_str = today.strftime("%Y%m%d")
     
     # Get the last log number for today
@@ -1159,7 +1159,7 @@ def create_waste_log(db: Session, data: dict, reported_by: int, branch_id: Optio
 
     from app.models.inventory import WasteLog, InventoryTransaction, InventoryItem, Location
     from app.models.food_item import FoodItem
-    from datetime import datetime
+    from datetime import timezone, datetime
     
     # Derivation logic for Enterprise View (branch_id=None or 'all')
     loc_id = data.get("location_id")
@@ -1196,7 +1196,7 @@ def create_waste_log(db: Session, data: dict, reported_by: int, branch_id: Optio
             photo_path=data.get("photo_path"),
             notes=data.get("notes"),
             reported_by=reported_by,
-            waste_date=data.get("waste_date", datetime.utcnow()),
+            waste_date=data.get("waste_date", datetime.now(timezone.utc)),
             branch_id=branch_id
         )
 
@@ -1230,7 +1230,7 @@ def create_waste_log(db: Session, data: dict, reported_by: int, branch_id: Optio
             photo_path=data.get("photo_path"),
             notes=data.get("notes"),
             reported_by=reported_by,
-            waste_date=data.get("waste_date", datetime.utcnow()),
+            waste_date=data.get("waste_date", datetime.now(timezone.utc)),
             branch_id=branch_id
         )
         db.add(waste_log)
@@ -1248,7 +1248,7 @@ def create_waste_log(db: Session, data: dict, reported_by: int, branch_id: Optio
             ).first()
             if loc_stock:
                 loc_stock.quantity -= data["quantity"]
-                loc_stock.last_updated = datetime.utcnow()
+                loc_stock.last_updated = datetime.now(timezone.utc)
             
             # 2. Handle Asset Mappings (e.g. "light" in Room 101)
             # PERSISTENCE FIX: We don't deactivate the mapping, we just record the waste.
@@ -1413,7 +1413,7 @@ def update_location(db: Session, location_id: int, data: dict):
 # Asset Mapping CRUD
 def create_asset_mapping(db: Session, data: dict, branch_id: int, assigned_by: Optional[int] = None):
     from app.models.inventory import AssetMapping, InventoryItem, LocationStock, Location
-    from datetime import datetime
+    from datetime import timezone, datetime
     
     # Derivation logic for Enterprise View (branch_id=None or 'all')
     dest_loc_id = data.get("location_id")
@@ -1484,7 +1484,7 @@ def create_asset_mapping(db: Session, data: dict, branch_id: int, assigned_by: O
     
     if source_stock:
         source_stock.quantity -= quantity
-        source_stock.last_updated = datetime.utcnow()
+        source_stock.last_updated = datetime.now(timezone.utc)
         print(f"[ASSET] Deducted {quantity} of {item.name} from {source_loc_id}. New stock: {source_stock.quantity}")
     else:
         # Create negative stock record if it doesn't exist
@@ -1493,7 +1493,7 @@ def create_asset_mapping(db: Session, data: dict, branch_id: int, assigned_by: O
             location_id=source_loc_id,
             item_id=item_id,
             quantity=-quantity,
-            last_updated=datetime.utcnow(),
+            last_updated=datetime.now(timezone.utc),
             branch_id=branch_id
         )
         db.add(new_source_stock)
@@ -1515,7 +1515,7 @@ def create_asset_mapping(db: Session, data: dict, branch_id: int, assigned_by: O
         issued_by=assigned_by,
         source_location_id=source_loc_id,
         destination_location_id=data["location_id"],
-        issue_date=datetime.utcnow(),
+        issue_date=datetime.now(timezone.utc),
         notes=f"Auto-generated from Asset Assignment to {dest_name}",
         branch_id=branch_id
     )
@@ -1574,13 +1574,13 @@ def create_asset_mapping(db: Session, data: dict, branch_id: int, assigned_by: O
     
     if loc_stock:
         loc_stock.quantity += quantity
-        loc_stock.last_updated = datetime.utcnow()
+        loc_stock.last_updated = datetime.now(timezone.utc)
     else:
         new_stock = LocationStock(
             location_id=data["location_id"],
             item_id=item_id,
             quantity=quantity,
-            last_updated=datetime.utcnow(),
+            last_updated=datetime.now(timezone.utc),
             branch_id=branch_id
         )
         db.add(new_stock)
@@ -1609,7 +1609,7 @@ def get_asset_mapping_by_id(db: Session, mapping_id: int):
 
 def update_asset_mapping(db: Session, mapping_id: int, data: dict):
     from app.models.inventory import AssetMapping, Location, LocationStock
-    from datetime import datetime
+    from datetime import timezone, datetime
     mapping = get_asset_mapping_by_id(db, mapping_id)
     if not mapping:
         return None
@@ -1633,7 +1633,7 @@ def update_asset_mapping(db: Session, mapping_id: int, data: dict):
             
             if target_stock:
                 target_stock.quantity -= qty
-                target_stock.last_updated = datetime.utcnow()
+                target_stock.last_updated = datetime.now(timezone.utc)
                 
             # 2. Add back to Warehouse
             wh_stock = db.query(LocationStock).filter(
@@ -1643,13 +1643,13 @@ def update_asset_mapping(db: Session, mapping_id: int, data: dict):
             
             if wh_stock:
                 wh_stock.quantity += qty
-                wh_stock.last_updated = datetime.utcnow()
+                wh_stock.last_updated = datetime.now(timezone.utc)
             else:
                 wh_stock = LocationStock(
                     location_id=warehouse.id,
                     item_id=mapping.item_id,
                     quantity=qty,
-                    last_updated=datetime.utcnow()
+                    last_updated=datetime.now(timezone.utc)
                 )
                 db.add(wh_stock)
 
@@ -1665,7 +1665,7 @@ def update_asset_mapping(db: Session, mapping_id: int, data: dict):
 
 def unassign_asset(db: Session, mapping_id: int, destination_location_id: int = None, unassigned_by: int = None):
     from app.models.inventory import AssetMapping, Location, LocationStock, InventoryTransaction, StockIssue, StockIssueDetail, InventoryItem
-    from datetime import datetime
+    from datetime import timezone, datetime
     
     # Handle Virtual Mapping vs Real Mapping
     is_virtual = False
@@ -1709,7 +1709,7 @@ def unassign_asset(db: Session, mapping_id: int, destination_location_id: int = 
     if mapping.is_active:
         if not is_virtual:
             mapping.is_active = False
-            mapping.unassigned_date = datetime.utcnow()
+            mapping.unassigned_date = datetime.now(timezone.utc)
         
         # Get Item details for transaction
         item = db.query(InventoryItem).filter(InventoryItem.id == mapping.item_id).first()
@@ -1725,7 +1725,7 @@ def unassign_asset(db: Session, mapping_id: int, destination_location_id: int = 
         
         if loc_stock:
             loc_stock.quantity = max(0, loc_stock.quantity - mapping.quantity)
-            loc_stock.last_updated = datetime.utcnow()
+            loc_stock.last_updated = datetime.now(timezone.utc)
             
         # 2. Add back to Warehouse (Physical Location)
         # Find warehouse to return to
@@ -1758,13 +1758,13 @@ def unassign_asset(db: Session, mapping_id: int, destination_location_id: int = 
             
             if wh_stock:
                 wh_stock.quantity += mapping.quantity
-                wh_stock.last_updated = datetime.utcnow()
+                wh_stock.last_updated = datetime.now(timezone.utc)
             else:
                 wh_stock = LocationStock(
                     location_id=warehouse.id,
                     item_id=mapping.item_id,
                     quantity=mapping.quantity,
-                    last_updated=datetime.utcnow(),
+                    last_updated=datetime.now(timezone.utc),
                     branch_id=mapping.branch_id
                 )
                 db.add(wh_stock)
@@ -1783,7 +1783,7 @@ def unassign_asset(db: Session, mapping_id: int, destination_location_id: int = 
                 issued_by=unassigned_by,
                 source_location_id=source_loc_id,
                 destination_location_id=dest_loc_id,
-                issue_date=datetime.utcnow(),
+                issue_date=datetime.now(timezone.utc),
                 notes=f"Asset Unassigned from {mapping.location.name if mapping.location else 'Unknown'} to {dest_name}",
                 branch_id=mapping.branch_id
             )
@@ -2046,7 +2046,7 @@ def update_stock_requisition_status(db: Session, requisition_id: int, status: st
     requisition.status = status
     if status == "approved" and approved_by_id:
         requisition.approved_by = approved_by_id
-        requisition.approved_at = datetime.utcnow()
+        requisition.approved_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(requisition)
@@ -2142,14 +2142,14 @@ def process_food_order_usage(db: Session, order_id: int):
              
              if loc_stock:
                  loc_stock.quantity -= quantity
-                 loc_stock.last_updated = datetime.utcnow()
+                 loc_stock.last_updated = datetime.now(timezone.utc)
              else:
                  # Create negative stock to track deficit/usage if not transferred yet
                  new_stock = LocationStock(
                      location_id=kitchen_loc.id,
                      item_id=item_id,
                      quantity=-quantity,
-                     last_updated=datetime.utcnow(),
+                     last_updated=datetime.now(timezone.utc),
                      branch_id=order.branch_id
                  )
                  db.add(new_stock)
@@ -2250,7 +2250,7 @@ def generate_transfer_number(db: Session, branch_id: int):
     # Branch specific numbering
     from app.models.inventory import InterBranchTransfer
     count = db.query(InterBranchTransfer).filter(InterBranchTransfer.source_branch_id == branch_id).count() + 1
-    return f"TRF-{branch_id}-{datetime.utcnow().strftime('%y%m')}-{count:04d}"
+    return f"TRF-{branch_id}-{datetime.now(timezone.utc).strftime('%y%m')}-{count:04d}"
 
 
 def create_inter_branch_transfer(db: Session, data: dict, source_branch_id: int, created_by: int):

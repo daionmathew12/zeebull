@@ -4,13 +4,13 @@ from app.models.booking import Booking, BookingRoom
 from app.models.Package import PackageBooking, PackageBookingRoom
 from app.models.service_request import ServiceRequest
 from app.schemas.foodorder import FoodOrderCreate, FoodOrderUpdate
-from datetime import datetime, timedelta
+from datetime import timezone, datetime, timedelta
 import re
 from app.curd.notification import notify_food_order_created, notify_food_order_status_changed
 
 def get_ist_now():
     """Get current time in Indian Standard Time (UTC+5:30)"""
-    return datetime.utcnow() + timedelta(hours=5, minutes=30)
+    return datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
 
 def get_booking_for_room(room_id, db: Session, branch_id: int, reference_date=None) -> tuple:
     """Get active booking for a room from either regular or package bookings within a branch"""
@@ -136,15 +136,89 @@ def get_guest_for_room(room_id, db: Session, branch_id: int, reference_date=None
     
     return None
 
+def resolve_food_item_price(item_model, order_type="dine_in"):
+    """Helper to resolve price based on time and order type."""
+    import json
+    from datetime import timezone, datetime
+    
+    # 1. Resolve Time-Wise Prices
+    twp = item_model.time_wise_prices
+    if twp:
+        try:
+            if isinstance(twp, str):
+                twp_list = json.loads(twp)
+            else:
+                twp_list = twp
+                
+            if isinstance(twp_list, list) and len(twp_list) > 0:
+                now = get_ist_now()
+                current_time = now.strftime("%H:%M")
+                
+                for rule in twp_list:
+                    from_t = rule.get("from_time")
+                    to_t = rule.get("to_time")
+                    rule_price = rule.get("price")
+                    
+                    if from_t and to_t and rule_price is not None:
+                        if from_t <= to_t:
+                            if from_t <= current_time <= to_t:
+                                return float(rule_price)
+                        else:
+                            # Over midnight
+                            if current_time >= from_t or current_time <= to_t:
+                                return float(rule_price)
+        except Exception as e:
+            print(f"Error resolving time-wise price: {e}")
+
+    # 2. Resolve Room Service Price
+    if order_type == "room_service" and item_model.room_service_price:
+        return float(item_model.room_service_price)
+        
+    # 3. Fallback to base price
+    resolved = float(item_model.price or 0.0)
+    # print(f"[DEBUG-PRICE] Resolved {item_model.name} to {resolved}")
+    return resolved
+
+def _populate_order_item_prices(order):
+    """Helper to populate price and subtotal for each item in an order."""
+    if not order or not order.items:
+        return order
+    
+    with open("pricing_debug.log", "a") as f:
+        f.write(f"\n--- Populating Order #{order.id} (Type: {order.order_type}) ---\n")
+        for item in order.items:
+            if item.food_item:
+                item.price = resolve_food_item_price(item.food_item, order.order_type)
+                item.subtotal = item.price * (item.quantity or 0)
+                f.write(f"  Item: {item.food_item.name}, Price: {item.price}, Subtotal: {item.subtotal}\n")
+            else:
+                item.price = 0.0
+                item.subtotal = 0.0
+                f.write(f"  Item: UNKNOWN, Price: 0.0\n")
+    return order
+
 def create_food_order(db: Session, order_data: FoodOrderCreate, branch_id: int):
+    from app.models.food_item import FoodItem
 
     status = getattr(order_data, 'status', 'pending')
     billing_status = getattr(order_data, 'billing_status', 'unbilled')
-    
-    # If amount is 0, it's complimentary - force to room_service
     order_type = getattr(order_data, 'order_type', 'dine_in')
-    amount = order_data.amount or 0.0
-    if amount == 0:
+
+    # Resolve actual prices from database instead of trusting frontend amount
+    calculated_amount = 0.0
+    for item_data in order_data.items:
+        food_item = db.query(FoodItem).filter(FoodItem.id == item_data.food_item_id, FoodItem.branch_id == branch_id).first()
+        if food_item:
+            unit_price = resolve_food_item_price(food_item, order_type)
+            calculated_amount += unit_price * item_data.quantity
+
+    # If amount is explicitly passed as 0, it's complimentary - but we keep calculated amount for logging? 
+    # Usually we trust the calculated amount unless it's a specific "complimentary" flag (not in schema yet)
+    # However, for now, we will trust the backend calculation if amount is not provided or different.
+    final_amount = calculated_amount if (order_data.amount is None or order_data.amount == 0) else order_data.amount
+    
+    # If amount is 0, force to room_service
+    if final_amount == 0:
         order_type = 'room_service'
 
     # Try to link to a booking if not provided
@@ -160,14 +234,14 @@ def create_food_order(db: Session, order_data: FoodOrderCreate, branch_id: int):
             else:
                 booking_id = b_id
 
-    gst_amount = amount * 0.05
-    total_with_gst = amount + gst_amount
+    gst_amount = final_amount * 0.05
+    total_with_gst = final_amount + gst_amount
 
     order = FoodOrder(
         room_id=order_data.room_id,
         booking_id=booking_id,
         package_booking_id=package_booking_id,
-        amount=amount,
+        amount=final_amount,
         gst_amount=gst_amount,
         total_with_gst=total_with_gst,
         assigned_employee_id=order_data.assigned_employee_id,
@@ -197,14 +271,36 @@ def create_food_order(db: Session, order_data: FoodOrderCreate, branch_id: int):
     db.commit()
     db.refresh(order)
     
-    # Create service request immediately for room service orders (even if scheduled)
-    if order.order_type == "room_service":
-        # Check if service request already exists
-        existing_request = db.query(ServiceRequest).filter(
-            ServiceRequest.food_order_id == order.id
+    # Populate for response
+    _populate_order_item_prices(order)
+    
+    # 1. Create Kitchen Task for the Chef
+    if order.prepared_by_id:
+        existing_kitchen_task = db.query(ServiceRequest).filter(
+            ServiceRequest.food_order_id == order.id,
+            ServiceRequest.request_type == "kitchen_preparation"
         ).first()
-        if not existing_request:
-            service_request = ServiceRequest(
+        if not existing_kitchen_task:
+            kitchen_task = ServiceRequest(
+                food_order_id=order.id,
+                room_id=order.room_id,
+                employee_id=order.prepared_by_id,
+                request_type="kitchen_preparation",
+                description=f"Kitchen Preparation for food order #{order.id}",
+                status="pending" if status != "scheduled" else "scheduled",
+                branch_id=branch_id
+            )
+            db.add(kitchen_task)
+            db.commit()
+
+    # 2. Create Delivery Task for the Delivery Person (Room Service Only)
+    if order.order_type == "room_service" and order.assigned_employee_id:
+        existing_delivery_task = db.query(ServiceRequest).filter(
+            ServiceRequest.food_order_id == order.id,
+            ServiceRequest.request_type == "food_delivery"
+        ).first()
+        if not existing_delivery_task:
+            delivery_task = ServiceRequest(
                 food_order_id=order.id,
                 room_id=order.room_id,
                 employee_id=order.assigned_employee_id,
@@ -213,8 +309,7 @@ def create_food_order(db: Session, order_data: FoodOrderCreate, branch_id: int):
                 status="pending" if status != "scheduled" else "scheduled",
                 branch_id=branch_id
             )
-
-            db.add(service_request)
+            db.add(delivery_task)
             db.commit()
     
     
@@ -318,6 +413,10 @@ def get_food_orders(db: Session, branch_id: int, skip: int = 0, limit: int = 100
             else:
                 # Fallback: Search for booking that was active at the time the order was created
                 order.guest_name = get_guest_for_room(order.room_id, db, branch_id=branch_id, reference_date=order.created_at)
+
+            # Populate item prices and subtotals for the UI
+            for order in orders:
+                _populate_order_item_prices(order)
 
         
         return orders
@@ -485,6 +584,10 @@ def update_food_order(db: Session, order_id: int, update_data: FoodOrderUpdate, 
 
     db.commit()
     db.refresh(order)
+    
+    # Populate for response
+    _populate_order_item_prices(order)
+    
     return order
 
 def trigger_scheduled_orders(db: Session, branch_id: int):

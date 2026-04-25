@@ -37,7 +37,7 @@ class ExpenseOut(BaseModel):
     amount: float
     date: date
     description: Optional[str]
-    employee_id: int
+    employee_id: Optional[int] = None
     image: Optional[str]
     department: Optional[str]
     status: str

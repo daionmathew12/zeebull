@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Optional
 from datetime import date, datetime
+from app.utils.date_utils import get_ist_now, get_ist_today
 from pydantic import BaseModel
 
 from app.utils.auth import get_db, get_current_user
@@ -84,7 +85,7 @@ def get_global_activity_report(
     
     for b, u in booking_query.all():
         activities.append(GlobalActivityItem(
-            activity_date=b.created_at or datetime.now(),
+            activity_date=b.created_at or get_ist_now(),
             type="Booking",
             description=f"Created booking for {b.guest_name or 'Unknown'} (Room count: {len(b.rooms)})",
             amount=b.total_amount,
@@ -101,7 +102,7 @@ def get_global_activity_report(
         if s_status.lower() != "completed":
             continue
             
-        act_date = s.last_used_at or s.assigned_at or datetime.now()
+        act_date = s.last_used_at or s.assigned_at or get_ist_now()
         if from_date and act_date.date() < from_date: continue
         if to_date and act_date.date() > to_date: continue
 
@@ -227,7 +228,7 @@ def get_user_history_report(
     
     for b in booking_query.all():
         activities.append(ActivityItem(
-            activity_date=b.created_at or datetime.now(),
+            activity_date=b.created_at or get_ist_now(),
             type="Booking",
             description=f"Created booking for {b.guest_name or 'Unknown'} (Room count: {len(b.rooms)})",
             amount=b.total_amount
@@ -246,7 +247,7 @@ def get_user_history_report(
                 continue
 
             # Determine relevant date: Completion time -> Assignment time -> Now
-            act_date = s.last_used_at or s.assigned_at or datetime.now()
+            act_date = s.last_used_at or s.assigned_at or get_ist_now()
             
             # Apply date filter in Python
             if from_date and act_date.date() < from_date:
