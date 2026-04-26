@@ -5725,8 +5725,17 @@ const Bookings = () => {
                               {booking.guest_name}
                             </div>
                             {booking.guest_email && (
-                              <div className="text-xs text-gray-500">
+                              <div className="text-[10px] text-gray-400">
                                 {booking.guest_email}
+                              </div>
+                            )}
+                            {booking.source && (
+                              <div className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider ${
+                                (booking.source !== 'Direct' && booking.source !== 'Admin' && booking.source !== 'direct' && booking.source !== 'admin')
+                                ? "bg-violet-50 text-violet-600 border border-violet-100"
+                                : "bg-gray-50 text-gray-400 border border-gray-100"
+                              }`}>
+                                {booking.source}
                               </div>
                             )}
                           </td>
