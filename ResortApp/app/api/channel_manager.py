@@ -81,8 +81,18 @@ def _handle_new_booking(payload: dict, db: Session, branch_id: int):
     first_name = guest.get("firstName", "")
     last_name = guest.get("lastName", "")
     name = f"{first_name} {last_name}".strip() or "Aiosell Guest"
-    email = guest.get("email")
-    phone = guest.get("phone")
+    email = guest.get("email") or payload.get("email")
+    
+    # Robust phone number extraction
+    phone = (
+        guest.get("phone") or 
+        guest.get("mobile") or 
+        guest.get("mobileNumber") or 
+        guest.get("contactNumber") or
+        payload.get("phone") or 
+        payload.get("mobile") or
+        payload.get("contactNumber")
+    )
     
     rooms = payload.get("rooms", [])
     if not rooms:
