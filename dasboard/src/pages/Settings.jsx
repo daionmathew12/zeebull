@@ -498,6 +498,14 @@ export default function Settings() {
                                     </button>
                                 </div>
                             </form>
+                            <div className="mt-4 p-3 bg-blue-50 border border-blue-100 rounded-xl flex items-center gap-3 text-blue-700">
+                                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                                    <SettingsIcon size={16} />
+                                </div>
+                                <p className="text-sm font-medium">
+                                    <strong>Default Policy:</strong> Friday and Saturday nights are automatically treated as <strong>Weekends</strong> for pricing calculations. You only need to add rules here for special holidays or long weekends.
+                                </p>
+                            </div>
                         </div>
 
                         {/* Calendar List */}
