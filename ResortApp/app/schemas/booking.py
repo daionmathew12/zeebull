@@ -79,6 +79,8 @@ class BookingOut(BaseModel):
     package_name: Optional[str] = None
     room_type_id: Optional[Union[int, str]] = None       # For soft-allocation bookings
     room_type_name: Optional[str] = None     # Resolved room type name
+    room_rate: float = 0.0
+    rate_plan_code: Optional[str] = None
     
     is_id_verified: bool = False
     digital_signature_url: Optional[str] = None

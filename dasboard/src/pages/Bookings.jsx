@@ -192,7 +192,9 @@ const BookingDetailsModal = ({
         })
         .filter(Boolean)
         .join(", ") || "-"
-      : "-";
+      : booking.room_type_name
+        ? `${booking.room_type_name}${booking.rate_plan_code ? ` (${booking.rate_plan_code})` : ""}`
+        : "-";
 
   const isCheckedIn =
     booking.status &&
