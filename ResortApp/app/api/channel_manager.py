@@ -70,16 +70,69 @@ async def aiosell_webhook(
         return {"success": True, "message": f"Ignored action {action}"}
 
 
+def _map_room_type(db: Session, room_code: str, branch_id: int):
+    """Helper to map Aiosell roomCode to Zeebull RoomType"""
+    if not room_code:
+        return None
+        
+    # 1. Direct ID/CM ID match
+    room_type = db.query(RoomType).filter(
+        RoomType.channel_manager_id == room_code, 
+        RoomType.branch_id == branch_id
+    ).first()
+    
+    # 2. Case-insensitive name match if CM ID fails
+    if not room_type:
+        room_type = db.query(RoomType).filter(
+            RoomType.name.ilike(room_code.replace("-", " ")),
+            RoomType.branch_id == branch_id
+        ).first()
+        
+    # 3. Fuzzy fallback
+    if not room_type:
+        room_type = db.query(RoomType).filter(
+            RoomType.name.ilike(f"%{room_code}%"),
+            RoomType.branch_id == branch_id
+        ).first()
+        
+    return room_type
+
+def _extract_amount(payload: dict) -> float:
+    """Helper to extract total amount from various Aiosell payload formats"""
+    # Try root level first
+    amt = payload.get("totalAmount")
+    if amt is not None:
+        return float(amt)
+        
+    # Try nested amount object
+    amount_obj = payload.get("amount", {})
+    amt = amount_obj.get("amountAfterTax") or amount_obj.get("amount")
+    if amt is not None:
+        return float(amt)
+        
+    return 0.0
+    
+def _extract_channel(payload: dict) -> str:
+    """Helper to extract channel name from various Aiosell/OTA formats"""
+    return (
+        payload.get("channel") or 
+        payload.get("channelName") or 
+        payload.get("source") or 
+        payload.get("segment") or 
+        "OTA"
+    )
+
 def _handle_new_booking(payload: dict, db: Session, branch_id: int):
     # Check if we already have it
     res_id = payload.get("bookingID") or payload.get("bookingId")
     existing = db.query(Booking).filter(Booking.external_id == res_id).first()
     if existing:
-        return {"success": True, "message": "Booking already exists"}
+        # If it exists, redirect to modify logic to ensure it's up to date
+        return _handle_modify_booking(payload, db)
         
     guest = payload.get("guest", {})
-    first_name = guest.get("firstName", "")
-    last_name = guest.get("lastName", "")
+    first_name = str(guest.get("firstName") or "").replace("None", "").strip()
+    last_name = str(guest.get("lastName") or "").replace("None", "").strip()
     name = f"{first_name} {last_name}".strip() or "Aiosell Guest"
     email = guest.get("email") or payload.get("email")
     
@@ -95,21 +148,29 @@ def _handle_new_booking(payload: dict, db: Session, branch_id: int):
     )
     
     rooms = payload.get("rooms", [])
-    if not rooms:
-         return Response(status_code=400, content="No rooms array in payload")
-         
-    primary_room_data = rooms[0]
-    room_code = primary_room_data.get("roomCode")
-    
-    # 1. Map to Zeebull RoomType
-    room_type = db.query(RoomType).filter(RoomType.channel_manager_id == room_code, RoomType.branch_id == branch_id).first()
-    room_type_id = room_type.id if room_type else None
-    
-    # If not mapped by ID, try exact fuzzy match as fallback
-    if not room_type_id:
-        room_type = db.query(RoomType).filter(RoomType.name.ilike(f"%{room_code}%")).first()
+    room_type_id = None
+    if rooms:
+        primary_room_data = rooms[0]
+        room_code = primary_room_data.get("roomCode")
+        room_type = _map_room_type(db, room_code, branch_id)
         if room_type:
-             room_type_id = room_type.id
+            room_type_id = room_type.id
+            
+    # Extract Rate Plan and Price Details
+    rate_plan_code = None
+    room_rate = 0.0
+    if rooms:
+        primary = rooms[0]
+        rate_plan_code = primary.get("rateplanCode")
+        
+        # Try to get sellRate from prices array
+        prices = primary.get("prices", [])
+        if prices and isinstance(prices, list):
+            room_rate = float(prices[0].get("sellRate", 0))
+        elif "sellingPrice" in primary:
+            room_rate = float(primary.get("sellingPrice", 0))
+            
+    special_requests = payload.get("specialRequests") or payload.get("notes")
              
     # Parse dates
     try:
@@ -131,11 +192,10 @@ def _handle_new_booking(payload: dict, db: Session, branch_id: int):
     total_adults = sum([int(r.get("occupancy", {}).get("adults", 1)) for r in rooms])
     total_children = sum([int(r.get("occupancy", {}).get("children", 0)) for r in rooms])
     
-    # OVERRIDE Zeebull Dynamic Pricing -> Use exact totalAmount from Aiosell
-    # Support both root 'totalAmount' and nested 'amount.amountAfterTax'
-    total_amount = float(payload.get("totalAmount") or payload.get("amount", {}).get("amountAfterTax", 0.0))
+    # Extract total amount
+    total_amount = _extract_amount(payload)
     
-    advance_deposit = 0.0 # Could check if payment is collected by OTA
+    advance_deposit = 0.0 
     if str(payload.get("pah", "True")).lower() == "false":
         advance_deposit = total_amount
         
@@ -149,14 +209,17 @@ def _handle_new_booking(payload: dict, db: Session, branch_id: int):
         adults=total_adults,
         children=total_children,
         room_type_id=room_type_id,
-        source=payload.get("channel", "OTA"),
+        source=_extract_channel(payload),
         external_id=res_id,
         user_id=user_id,
         branch_id=branch_id,
         status="Booked",
         num_rooms=num_rooms,
         total_amount=total_amount,
-        advance_deposit=advance_deposit
+        advance_deposit=advance_deposit,
+        room_rate=room_rate,
+        rate_plan_code=rate_plan_code,
+        special_requests=special_requests
     )
     
     db.add(db_booking)
@@ -174,9 +237,9 @@ def _handle_modify_booking(payload: dict, db: Session):
     booking = db.query(Booking).filter(Booking.external_id == res_id).first()
     
     if not booking:
-        # Fallback to creating it if modification arrives for a missing booking
-        logger.warning(f"[AIOSELL WEBHOOK] Modify for non-existent booking {res_id}. Discarding.")
-        return {"success": False, "message": "Booking not found"}
+        # Fallback to creation if branch_id is available (defaulting to 1 for now)
+        logger.warning(f"[AIOSELL WEBHOOK] Modify for non-existent booking {res_id}. Attempting to create.")
+        return _handle_new_booking(payload, db, 1)
         
     # Apply modifications
     rooms = payload.get("rooms", [])
@@ -188,13 +251,32 @@ def _handle_modify_booking(payload: dict, db: Session):
             booking.num_rooms = len(rooms)
             booking.adults = sum([int(r.get("occupancy", {}).get("adults", 1)) for r in rooms])
             booking.children = sum([int(r.get("occupancy", {}).get("children", 0)) for r in rooms])
-        except:
-            pass
             
-    # Support both root 'totalAmount' and nested 'amount.amountAfterTax'
-    amt = payload.get("totalAmount") or payload.get("amount", {}).get("amountAfterTax")
-    if amt is not None:
-        booking.total_amount = float(amt)
+            # UPDATE ROOM TYPE
+            room_code = primary.get("roomCode")
+            room_type = _map_room_type(db, room_code, booking.branch_id)
+            if room_type:
+                booking.room_type_id = room_type.id
+                
+            # UPDATE RATE AND PRICE
+            booking.rate_plan_code = primary.get("rateplanCode")
+            prices = primary.get("prices", [])
+            if prices and isinstance(prices, list):
+                booking.room_rate = float(prices[0].get("sellRate", 0))
+            elif "sellingPrice" in primary:
+                booking.room_rate = float(primary.get("sellingPrice", 0))
+                
+            booking.special_requests = payload.get("specialRequests") or payload.get("notes")
+        except Exception as e:
+            logger.error(f"[AIOSELL] Error during modify extraction: {e}")
+            
+    # Update amount and channel
+    booking.total_amount = _extract_amount(payload)
+    booking.source = _extract_channel(payload)
+    
+    db.commit()
+    logger.info(f"[AIOSELL WEBHOOK] Modified Booking {booking.display_id} from {res_id}")
+    return {"success": True, "message": "Modified"}
     
     db.commit()
     logger.info(f"[AIOSELL WEBHOOK] Modified Booking {booking.display_id} from {res_id}")

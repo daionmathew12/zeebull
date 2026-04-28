@@ -30,6 +30,8 @@ class Booking(Base):
     room_type_id = Column(Integer, ForeignKey("room_types.id"), nullable=True) # Selected Room Type
     num_rooms = Column(Integer, default=1) # Number of rooms requested
     external_id = Column(String, nullable=True) # OTA/CM ID
+    room_rate = Column(Float, default=0.0)
+    rate_plan_code = Column(String, nullable=True)
     
     branch = relationship("Branch")
     room_type = relationship("RoomType")
