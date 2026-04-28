@@ -113,37 +113,36 @@ def push_rate(room_code: str, base_price: float, start_date: date, end_date: dat
     logger.info(f"[AIOSELL] Pushing Rate: Room={room_code}, Plan={rate_plan_code}, Rate={base_price}, Date={str_start}")
     return _send_push(payload, "Rate", API_URL_RATES)
 
-def batch_push_rate(rate_data: list, start_date: date, end_date: date = None):
+def batch_push_rates(rate_data: list):
     """
-    Accepts a list of dictionaries to push multiple rate plans at once:
-    [{ "room_code": "SUITE", "rateplan_code": "EP", "rate": 5000 }]
+    Accepts a list of dictionaries to push multiple rates or dates at once:
+    [{ "room_code": "SUITE", "rate": 5000.0, "start_date": Date, "end_date": Date, "rate_plan_code": "EP" }]
     """
-    if not end_date:
-        end_date = start_date
-        
-    str_start = start_date.strftime("%Y-%m-%d")
-    str_end = end_date.strftime("%Y-%m-%d")
+    updates = []
     
-    rates_list = []
     for item in rate_data:
-        rates_list.append({
-            "roomCode": item.get("room_code"),
-            "rate": float(item.get("rate")),
-            "rateplanCode": item.get("rateplan_code")
+        room_code = item.get("room_code")
+        rate = item.get("rate", 0)
+        start = item.get("start_date")
+        end = item.get("end_date", start)
+        rate_plan_code = item.get("rate_plan_code", "EP")
+        
+        updates.append({
+            "startDate": start.strftime("%Y-%m-%d"),
+            "endDate": end.strftime("%Y-%m-%d"),
+            "rates": [
+                {
+                    "roomCode": room_code,
+                    "rate": float(rate),
+                    "rateplanCode": rate_plan_code
+                }
+            ]
         })
         
     payload = {
         "hotelCode": HOTEL_CODE,
-        "updates": [
-            {
-                "startDate": str_start,
-                "endDate": str_end,
-                "rates": rates_list
-            }
-        ]
+        "updates": updates
     }
-    
-    logger.info(f"[AIOSELL] Pushing Batch Rates: {len(rates_list)} plans, Date={str_start}")
     return _send_push(payload, "Batch Rates", API_URL_RATES)
 
 def batch_push_inventory(availability_data: list):
