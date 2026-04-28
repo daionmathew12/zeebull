@@ -143,9 +143,7 @@ def batch_push_rates(rate_data: list):
         "hotelCode": HOTEL_CODE,
         "updates": updates
     }
-    
     return _send_push(payload, "Batch Rates", API_URL_RATES)
-
 
 def batch_push_inventory(availability_data: list):
     """

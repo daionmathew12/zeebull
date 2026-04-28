@@ -1,21 +1,21 @@
 {
   "files": {
-    "main.css": "/zeebulladmin/static/css/main.0ab30cdf.css",
-    "main.js": "/zeebulladmin/static/js/main.fc62cdd3.js",
+    "main.css": "/zeebulladmin/static/css/main.33b028fc.css",
+    "main.js": "/zeebulladmin/static/js/main.ab027bf5.js",
     "static/js/239.3742c463.chunk.js": "/zeebulladmin/static/js/239.3742c463.chunk.js",
     "static/js/213.b8d4b5a9.chunk.js": "/zeebulladmin/static/js/213.b8d4b5a9.chunk.js",
     "static/js/455.929e50be.chunk.js": "/zeebulladmin/static/js/455.929e50be.chunk.js",
     "static/media/logo.jpeg": "/zeebulladmin/static/media/logo.0b1ace71bd22eb394651.jpeg",
     "static/media/zeebulllogo.png": "/zeebulladmin/static/media/zeebulllogo.0b1ace71bd22eb394651.png",
     "index.html": "/zeebulladmin/index.html",
-    "main.0ab30cdf.css.map": "/zeebulladmin/static/css/main.0ab30cdf.css.map",
-    "main.fc62cdd3.js.map": "/zeebulladmin/static/js/main.fc62cdd3.js.map",
+    "main.33b028fc.css.map": "/zeebulladmin/static/css/main.33b028fc.css.map",
+    "main.ab027bf5.js.map": "/zeebulladmin/static/js/main.ab027bf5.js.map",
     "239.3742c463.chunk.js.map": "/zeebulladmin/static/js/239.3742c463.chunk.js.map",
     "213.b8d4b5a9.chunk.js.map": "/zeebulladmin/static/js/213.b8d4b5a9.chunk.js.map",
     "455.929e50be.chunk.js.map": "/zeebulladmin/static/js/455.929e50be.chunk.js.map"
   },
   "entrypoints": [
-    "static/css/main.0ab30cdf.css",
-    "static/js/main.fc62cdd3.js"
+    "static/css/main.33b028fc.css",
+    "static/js/main.ab027bf5.js"
   ]
 }
