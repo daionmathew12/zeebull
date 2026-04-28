@@ -113,6 +113,38 @@ def push_rate(room_code: str, base_price: float, start_date: date, end_date: dat
     logger.info(f"[AIOSELL] Pushing Rate: Room={room_code}, Plan={rate_plan_code}, Rate={base_price}, Date={str_start}")
     return _send_push(payload, "Rate", API_URL_RATES)
 
+def batch_push_rates(rate_data: list):
+    """
+    Accepts a list of dictionaries to push multiple rates or dates at once:
+    [{ "room_code": "SUITE", "rate": 5000.0, "start_date": Date, "end_date": Date, "rate_plan_code": "EP" }]
+    """
+    updates = []
+    
+    for item in rate_data:
+        room_code = item.get("room_code")
+        rate = item.get("rate", 0)
+        start = item.get("start_date")
+        end = item.get("end_date", start)
+        rate_plan_code = item.get("rate_plan_code", "EP")
+        
+        updates.append({
+            "startDate": start.strftime("%Y-%m-%d"),
+            "endDate": end.strftime("%Y-%m-%d"),
+            "rates": [
+                {
+                    "roomCode": room_code,
+                    "rate": float(rate),
+                    "rateplanCode": rate_plan_code
+                }
+            ]
+        })
+        
+    payload = {
+        "hotelCode": HOTEL_CODE,
+        "updates": updates
+    }
+    return _send_push(payload, "Batch Rates", API_URL_RATES)
+
 def batch_push_inventory(availability_data: list):
     """
     Accepts a list of dictionaries to push multiple rooms or dates at once:

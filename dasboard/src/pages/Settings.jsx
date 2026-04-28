@@ -443,7 +443,10 @@ export default function Settings() {
                                 </div>
                                 <div>
                                     <h2 className="text-xl font-bold text-gray-800">Dynamic Pricing Rules</h2>
-                                    <p className="text-sm text-gray-500">Define custom holidays and long weekends for dynamic room pricing</p>
+                                    <p className="text-sm text-gray-500">
+                                        Define custom holidays and long weekends. 
+                                        <span className="ml-1 text-indigo-600 font-bold underline">Friday and Saturday nights are automatically treated as weekends.</span>
+                                    </p>
                                 </div>
                             </div>
 
@@ -498,14 +501,6 @@ export default function Settings() {
                                     </button>
                                 </div>
                             </form>
-                            <div className="mt-4 p-3 bg-blue-50 border border-blue-100 rounded-xl flex items-center gap-3 text-blue-700">
-                                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                                    <SettingsIcon size={16} />
-                                </div>
-                                <p className="text-sm font-medium">
-                                    <strong>Default Policy:</strong> Friday and Saturday nights are automatically treated as <strong>Weekends</strong> for pricing calculations. You only need to add rules here for special holidays or long weekends.
-                                </p>
-                            </div>
                         </div>
 
                         {/* Calendar List */}
