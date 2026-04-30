@@ -80,6 +80,7 @@ from app.api import (
     notification,
     activity_logs,
     rate_plan,
+    calendar,
 )
 from app.api.settings import router as settings_router
 from app.api import reports_module
@@ -358,6 +359,7 @@ app.include_router(notification.router, prefix="/api/notifications", tags=["Noti
 app.include_router(service_report.router, prefix="/api", tags=["Service Reports"])
 app.include_router(activity_logs.router, prefix="/api/activity-logs", tags=["Activity Logs"])
 app.include_router(rate_plan.router, prefix="/api", tags=["RatePlans"])
+app.include_router(calendar.router, prefix="/api/calendar", tags=["Calendar"])
 
 # Channel Manager
 from app.api import channel_manager

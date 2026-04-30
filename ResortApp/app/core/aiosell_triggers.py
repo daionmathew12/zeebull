@@ -6,7 +6,7 @@ from app.database import SessionLocal
 from app.models.room import RoomType, Room
 from app.models.booking import Booking, BookingRoom
 from app.models.booking import Booking, BookingRoom
-from app.core.aiosell_client import push_inventory, push_rate, batch_push_inventory, batch_push_rate
+from app.core.aiosell_client import push_inventory, push_rate, batch_push_inventory, batch_push_rates
 
 logger = logging.getLogger(__name__)
 
