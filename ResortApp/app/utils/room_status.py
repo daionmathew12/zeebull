@@ -2,16 +2,27 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError, DisconnectionError
 from app.models.room import Room
 from app.models.booking import Booking, BookingRoom
-from datetime import date
+from app.models.Package import PackageBooking, PackageBookingRoom
+from datetime import date, datetime, timedelta
 from app.utils.date_utils import get_ist_today
 import time
 
-def update_room_statuses(db: Session):
+# Simple in-memory cache for throttling
+_last_status_update = {}
+
+def update_room_statuses(db: Session, branch_id: int = None):
     """
     Update room statuses based on current bookings.
     Only shows current day status - not future bookings.
-    With improved error handling and retry logic.
+    Optimized to use bulk queries instead of N+1 per room.
     """
+    # Throttle: Only update once every 5 minutes per branch
+    now = datetime.now()
+    cache_key = branch_id or 0
+    if cache_key in _last_status_update:
+        if now - _last_status_update[cache_key] < timedelta(minutes=5):
+            return 0
+    
     max_retries = 3
     retry_delay = 1
     
@@ -19,92 +30,97 @@ def update_room_statuses(db: Session):
         try:
             today = get_ist_today().date()
             
-            # Use with_for_update(nowait=True) to prevent deadlocks, but fallback if it fails
-            try:
-                rooms = db.query(Room).with_for_update(skip_locked=True).all()
-            except Exception:
-                # Fallback to regular query if row-level locking fails
-                rooms = db.query(Room).all()
+            # 1. Fetch rooms
+            q_rooms = db.query(Room)
+            if branch_id:
+                q_rooms = q_rooms.filter(Room.branch_id == branch_id)
+            rooms = q_rooms.all()
+            if not rooms:
+                return 0
             
+            room_ids = [r.id for r in rooms]
+            
+            # 2. Bulk fetch active check-ins (Checked-in status takes precedence)
+            checked_in_rooms = set()
+            
+            # Regular bookings
+            active_checkins = db.query(BookingRoom.room_id).join(Booking).filter(
+                BookingRoom.room_id.in_(room_ids),
+                Booking.status.in_(['checked-in', 'checked_in', 'Checked-in'])
+            ).all()
+            for r in active_checkins:
+                checked_in_rooms.add(r.room_id)
+                
+            # Package bookings
+            pkg_checkins = db.query(PackageBookingRoom.room_id).join(PackageBooking).filter(
+                PackageBookingRoom.room_id.in_(room_ids),
+                PackageBooking.status.in_(['checked-in', 'checked_in', 'Checked-in'])
+            ).all()
+            for r in pkg_checkins:
+                checked_in_rooms.add(r.room_id)
+                
+            # 3. Bulk fetch active reservations (Booked status for today)
+            booked_rooms = set()
+            
+            # Regular bookings
+            active_res = db.query(BookingRoom.room_id).join(Booking).filter(
+                BookingRoom.room_id.in_(room_ids),
+                Booking.status.in_(['booked', 'Booked']),
+                Booking.check_in <= today,
+                Booking.check_out > today
+            ).all()
+            for r in active_res:
+                booked_rooms.add(r.room_id)
+                
+            # Package bookings
+            pkg_res = db.query(PackageBookingRoom.room_id).join(PackageBooking).filter(
+                PackageBookingRoom.room_id.in_(room_ids),
+                PackageBooking.status.in_(['booked', 'Booked']),
+                PackageBooking.check_in <= today,
+                PackageBooking.check_out > today
+            ).all()
+            for r in pkg_res:
+                booked_rooms.add(r.room_id)
+            
+            # 4. Update statuses in memory
             updated_count = 0
             for room in rooms:
-                try:
-                    # FIX: Prioritize 'checked-in' status regarding of dates (handles checkout day and overstays)
-                    
-                    # 1. Check for Active Check-ins
-                    active_checked_in = db.query(BookingRoom).join(Booking).filter(
-                        BookingRoom.room_id == room.id,
-                        Booking.status.in_(['checked-in', 'checked_in', 'Checked-in'])
-                    ).first()
-                    
-                    from app.models.Package import PackageBooking, PackageBookingRoom
-                    package_checked_in = db.query(PackageBookingRoom).join(PackageBooking).filter(
-                        PackageBookingRoom.room_id == room.id,
-                        PackageBooking.status.in_(['checked-in', 'checked_in', 'Checked-in'])
-                    ).first()
-                    
-                    new_status = None
-                    if active_checked_in or package_checked_in:
-                         new_status = "Checked-in"
-                    else:
-                         # 2. Check for Active Reservations (Booked) - enforce dates
-                         active_reservation = db.query(BookingRoom).join(Booking).filter(
-                            BookingRoom.room_id == room.id,
-                            Booking.status.in_(['booked', 'Booked']),
-                            Booking.check_in <= today,
-                            Booking.check_out > today
-                        ).first()
-                        
-                         package_reservation = db.query(PackageBookingRoom).join(PackageBooking).filter(
-                            PackageBookingRoom.room_id == room.id,
-                            PackageBooking.status.in_(['booked', 'Booked']),
-                            PackageBooking.check_in <= today,
-                            PackageBooking.check_out > today
-                        ).first()
-                        
-                         if active_reservation or package_reservation:
-                             new_status = "Booked"
-                         else:
-                             new_status = "Available"
-                    
-                    # Only update if status changed to reduce unnecessary commits
-                    if room.status != new_status:
-                        room.status = new_status
-                        updated_count += 1
-                        
-                except Exception as room_error:
-                    # Log individual room errors but continue processing
-                    print(f"Error updating room {room.id}: {room_error}")
+                # Do not change status if it is Maintenance, Cleaning, or Dirty
+                # Only change if it's Available, Checked-in, or Booked
+                current_lower = room.status.lower()
+                if current_lower in ["maintenance", "cleaning", "dirty"]:
                     continue
+                    
+                new_status = "Available"
+                if room.id in checked_in_rooms:
+                    new_status = "Checked-in"
+                elif room.id in booked_rooms:
+                    new_status = "Booked"
+                
+                if room.status != new_status:
+                    room.status = new_status
+                    updated_count += 1
             
-            try:
-                db.commit()
-            except Exception as commit_err:
-                # Roll back any failed commit to avoid pending transaction errors
-                db.rollback()
-                print(f"Commit failed during room status update: {commit_err}")
-                return 0
             if updated_count > 0:
-                print(f"Updated room statuses for {updated_count} out of {len(rooms)} rooms")
+                db.commit()
+                print(f"[STATUS] Optimized update: {updated_count} rooms updated.")
+            
+            # Update cache timestamp
+            _last_status_update[cache_key] = now
             return updated_count
             
         except (OperationalError, DisconnectionError) as e:
             db.rollback()
             if attempt < max_retries - 1:
-                print(f"Database error (attempt {attempt + 1}/{max_retries}): {e}. Retrying...")
                 time.sleep(retry_delay * (attempt + 1))
-                # Try to refresh the session
-                db.expire_all()
                 continue
             else:
-                print(f"Error updating room statuses after {max_retries} attempts: {e}")
-                # Don't raise - let the endpoint handle gracefully
+                print(f"Error updating room statuses: {e}")
                 return 0
         except Exception as e:
             db.rollback()
             print(f"Error updating room statuses: {e}")
-            print(f"Error type: {type(e)}")
-            # Don't raise - allow room fetching to continue even if status update fails
             return 0
     
     return 0
+

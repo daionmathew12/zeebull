@@ -1,12 +1,13 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import 'package:orchid_employee/core/constants/app_colors.dart';
 import 'package:orchid_employee/presentation/providers/kitchen_provider.dart';
 import 'package:orchid_employee/presentation/providers/attendance_provider.dart';
 import 'package:orchid_employee/presentation/providers/auth_provider.dart';
 import 'package:intl/intl.dart';
-import 'package:geolocator/geolocator.dart';
+import 'package:orchid_employee/presentation/widgets/attendance_helper.dart';
 import 'kot_screen.dart';
 import 'kot_history_screen.dart';
 import 'stock_requisition_screen.dart';
@@ -219,15 +220,12 @@ class _KitchenDashboardState extends State<KitchenDashboard> {
     return InkWell(
       onTap: () async {
         if (attendance.isLoading) return;
-        if (isOnDuty) {
-          await attendance.clockOut(auth.employeeId!);
-        } else {
-          Position? position = await _getCurrentLocation();
-          await attendance.clockIn(
-            auth.employeeId!, 
-            latitude: position?.latitude, 
-            longitude: position?.longitude,
-          );
+        await AttendanceHelper.performAttendanceAction(
+          context: context, 
+          isClockingIn: !isOnDuty,
+        );
+        if (mounted) {
+          attendance.checkTodayStatus(auth.employeeId);
         }
       },
       child: Container(

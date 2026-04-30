@@ -62,6 +62,8 @@ async def create_damage_report(
     return crud.create_service_request(db, request_data, branch_id=branch_id)
 
 
+_last_trigger_time = {}
+
 @router.get("", response_model=List[dict])
 @router.get("/", response_model=List[dict])
 def get_service_requests(
@@ -74,7 +76,6 @@ def get_service_requests(
     current_user: User = Depends(get_current_user),
     branch_id: int = Depends(get_branch_id)
 ):
-
     """
     Get service requests. If include_checkout_requests is True, also includes checkout requests.
     Returns a list of dicts (not ServiceRequestOut) to support both service requests and checkout requests.
@@ -90,20 +91,25 @@ def get_service_requests(
     # Apply employee filter if not admin
     effective_employee_id = None if is_admin else current_employee_id
     
-    print(f"[DEBUG] User: {current_user.email}, Role: {user_role}, Admin: {is_admin}, EmpID: {current_employee_id}")
-    
     # Trigger scheduled orders so they appear in the task list if due
-    try:
-        from app.curd.foodorder import trigger_scheduled_orders
-        if branch_id is not None:
-             trigger_scheduled_orders(db, branch_id)
-        else:
-             from app.models.branch import Branch
-             branches = db.query(Branch).all()
-             for b in branches:
-                  trigger_scheduled_orders(db, b.id)
-    except Exception as e:
-        print(f"[ERROR] Failed to trigger scheduled orders: {e}")
+    # Throttle: Only trigger once every 2 minutes per branch to avoid DB overhead
+    now = datetime.now()
+    cache_key = branch_id or 0
+    
+    if cache_key not in _last_trigger_time or (now - _last_trigger_time[cache_key] > timedelta(minutes=2)):
+        try:
+            from app.curd.foodorder import trigger_scheduled_orders
+            if branch_id is not None:
+                trigger_scheduled_orders(db, branch_id)
+            elif is_admin: # Only trigger all branches if user is admin and no branch_id specified
+                from app.models.branch import Branch
+                branches = db.query(Branch).all()
+                for b in branches:
+                    trigger_scheduled_orders(db, b.id)
+            _last_trigger_time[cache_key] = now
+        except Exception as e:
+            print(f"[ERROR] Failed to trigger scheduled orders: {e}")
+
 
     service_requests = crud.get_service_requests(
         db, skip=skip, limit=limit, status=status, room_id=room_id, 

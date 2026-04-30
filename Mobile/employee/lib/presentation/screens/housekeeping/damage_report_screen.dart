@@ -5,6 +5,7 @@ import 'package:orchid_employee/presentation/providers/service_request_provider.
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:typed_data';
+import 'package:orchid_employee/presentation/widgets/onyx_glass_card.dart';
 
 
 class DamageReportScreen extends StatefulWidget {
@@ -66,15 +67,8 @@ class _DamageReportScreenState extends State<DamageReportScreen> {
   void _removeImage(int index) {
     setState(() {
       _images.removeAt(index);
-      // Rebuild the bytes map to keep indices in sync
-      final newBytes = <int, Uint8List>{};
-      for (int i = 0; i < _images.length; i++) {
-        // This is a bit inefficient but safe for a few images
-        // Or we could just store XFile and Bytes together in a class
-      }
-      // Simpler: just clear and let the next pick handle it, or better:
       _imageBytes.clear();
-      _fetchBytesForAll(); // Helper to re-read or just store them together
+      _fetchBytesForAll();
     });
   }
 
@@ -92,7 +86,7 @@ class _DamageReportScreenState extends State<DamageReportScreen> {
     
     if (_images.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please add at least one photo")),
+        const SnackBar(content: Text("Please add at least one photo"), backgroundColor: Colors.redAccent),
       );
       return;
     }
@@ -112,7 +106,7 @@ class _DamageReportScreenState extends State<DamageReportScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text("✓ Damage report submitted successfully"),
-            backgroundColor: Colors.green,
+            backgroundColor: Colors.greenAccent,
           ),
         );
         Navigator.pop(context);
@@ -120,7 +114,7 @@ class _DamageReportScreenState extends State<DamageReportScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text("Failed to submit report. Please try again."),
-            backgroundColor: Colors.red,
+            backgroundColor: Colors.redAccent,
           ),
         );
       }
@@ -136,33 +130,34 @@ class _DamageReportScreenState extends State<DamageReportScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: AppColors.onyx,
       appBar: AppBar(
-        title: Text("Report Damage - Room ${widget.roomNumber}", style: const TextStyle(color: Colors.white)),
-        backgroundColor: AppColors.primary,
-        iconTheme: const IconThemeData(color: Colors.white),
+        title: Text("REPORT DAMAGE - ROOM ${widget.roomNumber}", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: 1)),
+        backgroundColor: AppColors.onyx,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: AppColors.accent),
       ),
       body: Form(
         key: _formKey,
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(20),
           children: [
-            // Info Card
+            // Info Header
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.blue.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.blue.shade200),
+                color: AppColors.accent.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.accent.withOpacity(0.2)),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.info_outline, color: Colors.blue.shade700),
+                  const Icon(Icons.info_outline, color: AppColors.accent, size: 20),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      "Take clear photos of the damage. This will be charged to the guest.",
-                      style: TextStyle(color: Colors.blue.shade900, fontSize: 14),
+                      "Take clear photos of the damage. This will be recorded for guest billing.",
+                      style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 13, fontWeight: FontWeight.w500),
                     ),
                   ),
                 ],
@@ -172,21 +167,19 @@ class _DamageReportScreenState extends State<DamageReportScreen> {
 
             // Category Selection
             const Text(
-              "Damage Category",
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              "DAMAGE CATEGORY",
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: AppColors.accent, letterSpacing: 1),
             ),
             const SizedBox(height: 12),
-            Container(
+            OnyxGlassCard(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.grey.shade300),
-              ),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
                   value: _selectedCategory,
                   isExpanded: true,
+                  dropdownColor: AppColors.onyx,
+                  icon: const Icon(Icons.keyboard_arrow_down_rounded, color: AppColors.accent),
+                  style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
                   items: _categories.map((category) {
                     return DropdownMenuItem(
                       value: category,
@@ -203,32 +196,29 @@ class _DamageReportScreenState extends State<DamageReportScreen> {
 
             // Description
             const Text(
-              "Description",
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              "DESCRIPTION",
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: AppColors.accent, letterSpacing: 1),
             ),
             const SizedBox(height: 12),
-            TextFormField(
-              controller: _descriptionController,
-              maxLines: 4,
-              decoration: InputDecoration(
-                hintText: "Describe the damage in detail...",
-                filled: true,
-                fillColor: Colors.white,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
+            OnyxGlassCard(
+              padding: EdgeInsets.zero,
+              child: TextFormField(
+                controller: _descriptionController,
+                maxLines: 4,
+                style: const TextStyle(color: Colors.white, fontSize: 15),
+                decoration: InputDecoration(
+                  hintText: "Describe the damage in detail...",
+                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.2)),
+                  contentPadding: const EdgeInsets.all(16),
+                  border: InputBorder.none,
                 ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Please describe the damage';
+                  }
+                  return null;
+                },
               ),
-              validator: (value) {
-                if (value == null || value.trim().isEmpty) {
-                  return 'Please describe the damage';
-                }
-                return null;
-              },
             ),
             const SizedBox(height: 24),
 
@@ -237,44 +227,57 @@ class _DamageReportScreenState extends State<DamageReportScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text(
-                  "Photos",
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  "PHOTOS",
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: AppColors.accent, letterSpacing: 1),
                 ),
-                Text(
-                  "${_images.length}/5",
-                  style: TextStyle(color: Colors.grey[600]),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppColors.accent.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    "${_images.length}/5",
+                    style: const TextStyle(color: AppColors.accent, fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
 
             // Image Grid
-            if (_images.isNotEmpty)
+            if (_images.isNotEmpty) ...[
               GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 3,
-                  crossAxisSpacing: 8,
-                  mainAxisSpacing: 8,
+                  crossAxisSpacing: 10,
+                  mainAxisSpacing: 10,
                 ),
                 itemCount: _images.length,
                 itemBuilder: (context, index) {
                   return Stack(
                     children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: _imageBytes[index] != null
-                            ? Image.memory(
-                                _imageBytes[index]!,
-                                width: double.infinity,
-                                height: double.infinity,
-                                fit: BoxFit.cover,
-                              )
-                            : Container(
-                                color: Colors.grey[300],
-                                child: const Icon(Icons.image, size: 40),
-                              ),
+                      Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.white.withOpacity(0.1)),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: _imageBytes[index] != null
+                              ? Image.memory(
+                                  _imageBytes[index]!,
+                                  width: double.infinity,
+                                  height: double.infinity,
+                                  fit: BoxFit.cover,
+                                )
+                              : Container(
+                                  color: Colors.white.withOpacity(0.05),
+                                  child: const Icon(Icons.image, size: 40, color: Colors.white12),
+                                ),
+                        ),
                       ),
                       Positioned(
                         top: 4,
@@ -284,13 +287,13 @@ class _DamageReportScreenState extends State<DamageReportScreen> {
                           child: Container(
                             padding: const EdgeInsets.all(4),
                             decoration: BoxDecoration(
-                              color: Colors.red,
+                              color: Colors.redAccent.withOpacity(0.8),
                               shape: BoxShape.circle,
                             ),
                             child: const Icon(
                               Icons.close,
                               color: Colors.white,
-                              size: 16,
+                              size: 14,
                             ),
                           ),
                         ),
@@ -299,45 +302,54 @@ class _DamageReportScreenState extends State<DamageReportScreen> {
                   );
                 },
               ),
-            const SizedBox(height: 12),
+              const SizedBox(height: 16),
+            ],
 
             // Add Photo Buttons
             Row(
               children: [
                 Expanded(
-                  child: OutlinedButton.icon(
+                  child: ElevatedButton.icon(
                     onPressed: _images.length < 5
                         ? () => _pickImage(ImageSource.camera)
                         : null,
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white.withOpacity(0.05),
+                      foregroundColor: AppColors.accent,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(16),
+                        side: BorderSide(color: AppColors.accent.withOpacity(0.3)),
                       ),
                     ),
-                    icon: const Icon(Icons.camera_alt),
-                    label: const Text("Camera"),
+                    icon: const Icon(Icons.camera_alt_rounded, size: 20),
+                    label: const Text("CAMERA", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 11)),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: OutlinedButton.icon(
+                  child: ElevatedButton.icon(
                     onPressed: _images.length < 5
                         ? () => _pickImage(ImageSource.gallery)
                         : null,
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white.withOpacity(0.05),
+                      foregroundColor: AppColors.accent,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(16),
+                        side: BorderSide(color: AppColors.accent.withOpacity(0.3)),
                       ),
                     ),
-                    icon: const Icon(Icons.photo_library),
-                    label: const Text("Gallery"),
+                    icon: const Icon(Icons.photo_library_rounded, size: 20),
+                    label: const Text("GALLERY", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 11)),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 40),
 
             // Submit Button
             SizedBox(
@@ -345,28 +357,31 @@ class _DamageReportScreenState extends State<DamageReportScreen> {
               child: ElevatedButton(
                 onPressed: _isSubmitting ? null : _submitReport,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
+                  backgroundColor: Colors.redAccent,
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  elevation: 8,
+                  shadowColor: Colors.redAccent.withOpacity(0.3),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(16),
                   ),
                 ),
                 child: _isSubmitting
                     ? const SizedBox(
-                        height: 20,
-                        width: 20,
+                        height: 22,
+                        width: 22,
                         child: CircularProgressIndicator(
                           color: Colors.white,
-                          strokeWidth: 2,
+                          strokeWidth: 3,
                         ),
                       )
                     : const Text(
-                        "Submit Damage Report",
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        "SUBMIT DAMAGE REPORT",
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, letterSpacing: 1),
                       ),
               ),
             ),
+            const SizedBox(height: 20),
           ],
         ),
       ),

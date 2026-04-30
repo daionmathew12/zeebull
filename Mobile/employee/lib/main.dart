@@ -20,6 +20,7 @@ import 'presentation/screens/kitchen/kot_screen.dart';
 import 'presentation/screens/housekeeping/room_list_screen.dart';
 import 'presentation/screens/waiter/waiter_dashboard.dart';
 import 'presentation/screens/maintenance/maintenance_dashboard.dart';
+import 'presentation/screens/housekeeping/service_requests_screen.dart';
 
 void main() {
   runApp(const OrchidEmployeeApp());
@@ -102,6 +103,7 @@ class OrchidEmployeeApp extends StatelessWidget {
           '/login': (context) => const LoginScreen(),
           '/kot': (context) => const KOTScreen(),
           '/housekeeping/rooms': (context) => RoomListScreen(),
+          '/housekeeping/requests': (context) => const ServiceRequestsScreen(),
           '/waiter': (context) => const WaiterDashboard(),
           '/maintenance': (context) => const MaintenanceDashboard(),
         },

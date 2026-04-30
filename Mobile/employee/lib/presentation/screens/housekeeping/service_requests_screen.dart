@@ -10,6 +10,7 @@ import 'package:orchid_employee/presentation/providers/auth_provider.dart';
 import 'service_request_dialogs.dart';
 import 'package:orchid_employee/presentation/providers/attendance_provider.dart';
 import 'package:orchid_employee/presentation/screens/housekeeping/checkout_verification_dialog.dart';
+import 'package:orchid_employee/presentation/widgets/onyx_glass_card.dart';
 
 class ServiceRequestsScreen extends StatefulWidget {
   const ServiceRequestsScreen({super.key});
@@ -122,59 +123,73 @@ class _ServiceRequestsScreenState extends State<ServiceRequestsScreen> {
     }).length;
 
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: AppColors.onyx,
       appBar: AppBar(
-        title: const Text("Service Requests", style: TextStyle(color: Colors.white)),
-        backgroundColor: AppColors.primary,
-        iconTheme: const IconThemeData(color: Colors.white),
+        title: const Text("SERVICE REQUESTS", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: 1)),
+        backgroundColor: AppColors.onyx,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: AppColors.accent),
       ),
       body: Column(
         children: [
           // Stats Header
           Container(
             padding: const EdgeInsets.all(16),
-            color: Colors.white,
+            color: AppColors.onyx,
             child: Row(
               children: [
                 _StatChip(
-                  label: "Pending",
+                  label: "PENDING",
                   count: pendingCount,
-                  color: Colors.orange,
+                  color: Colors.orangeAccent,
                 ),
                 const SizedBox(width: 12),
                 _StatChip(
-                  label: "In Progress",
+                  label: "IN PROGRESS",
                   count: inProgressCount,
-                  color: Colors.blue,
+                  color: Colors.blueAccent,
                 ),
               ],
             ),
           ),
 
-          // Filter Tabs
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            color: Colors.white,
+            color: AppColors.onyx,
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: ['All', 'Pending', 'In Progress', 'Completed']
-                    .map((filter) => Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: ChoiceChip(
-                            label: Text(filter),
-                            selected: _selectedFilter == filter,
-                            onSelected: (selected) {
-                              setState(() => _selectedFilter = filter);
-                            },
-                            selectedColor: AppColors.primary,
-                            labelStyle: TextStyle(
-                              color: _selectedFilter == filter
-                                  ? Colors.white
-                                  : Colors.black87,
+                    .map((filter) {
+                      final isSelected = _selectedFilter == filter;
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: InkWell(
+                          onTap: () => setState(() => _selectedFilter = filter),
+                          borderRadius: BorderRadius.circular(20),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: isSelected ? AppColors.accent.withOpacity(0.2) : Colors.white.withOpacity(0.05),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: isSelected ? AppColors.accent.withOpacity(0.5) : Colors.white10,
+                                width: 1,
+                              ),
+                            ),
+                            child: Text(
+                              filter.toUpperCase(),
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w900,
+                                color: isSelected ? AppColors.accent : Colors.white38,
+                                letterSpacing: 0.5,
+                              ),
                             ),
                           ),
-                        ))
+                        ),
+                      );
+                    })
                     .toList(),
               ),
             ),
@@ -195,12 +210,12 @@ class _ServiceRequestsScreenState extends State<ServiceRequestsScreen> {
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    Icon(Icons.check_circle_outline,
-                                        size: 64, color: Colors.grey[400]),
+                                    Icon(Icons.check_circle_outline_rounded,
+                                        size: 64, color: Colors.white.withOpacity(0.05)),
                                     const SizedBox(height: 16),
                                     Text(
-                                      "No $_selectedFilter requests",
-                                      style: TextStyle(color: Colors.grey[600], fontSize: 16),
+                                      "NO ${_selectedFilter.toUpperCase()} REQUESTS",
+                                      style: TextStyle(color: Colors.white.withOpacity(0.2), fontSize: 12, fontWeight: FontWeight.w900, letterSpacing: 1),
                                     ),
                                   ],
                                 ),
@@ -257,11 +272,11 @@ class _StatChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withOpacity(0.3)),
+        color: color.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withOpacity(0.1)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -271,13 +286,13 @@ class _StatChip extends StatelessWidget {
             style: TextStyle(
               color: color,
               fontSize: 18,
-              fontWeight: FontWeight.bold,
+              fontWeight: FontWeight.w900,
             ),
           ),
           const SizedBox(width: 8),
           Text(
             label,
-            style: TextStyle(color: color, fontSize: 14),
+            style: TextStyle(color: color.withOpacity(0.6), fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.5),
           ),
         ],
       ),
@@ -335,643 +350,482 @@ class _RequestCardState extends State<_RequestCard> {
         : "${(minutesAgo / 60).floor()}h ago";
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          // Header
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: priorityColor.withOpacity(0.1),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(10),
+      margin: const EdgeInsets.only(bottom: 16),
+      child: OnyxGlassCard(
+        padding: EdgeInsets.zero,
+        child: Column(
+          children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: priorityColor.withOpacity(0.1),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppColors.onyx,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(typeIcon, color: Colors.white, size: 24),
                   ),
-                  child: Icon(typeIcon, color: priorityColor, size: 24),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Text(
-                            "Room ${request.roomNumber}",
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: priorityColor,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              request.priority,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              "ROOM ${request.roomNumber}",
                               style: const TextStyle(
+                                fontSize: 18,
                                 color: Colors.white,
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
+                                fontWeight: FontWeight.w900,
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        request.type,
-                        style: TextStyle(color: Colors.grey[600], fontSize: 14),
-                      ),
-                    ],
-                  ),
-                ),
-                Text(
-                  timeAgo,
-                  style: TextStyle(color: Colors.grey[500], fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-
-          // Body
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (request.guestName != null) ...[
-                  Row(
-                    children: [
-                      Icon(Icons.person, size: 16, color: Colors.grey[600]),
-                      const SizedBox(width: 4),
-                      Text(
-                        request.guestName!,
-                        style: TextStyle(color: Colors.grey[700], fontSize: 14),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                ],
-                Text(
-                  request.description,
-                  style: const TextStyle(fontSize: 15),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Icon(Icons.person_pin, size: 16, color: Colors.grey[600]),
-                    const SizedBox(width: 4),
-                    Text(
-                      request.employeeName ?? "Not assigned",
-                      style: TextStyle(
-                        color: request.employeeId != null ? Colors.blue[700] : Colors.grey[600],
-                        fontWeight: request.employeeId != null ? FontWeight.bold : FontWeight.normal,
-                        fontSize: 14,
-                      ),
-                    ),
-                    const Spacer(),
-                    Consumer<AuthProvider>(
-                      builder: (context, auth, _) {
-                         if (auth.role == UserRole.manager || auth.role == UserRole.kitchen) {
-                           return InkWell(
-                             onTap: widget.onAssign,
-                             child: Text(
-                               request.employeeId != null ? "Change" : "Assign",
-                               style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold, fontSize: 13),
-                             ),
-                           );
-                         }
-                         return const SizedBox.shrink();
-                      }
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-
-                // Action Buttons
-                if (request.status.toLowerCase() == 'pending')
-                  _isUpdating
-                  ? const Center(child: Padding(
-                      padding: EdgeInsets.symmetric(vertical: 14),
-                      child: CircularProgressIndicator(strokeWidth: 2)))
-                  : Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: () {
-                              if (!context.read<AttendanceProvider>().isClockedIn) {
-                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Action Denied: You must Clock In first")));
-                                return;
-                              }
-
-                              final isFoodService = request.type.toLowerCase().contains('food') || 
-                                                    request.description.toLowerCase().contains('food') ||
-                                                    request.type.toLowerCase() == 'delivery';
-
-                               if (isFoodService) {
-                                  showDialog(
-                                    context: context,
-                                    builder: (_) => DeliveryStartDialog(
-                                      request: request,
-                                      onConfirm: () {
-                                        final empId = context.read<AuthProvider>().employeeId;
-                                        _doUpdate('in_progress');
-                                      },
-                                    ),
-                                  );
-                                  return;
-                               }
-
-                              showDialog(
-                                context: context,
-                                builder: (_) => PickInventoryDialog(
-                                  requestId: request.id,
-                                  roomNumber: request.roomNumber,
-                                  preAssignedItems: request.refillItems,
-                                  onStart: (items) async {
-                                    if (items.isNotEmpty) {
-                                      final groupedItems = <int, List<Map<String, dynamic>>>{};
-                                      for (var item in items) {
-                                        final locId = item['location_id'] as int?;
-                                        if (locId != null) {
-                                          groupedItems.putIfAbsent(locId, () => []).add(item);
-                                        }
-                                      }
-
-                                      for (var entry in groupedItems.entries) {
-                                        await context.read<InventoryProvider>().createStockIssue(
-                                          sourceLocationId: entry.key,
-                                          items: entry.value,
-                                          notes: "Used for Service Request #${request.id} (Room ${request.roomNumber})",
-                                        );
-                                      }
-                                    }
-                                    _doUpdate('in_progress');
-                                  },
-                                ),
-                              );
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                          icon: const Icon(Icons.play_arrow),
-                          label: const Text("Accept & Start"),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: () => _doUpdate('cancelled'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.red,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                          icon: const Icon(Icons.close),
-                          label: const Text("Reject"),
-                        ),
-                      ),
-                    ],
-                  ),
-                if (request.status.toLowerCase().replaceAll('_', ' ') == 'in progress')
-                  _isUpdating
-                  ? const Center(child: Padding(
-                      padding: EdgeInsets.symmetric(vertical: 14),
-                      child: CircularProgressIndicator(strokeWidth: 2)))
-                  : SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                          final desc = request.description.toLowerCase();
-                          if (desc.contains("checkout") || request.type.toLowerCase() == 'checkout') {
-                             showDialog(
-                               context: context,
-                               builder: (_) => CheckoutVerificationDialog(
-                                 roomNumber: request.roomNumber,
-                                 onSuccess: () => _doUpdate('completed', null),
-                               )
-                             );
-                             return;
-                          }
-
-                          final isFood = request.type.toLowerCase().contains('food') || 
-                                         request.description.toLowerCase().contains('food') ||
-                                         request.type.toLowerCase() == 'delivery';
-
-                          showDialog(
-                            context: context,
-                            builder: (_) => CompleteServiceDialog(
-                               requestId: request.id,
-                               roomNumber: request.roomNumber,
-                               refillItems: request.refillItems,
-                               isFoodService: isFood,
-                               currentBillingStatus: request.billingStatus,
-                               foodOrderAmount: request.foodOrderAmount,
-                               foodOrderGst: request.foodOrderGst,
-                               foodOrderTotal: request.foodOrderTotal,
-                               onJustComplete: (billingStatus) => _doUpdate('completed', billingStatus),
-                               onReturn: (items, destId, billingStatus) async {
-                                  final provider = context.read<InventoryProvider>();
-                                  final locs = provider.locations;
-                                  
-                                  dynamic roomLoc;
-                                  try {
-                                    roomLoc = locs.firstWhere((l) => l['name'] == "Room ${request.roomNumber}");
-                                  } catch (e) {
-                                    roomLoc = null;
-                                  }
-                                  
-                                  if (roomLoc == null) {
-                                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error: Room location not found in inventory system. Cannot return items.")));
-                                     return; 
-                                  }
-
-                                  await provider.createStockIssue(
-                                     sourceLocationId: roomLoc['id'],
-                                     destinationLocationId: destId,
-                                     items: items.map((i) => {
-                                        'item_id': i['item_id'],
-                                        'issued_quantity': i['quantity'],
-                                        'unit': i['unit']
-                                     }).toList(),
-                                     notes: "Return from Service Request #${request.id}"
-                                  );
-                                  _doUpdate('completed', billingStatus);
-                               }
-                            )
-                          );
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      icon: const Icon(Icons.check_circle),
-                      label: const Text("Mark Complete"),
-                    ),
-                  ),
-                if (request.status.toLowerCase() == 'completed')
-                  Column(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.green.shade50,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.check_circle, color: Colors.green.shade700),
                             const SizedBox(width: 8),
-                            Text(
-                              "Completed",
-                              style: TextStyle(
-                                color: Colors.green.shade700,
-                                fontWeight: FontWeight.bold,
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: priorityColor.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(color: priorityColor.withOpacity(0.5))
+                              ),
+                              child: Text(
+                                request.priority.toUpperCase(),
+                                style: TextStyle(
+                                  color: priorityColor,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w900,
+                                ),
                               ),
                             ),
                           ],
                         ),
+                        const SizedBox(height: 4),
+                        Text(
+                          request.type.toUpperCase(),
+                          style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Text(
+                    timeAgo.toUpperCase(),
+                    style: TextStyle(color: Colors.white.withOpacity(0.2), fontSize: 10, fontWeight: FontWeight.w900),
+                  ),
+                ],
+              ),
+            ),
+
+            // Body
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (request.guestName != null) ...[
+                    Row(
+                      children: [
+                        Icon(Icons.person_rounded, size: 16, color: AppColors.accent),
+                        const SizedBox(width: 8),
+                        Text(
+                          request.guestName!.toUpperCase(),
+                          style: const TextStyle(color: AppColors.accent, fontSize: 12, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  Text(
+                    request.description,
+                    style: const TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.w500),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Icon(Icons.person_pin_rounded, size: 16, color: Colors.white.withOpacity(0.3)),
+                      const SizedBox(width: 8),
+                      Text(
+                        (request.employeeName ?? "NOT ASSIGNED").toUpperCase(),
+                        style: TextStyle(
+                          color: request.employeeId != null ? Colors.blueAccent : Colors.white.withOpacity(0.2),
+                          fontWeight: FontWeight.w900,
+                          fontSize: 11,
+                          letterSpacing: 0.5,
+                        ),
                       ),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: () {
-                            // Show details dialog
+                      const Spacer(),
+                      Consumer<AuthProvider>(
+                        builder: (context, auth, _) {
+                           if (auth.role == UserRole.manager || auth.role == UserRole.kitchen) {
+                             return InkWell(
+                               onTap: widget.onAssign,
+                               child: Text(
+                                 (request.employeeId != null ? "CHANGE" : "ASSIGN").toUpperCase(),
+                                 style: const TextStyle(color: AppColors.accent, fontWeight: FontWeight.w900, fontSize: 10),
+                               ),
+                             );
+                           }
+                           return const SizedBox.shrink();
+                        }
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Action Buttons
+                  if (request.status.toLowerCase() == 'pending')
+                    _isUpdating
+                    ? const Center(child: Padding(
+                        padding: EdgeInsets.symmetric(vertical: 14),
+                        child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accent)))
+                    : Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                                if (!context.read<AttendanceProvider>().isClockedIn) {
+                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Action Denied: You must Clock In first")));
+                                  return;
+                                }
+
+                                final isFoodService = request.type.toLowerCase().contains('food') || 
+                                                      request.description.toLowerCase().contains('food') ||
+                                                      request.type.toLowerCase() == 'delivery';
+
+                                 if (isFoodService) {
+                                    showDialog(
+                                      context: context,
+                                      builder: (_) => DeliveryStartDialog(
+                                        request: request,
+                                        onConfirm: () {
+                                          _doUpdate('in_progress');
+                                        },
+                                      ),
+                                    );
+                                    return;
+                                 }
+
+                                showDialog(
+                                  context: context,
+                                  builder: (_) => PickInventoryDialog(
+                                    requestId: request.id,
+                                    roomNumber: request.roomNumber,
+                                    preAssignedItems: request.refillItems,
+                                    onStart: (items) async {
+                                      if (items.isNotEmpty) {
+                                        final groupedItems = <int, List<Map<String, dynamic>>>{};
+                                        for (var item in items) {
+                                          final locId = item['location_id'] as int?;
+                                          if (locId != null) {
+                                            groupedItems.putIfAbsent(locId, () => []).add(item);
+                                          }
+                                        }
+
+                                        for (var entry in groupedItems.entries) {
+                                          await context.read<InventoryProvider>().createStockIssue(
+                                            sourceLocationId: entry.key,
+                                            items: entry.value,
+                                            notes: "Used for Service Request #${request.id} (Room ${request.roomNumber})",
+                                          );
+                                        }
+                                      }
+                                      _doUpdate('in_progress');
+                                    },
+                                  ),
+                                );
+                            },
+                            icon: const Icon(Icons.check_rounded, size: 18),
+                            label: const Text("ACCEPT TASK", style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.accent,
+                              foregroundColor: AppColors.onyx,
+                              elevation: 0,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () => _doUpdate('cancelled'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                            icon: const Icon(Icons.close),
+                            label: const Text("Reject"),
+                          ),
+                        ),
+                      ],
+                    ),
+                  if (request.status.toLowerCase().replaceAll('_', ' ') == 'in progress')
+                    _isUpdating
+                    ? const Center(child: Padding(
+                        padding: EdgeInsets.symmetric(vertical: 14),
+                        child: CircularProgressIndicator(strokeWidth: 2)))
+                    : SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                            final desc = request.description.toLowerCase();
+                            if (desc.contains("checkout") || request.type.toLowerCase() == 'checkout') {
+                               showDialog(
+                                 context: context,
+                                 builder: (_) => CheckoutVerificationDialog(
+                                   roomNumber: request.roomNumber,
+                                   onSuccess: () => _doUpdate('completed', null),
+                                 )
+                               );
+                               return;
+                            }
+
+                            final isFood = request.type.toLowerCase().contains('food') || 
+                                           request.description.toLowerCase().contains('food') ||
+                                           request.type.toLowerCase() == 'delivery';
+
                             showDialog(
                               context: context,
-                              builder: (context) => Dialog(
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(20),
+                              builder: (_) => CompleteServiceDialog(
+                                 requestId: request.id,
+                                 roomNumber: request.roomNumber,
+                                 refillItems: request.refillItems,
+                                 isFoodService: isFood,
+                                 currentBillingStatus: request.billingStatus,
+                                 foodOrderAmount: request.foodOrderAmount,
+                                 foodOrderGst: request.foodOrderGst,
+                                 foodOrderTotal: request.foodOrderTotal,
+                                 onJustComplete: (billingStatus) => _doUpdate('completed', billingStatus),
+                                 onReturn: (items, destId, billingStatus) async {
+                                    final provider = context.read<InventoryProvider>();
+                                    final locs = provider.locations;
+                                    
+                                    dynamic roomLoc;
+                                    try {
+                                      roomLoc = locs.firstWhere((l) => l['name'] == "Room ${request.roomNumber}");
+                                    } catch (e) {
+                                      roomLoc = null;
+                                    }
+                                    
+                                    if (roomLoc == null) {
+                                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error: Room location not found in inventory system. Cannot return items.")));
+                                       return; 
+                                    }
+
+                                    await provider.createStockIssue(
+                                       sourceLocationId: roomLoc['id'],
+                                       destinationLocationId: destId,
+                                       items: items.map((i) => {
+                                          'item_id': i['item_id'],
+                                          'issued_quantity': i['quantity'],
+                                          'unit': i['unit']
+                                       }).toList(),
+                                       notes: "Return from Service Request #${request.id}"
+                                    );
+                                    _doUpdate('completed', billingStatus);
+                                 }
+                              )
+                            );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        icon: const Icon(Icons.check_circle),
+                        label: const Text("Mark Complete"),
+                      ),
+                    ),
+                  if (request.status.toLowerCase() == 'completed')
+                    Column(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.check_circle, color: Colors.greenAccent),
+                              const SizedBox(width: 8),
+                              const Text(
+                                "COMPLETED",
+                                style: TextStyle(
+                                  color: Colors.greenAccent,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 10,
                                 ),
-                                child: Container(
-                                  constraints: BoxConstraints(maxWidth: 500),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      // Header with gradient
-                                      Container(
-                                        padding: const EdgeInsets.all(24),
-                                        decoration: BoxDecoration(
-                                          gradient: LinearGradient(
-                                            colors: [AppColors.primary, AppColors.primary.withOpacity(0.8)],
-                                            begin: Alignment.topLeft,
-                                            end: Alignment.bottomRight,
-                                          ),
-                                          borderRadius: BorderRadius.only(
-                                            topLeft: Radius.circular(20),
-                                            topRight: Radius.circular(20),
-                                          ),
-                                        ),
-                                        child: Row(
-                                          children: [
-                                            Container(
-                                              padding: EdgeInsets.all(12),
-                                              decoration: BoxDecoration(
-                                                color: Colors.white.withOpacity(0.2),
-                                                borderRadius: BorderRadius.circular(12),
-                                              ),
-                                              child: Icon(Icons.room_service, color: Colors.white, size: 28),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              // Show details dialog...
+                               showDialog(
+                                context: context,
+                                builder: (context) => Dialog(
+                                  backgroundColor: Colors.transparent,
+                                  child: OnyxGlassCard(
+                                    padding: EdgeInsets.zero,
+                                    child: Container(
+                                      constraints: const BoxConstraints(maxWidth: 500),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.all(24),
+                                            decoration: BoxDecoration(
+                                              color: AppColors.accent.withOpacity(0.1),
+                                              borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
                                             ),
-                                            SizedBox(width: 16),
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment: CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    "Service Details",
-                                                    style: TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 20,
-                                                      fontWeight: FontWeight.bold,
-                                                    ),
-                                                  ),
-                                                  SizedBox(height: 4),
-                                                  Text(
-                                                    "Room ${request.roomNumber}",
-                                                    style: TextStyle(
-                                                      color: Colors.white.withOpacity(0.9),
-                                                      fontSize: 14,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                            IconButton(
-                                              onPressed: () => Navigator.pop(context),
-                                              icon: Icon(Icons.close, color: Colors.white),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      
-                                      // Content
-                                      Container(
-                                        padding: const EdgeInsets.all(24),
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            // Service Type Card
-                                            Container(
-                                              padding: EdgeInsets.all(16),
-                                              decoration: BoxDecoration(
-                                                color: Colors.blue.shade50,
-                                                borderRadius: BorderRadius.circular(12),
-                                                border: Border.all(color: Colors.blue.shade100),
-                                              ),
-                                              child: Row(
-                                                children: [
-                                                  Icon(Icons.cleaning_services, color: Colors.blue.shade700, size: 24),
-                                                  SizedBox(width: 12),
-                                                  Expanded(
-                                                    child: Column(
-                                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                                      children: [
-                                                        Text(
-                                                          "Service Type",
-                                                          style: TextStyle(
-                                                            fontSize: 11,
-                                                            color: Colors.grey[600],
-                                                            fontWeight: FontWeight.w500,
-                                                          ),
-                                                        ),
-                                                        SizedBox(height: 4),
-                                                        Text(
-                                                          request.type,
-                                                          style: TextStyle(
-                                                            fontSize: 16,
-                                                            fontWeight: FontWeight.bold,
-                                                            color: Colors.blue.shade900,
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                  Container(
-                                                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                                    decoration: BoxDecoration(
-                                                      color: request.status.toLowerCase() == 'completed' 
-                                                          ? Colors.green.shade100 
-                                                          : Colors.orange.shade100,
-                                                      borderRadius: BorderRadius.circular(20),
-                                                    ),
-                                                    child: Text(
-                                                      request.status,
-                                                      style: TextStyle(
-                                                        fontSize: 12,
-                                                        fontWeight: FontWeight.bold,
-                                                        color: request.status.toLowerCase() == 'completed' 
-                                                            ? Colors.green.shade700 
-                                                            : Colors.orange.shade700,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                            
-                                            SizedBox(height: 20),
-                                            
-                                            // Timeline
-                                            Row(
+                                            child: Row(
                                               children: [
-                                                Expanded(
-                                                  child: _TimelineItem(
-                                                    icon: Icons.play_circle_outline,
-                                                    label: "Started",
-                                                    time: DateFormat('MMM dd, HH:mm').format(request.createdAt),
-                                                    color: Colors.blue,
-                                                  ),
-                                                ),
-                                                if (request.completedAt != null) ...[
-                                                  SizedBox(width: 12),
-                                                  Expanded(
-                                                    child: _TimelineItem(
-                                                      icon: Icons.check_circle_outline,
-                                                      label: "Completed",
-                                                      time: DateFormat('MMM dd, HH:mm').format(request.completedAt!),
-                                                      color: Colors.green,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ],
-                                            ),
-                                            
-                                            if (request.refillItems.isNotEmpty) ...[
-                                              SizedBox(height: 24),
-                                              Divider(),
-                                              SizedBox(height: 16),
-                                              
-                                              // Inventory Items Section
-                                              Row(
-                                                children: [
-                                                  Icon(Icons.inventory_2, size: 20, color: AppColors.primary),
-                                                  SizedBox(width: 8),
-                                                  Text(
-                                                    "Inventory Items",
-                                                    style: TextStyle(
-                                                      fontSize: 16,
-                                                      fontWeight: FontWeight.bold,
-                                                      color: Colors.grey[800],
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                              SizedBox(height: 12),
-                                              
-                                              ...request.refillItems.map((item) {
-                                                final itemId = item['item_id'];
-                                                final quantity = item['quantity'];
-                                                
-                                                String itemName = 'Item #$itemId';
-                                                String unit = 'pcs';
-                                                
-                                                try {
-                                                  final invProvider = context.read<InventoryProvider>();
-                                                  final inventoryItem = invProvider.allItems.firstWhere(
-                                                    (i) => i.id == itemId,
-                                                  );
-                                                  itemName = inventoryItem.name;
-                                                  unit = inventoryItem.unit ?? 'pcs';
-                                                } catch (e) {
-                                                  print('[WARN] Item $itemId not found: $e');
-                                                }
-                                                
-                                                return Container(
-                                                  margin: EdgeInsets.only(bottom: 8),
-                                                  padding: EdgeInsets.all(12),
+                                                Container(
+                                                  padding: const EdgeInsets.all(12),
                                                   decoration: BoxDecoration(
-                                                    color: Colors.grey.shade50,
-                                                    borderRadius: BorderRadius.circular(10),
-                                                    border: Border.all(color: Colors.grey.shade200),
+                                                    color: AppColors.onyx,
+                                                    borderRadius: BorderRadius.circular(12),
                                                   ),
-                                                  child: Row(
+                                                  child: const Icon(Icons.room_service, color: Colors.white, size: 28),
+                                                ),
+                                                const SizedBox(width: 16),
+                                                Expanded(
+                                                  child: Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
                                                     children: [
-                                                      Container(
-                                                        padding: EdgeInsets.all(8),
-                                                        decoration: BoxDecoration(
+                                                      const Text(
+                                                        "SERVICE DETAILS",
+                                                        style: TextStyle(
                                                           color: Colors.white,
-                                                          borderRadius: BorderRadius.circular(8),
-                                                        ),
-                                                        child: Icon(Icons.inventory, size: 18, color: AppColors.primary),
-                                                      ),
-                                                      SizedBox(width: 12),
-                                                      Expanded(
-                                                        child: Text(
-                                                          itemName,
-                                                          style: TextStyle(
-                                                            fontSize: 14,
-                                                            fontWeight: FontWeight.w500,
-                                                            color: Colors.grey[800],
-                                                          ),
+                                                          fontSize: 18,
+                                                          fontWeight: FontWeight.w900,
                                                         ),
                                                       ),
-                                                      Container(
-                                                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                                        decoration: BoxDecoration(
-                                                          color: AppColors.primary.withOpacity(0.1),
-                                                          borderRadius: BorderRadius.circular(8),
-                                                        ),
-                                                        child: Text(
-                                                          "$quantity $unit",
-                                                          style: TextStyle(
-                                                            fontSize: 13,
-                                                            fontWeight: FontWeight.bold,
-                                                            color: AppColors.primary,
-                                                          ),
+                                                      const SizedBox(height: 4),
+                                                      Text(
+                                                        "ROOM ${request.roomNumber}",
+                                                        style: TextStyle(
+                                                          color: Colors.white.withOpacity(0.5),
+                                                          fontSize: 12,
+                                                          fontWeight: FontWeight.bold,
                                                         ),
                                                       ),
                                                     ],
                                                   ),
-                                                );
-                                              }).toList(),
-                                            ] else ...[
-                                              SizedBox(height: 24),
-                                              Center(
-                                                child: Column(
+                                                ),
+                                                IconButton(
+                                                  onPressed: () => Navigator.pop(context),
+                                                  icon: const Icon(Icons.close, color: Colors.white54),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          Padding(
+                                            padding: const EdgeInsets.all(24),
+                                            child: Column(
+                                              children: [
+                                                Row(
                                                   children: [
-                                                    Icon(Icons.inventory_2_outlined, size: 48, color: Colors.grey[300]),
-                                                    SizedBox(height: 8),
-                                                    Text(
-                                                      "No inventory items assigned",
-                                                      style: TextStyle(
-                                                        fontSize: 13,
-                                                        color: Colors.grey[500],
-                                                        fontStyle: FontStyle.italic,
+                                                    Expanded(
+                                                      child: _TimelineItem(
+                                                        icon: Icons.play_circle_outline,
+                                                        label: "STARTED",
+                                                        time: DateFormat('HH:mm').format(request.createdAt),
+                                                        color: Colors.blueAccent,
                                                       ),
                                                     ),
+                                                    const SizedBox(width: 12),
+                                                    if (request.completedAt != null)
+                                                      Expanded(
+                                                        child: _TimelineItem(
+                                                          icon: Icons.check_circle_outline,
+                                                          label: "COMPLETED",
+                                                          time: DateFormat('HH:mm').format(request.completedAt!),
+                                                          color: Colors.greenAccent,
+                                                        ),
+                                                      ),
                                                   ],
                                                 ),
-                                              ),
-                                            ],
-                                          ],
-                                        ),
+                                                const SizedBox(height: 24),
+                                                if (request.refillItems.isNotEmpty) ...[
+                                                   const Divider(color: Colors.white10),
+                                                   const SizedBox(height: 16),
+                                                   const Align(
+                                                     alignment: Alignment.centerLeft,
+                                                     child: Text("INVENTORY ITEMS", style: TextStyle(color: Colors.white30, fontSize: 10, fontWeight: FontWeight.w900)),
+                                                   ),
+                                                   const SizedBox(height: 12),
+                                                   ...request.refillItems.map((item) => Container(
+                                                     margin: const EdgeInsets.only(bottom: 8),
+                                                     padding: const EdgeInsets.all(12),
+                                                     decoration: BoxDecoration(
+                                                       color: Colors.white.withOpacity(0.03),
+                                                       borderRadius: BorderRadius.circular(12),
+                                                     ),
+                                                     child: Row(
+                                                       children: [
+                                                         const Icon(Icons.inventory_2, size: 16, color: AppColors.accent),
+                                                         const SizedBox(width: 12),
+                                                         Expanded(child: Text("Item #${item['item_id']}", style: const TextStyle(color: Colors.white70, fontSize: 13))),
+                                                         Text("${item['quantity']} PCS", style: const TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold, fontSize: 13)),
+                                                       ],
+                                                     ),
+                                                   )),
+                                                ],
+                                              ],
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                    ],
+                                    ),
                                   ),
                                 ),
+                              );
+                            },
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white70,
+                              side: const BorderSide(color: Colors.white10),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
                               ),
-                            );
-                          },
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.green.shade700,
-                            side: BorderSide(color: Colors.green.shade700),
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
                             ),
+                            icon: const Icon(Icons.info_outline, size: 18),
+                            label: const Text("VIEW DETAILS", style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900)),
                           ),
-                          icon: const Icon(Icons.info_outline, size: 18),
-                          label: const Text("View Details"),
                         ),
-                      ),
-                    ],
-                  ),
-              ],
+                      ],
+                    ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
-// Timeline Item Widget for Service Details Dialog
 class _TimelineItem extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -988,35 +842,35 @@ class _TimelineItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: EdgeInsets.all(12),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withOpacity(0.3)),
+        color: color.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.1)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(icon, size: 16, color: color),
-              SizedBox(width: 6),
+              Icon(icon, size: 14, color: color),
+              const SizedBox(width: 6),
               Text(
                 label,
                 style: TextStyle(
-                  fontSize: 11,
-                  color: Colors.grey[600],
-                  fontWeight: FontWeight.w500,
+                  fontSize: 9,
+                  color: color.withOpacity(0.6),
+                  fontWeight: FontWeight.w900,
                 ),
               ),
             ],
           ),
-          SizedBox(height: 6),
+          const SizedBox(height: 6),
           Text(
             time,
             style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.bold,
+              fontSize: 14,
+              fontWeight: FontWeight.w900,
               color: color,
             ),
           ),

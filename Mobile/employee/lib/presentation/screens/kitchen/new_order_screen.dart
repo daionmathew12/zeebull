@@ -4,6 +4,7 @@ import 'package:orchid_employee/presentation/providers/kitchen_provider.dart';
 import 'package:orchid_employee/presentation/providers/inventory_provider.dart';
 import 'package:orchid_employee/presentation/providers/auth_provider.dart';
 import 'package:orchid_employee/core/constants/app_colors.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class NewOrderScreen extends StatefulWidget {
   const NewOrderScreen({super.key});
@@ -26,10 +27,16 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<InventoryProvider>().fetchRooms();
-      context.read<KitchenProvider>().fetchFoodItems();
-      context.read<KitchenProvider>().fetchEmployees();
+      _refreshData();
     });
+  }
+
+  Future<void> _refreshData() async {
+    await Future.wait([
+      context.read<InventoryProvider>().fetchRooms(),
+      context.read<KitchenProvider>().fetchFoodItems(),
+      context.read<KitchenProvider>().fetchEmployees(),
+    ]);
   }
 
   double get _totalAmount {
@@ -43,118 +50,224 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FA),
+      backgroundColor: AppColors.onyx,
       appBar: AppBar(
-        title: const Text("New Order"),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
+        title: Text(
+          "NEW ORDER",
+          style: GoogleFonts.outfit(
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1.5,
+            color: Colors.white,
+          ),
+        ),
+        backgroundColor: Colors.transparent,
         elevation: 0,
+        centerTitle: true,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 20),
+          onPressed: () => Navigator.pop(context),
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: AppColors.accent),
+            onPressed: _refreshData,
+          ),
+        ],
       ),
-      body: Consumer2<InventoryProvider, KitchenProvider>(
-        builder: (context, inventory, kitchen, child) {
-          return Form(
-            key: _formKey,
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                _buildSectionHeader("Order Information"),
-                const SizedBox(height: 12),
-                _buildRoomSelector(inventory.rooms.where((r) {
-                  final status = (r['status'] as String?)?.toLowerCase() ?? '';
-                  return status == 'occupied' || status == 'checked-in';
-                }).toList()),
-                const SizedBox(height: 16),
-                _buildOrderTypeSelector(),
-                const SizedBox(height: 16),
-                _buildEmployeeSelector(kitchen.employees),
-                const SizedBox(height: 24),
-                
-                _buildSectionHeader("Selected Items"),
-                const SizedBox(height: 12),
-                if (_selectedItems.isEmpty)
-                   _buildEmptyItemsState()
-                else
-                   ..._selectedItems.asMap().entries.map((entry) => _buildSelectedItemCard(entry.key, entry.value)),
-                
-                const SizedBox(height: 16),
-                _buildAddItemButton(kitchen.foodItems),
-                
-                const SizedBox(height: 24),
-                _buildSectionHeader("Notes"),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _notesController,
-                  decoration: InputDecoration(
-                    hintText: "Enter any special requests...",
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                    fillColor: Colors.white,
-                    filled: true,
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              AppColors.onyx,
+              AppColors.onyx.withOpacity(0.8),
+              const Color(0xFF1E293B),
+            ],
+          ),
+        ),
+        child: Consumer2<InventoryProvider, KitchenProvider>(
+          builder: (context, inventory, kitchen, child) {
+            // Filter rooms - show all if list is empty for debugging, 
+            // but ideally show occupied/checked-in for production
+            final rooms = inventory.rooms.where((r) {
+              final status = (r['status'] as String?)?.toLowerCase() ?? '';
+              return status == 'occupied' || status == 'checked-in' || status == 'checked_in';
+            }).toList();
+
+            return Form(
+              key: _formKey,
+              child: ListView(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                children: [
+                  _buildSectionLabel("GUEST INFORMATION"),
+                  const SizedBox(height: 12),
+                  _buildOnyxGlassCard(
+                    child: Column(
+                      children: [
+                        _buildRoomSelector(rooms, inventory.isLoading),
+                        const SizedBox(height: 16),
+                        _buildOrderTypeSelector(),
+                        const SizedBox(height: 16),
+                        _buildEmployeeSelector(kitchen.employees, kitchen.isLoading),
+                      ],
+                    ),
                   ),
-                  maxLines: 3,
-                ),
-                
-                const SizedBox(height: 32),
-                _buildSummary(kitchen),
-              ],
+                  
+                  const SizedBox(height: 24),
+                  _buildSectionLabel("ORDER ITEMS"),
+                  const SizedBox(height: 12),
+                  _buildOnyxGlassCard(
+                    child: Column(
+                      children: [
+                        if (_selectedItems.isEmpty)
+                           _buildEmptyItemsState()
+                        else
+                           ..._selectedItems.asMap().entries.map((entry) => _buildSelectedItemCard(entry.key, entry.value)),
+                        
+                        const SizedBox(height: 16),
+                        _buildAddItemButton(kitchen.foodItems),
+                      ],
+                    ),
+                  ),
+                  
+                  const SizedBox(height: 24),
+                  _buildSectionLabel("SPECIAL INSTRUCTIONS"),
+                  const SizedBox(height: 12),
+                  _buildOnyxGlassCard(
+                    child: TextField(
+                      controller: _notesController,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        hintText: "Add notes for the chef or delivery...",
+                        hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                        border: InputBorder.none,
+                      ),
+                      maxLines: 2,
+                    ),
+                  ),
+                  
+                  const SizedBox(height: 32),
+                  _buildSubmitSection(kitchen),
+                  const SizedBox(height: 40),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSectionLabel(String label) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4),
+      child: Text(
+        label,
+        style: GoogleFonts.outfit(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: AppColors.accent,
+          letterSpacing: 1.2,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOnyxGlassCard({required Widget child, EdgeInsets? padding}) {
+    return Container(
+      padding: padding ?? const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+      ),
+      child: child,
+    );
+  }
+
+  Widget _buildRoomSelector(List<dynamic> rooms, bool isLoading) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          "Select Occupied Room",
+          style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12),
+        ),
+        const SizedBox(height: 8),
+        DropdownButtonFormField<int>(
+          dropdownColor: AppColors.onyxLight,
+          icon: const Icon(Icons.keyboard_arrow_down, color: AppColors.accent),
+          decoration: InputDecoration(
+            prefixIcon: const Icon(Icons.meeting_room_outlined, color: AppColors.accent, size: 20),
+            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white.withOpacity(0.1))),
+            focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.accent)),
+          ),
+          style: const TextStyle(color: Colors.white, fontSize: 16),
+          value: _selectedRoomId,
+          hint: Text(
+            isLoading ? "Loading rooms..." : "Select Room",
+            style: TextStyle(color: Colors.white.withOpacity(0.3)),
+          ),
+          items: rooms.map((room) {
+            return DropdownMenuItem<int>(
+              value: room['id'],
+              child: Text("Room ${room['number']}"),
+            );
+          }).toList(),
+          onChanged: (val) {
+            setState(() {
+              _selectedRoomId = val;
+              final room = rooms.firstWhere((r) => r['id'] == val);
+              _selectedRoomNumber = room['number'].toString();
+            });
+          },
+          validator: (val) => val == null ? "Required" : null,
+        ),
+        if (!isLoading && rooms.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              "No occupied rooms found.",
+              style: TextStyle(color: AppColors.error.withOpacity(0.7), fontSize: 11),
             ),
-          );
-        },
-      ),
+          ),
+      ],
     );
   }
 
-  Widget _buildSectionHeader(String title) {
-    return Text(
-      title.toUpperCase(),
-      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey.shade600, letterSpacing: 1),
-    );
-  }
-
-  Widget _buildRoomSelector(List<dynamic> rooms) {
-    return DropdownButtonFormField<int>(
-      decoration: InputDecoration(
-        labelText: "Select Room",
-        prefixIcon: const Icon(Icons.meeting_room),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-        filled: true,
-        fillColor: Colors.white,
-      ),
-      value: _selectedRoomId,
-      items: rooms.map((room) {
-        return DropdownMenuItem<int>(
-          value: room['id'],
-          child: Text("Room ${room['number']}"),
-        );
-      }).toList(),
-      onChanged: (val) {
-        setState(() {
-          _selectedRoomId = val;
-          final room = rooms.firstWhere((r) => r['id'] == val);
-          _selectedRoomNumber = room['number'].toString();
-        });
-      },
-      validator: (val) => val == null ? "Please select a room" : null,
-    );
-  }
-
-  Widget _buildEmployeeSelector(List<dynamic> employees) {
-    return DropdownButtonFormField<int>(
-      decoration: InputDecoration(
-        labelText: "Assign For Delivery",
-        prefixIcon: const Icon(Icons.person_outline),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-        filled: true,
-        fillColor: Colors.white,
-      ),
-      value: _assignedEmployeeId,
-      items: employees.map((emp) {
-        return DropdownMenuItem<int>(
-          value: emp['id'],
-          child: Text("${emp['name']} (${emp['role']})"),
-        );
-      }).toList(),
-      onChanged: (val) => setState(() => _assignedEmployeeId = val),
-      hint: const Text("Select Delivery Staff"),
+  Widget _buildEmployeeSelector(List<dynamic> employees, bool isLoading) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          "Assign Staff",
+          style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12),
+        ),
+        const SizedBox(height: 8),
+        DropdownButtonFormField<int>(
+          dropdownColor: AppColors.onyxLight,
+          icon: const Icon(Icons.keyboard_arrow_down, color: AppColors.accent),
+          decoration: InputDecoration(
+            prefixIcon: const Icon(Icons.person_outline, color: AppColors.accent, size: 20),
+            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white.withOpacity(0.1))),
+            focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.accent)),
+          ),
+          style: const TextStyle(color: Colors.white, fontSize: 16),
+          value: _assignedEmployeeId,
+          hint: Text(
+            isLoading ? "Loading staff..." : "Select Staff",
+            style: TextStyle(color: Colors.white.withOpacity(0.3)),
+          ),
+          items: employees.map((emp) {
+            return DropdownMenuItem<int>(
+              value: emp['id'],
+              child: Text("${emp['name']} (${emp['role']})"),
+            );
+          }).toList(),
+          onChanged: (val) => setState(() => _assignedEmployeeId = val),
+        ),
+      ],
     );
   }
 
@@ -162,7 +275,7 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: Colors.grey.shade200,
+        color: Colors.black.withOpacity(0.2),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -177,25 +290,30 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   Widget _buildTypeOption(String type, String label, IconData icon) {
     final bool isSelected = _orderType == type;
     return Expanded(
-      child: InkWell(
+      child: GestureDetector(
         onTap: () => setState(() => _orderType = type),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color: isSelected ? Colors.white : Colors.transparent,
+            color: isSelected ? AppColors.accent : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
-            boxShadow: isSelected ? [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4)] : null,
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 18, color: isSelected ? Colors.blue : Colors.grey),
+              Icon(
+                icon, 
+                size: 16, 
+                color: isSelected ? AppColors.onyx : Colors.white.withOpacity(0.5)
+              ),
               const SizedBox(width: 8),
               Text(
                 label,
-                style: TextStyle(
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                  color: isSelected ? Colors.blue : Colors.grey,
+                style: GoogleFonts.outfit(
+                  fontSize: 13,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                  color: isSelected ? AppColors.onyx : Colors.white.withOpacity(0.5),
                 ),
               ),
             ],
@@ -206,19 +324,43 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
   }
 
   Widget _buildSelectedItemCard(int index, Map<String, dynamic> item) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      elevation: 0,
-      child: ListTile(
-        title: Text(item['name'], style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text("₹${item['price']} x ${item['quantity']}"),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.remove_circle_outline, color: Colors.grey),
-              onPressed: () {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppColors.accent.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.fastfood_outlined, color: AppColors.accent, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item['name'],
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  "₹${item['price']}",
+                  style: TextStyle(color: AppColors.accent.withOpacity(0.7), fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          Row(
+            children: [
+              _buildQtyBtn(Icons.remove, () {
                 setState(() {
                   if (item['quantity'] > 1) {
                     item['quantity']--;
@@ -226,54 +368,73 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
                     _selectedItems.removeAt(index);
                   }
                 });
-              },
-            ),
-            Text("${item['quantity']}", style: const TextStyle(fontWeight: FontWeight.bold)),
-            IconButton(
-              icon: const Icon(Icons.add_circle_outline, color: Colors.blue),
-              onPressed: () {
+              }),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  "${item['quantity']}",
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+              ),
+              _buildQtyBtn(Icons.add, () {
                 setState(() {
                   item['quantity']++;
                 });
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildEmptyItemsState() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
-      child: Column(
-        children: [
-          Icon(Icons.shopping_basket_outlined, size: 48, color: Colors.grey.shade300),
-          const SizedBox(height: 12),
-          Text("No items selected yet", style: TextStyle(color: Colors.grey.shade500)),
+              }),
+            ],
+          ),
         ],
       ),
     );
   }
 
+  Widget _buildQtyBtn(IconData icon, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white.withOpacity(0.2)),
+        ),
+        child: Icon(icon, size: 16, color: Colors.white),
+      ),
+    );
+  }
+
+  Widget _buildEmptyItemsState() {
+    return Column(
+      children: [
+        Icon(Icons.shopping_basket_outlined, size: 40, color: Colors.white.withOpacity(0.1)),
+        const SizedBox(height: 8),
+        Text(
+          "No items selected",
+          style: TextStyle(color: Colors.white.withOpacity(0.2), fontSize: 13),
+        ),
+      ],
+    );
+  }
+
   Widget _buildAddItemButton(List<dynamic> foodItems) {
-    return ElevatedButton.icon(
-      onPressed: () => _showAddItemDialog(foodItems),
-      icon: const Icon(Icons.add),
-      label: const Text("Add Menu Item"),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.blue,
-        elevation: 0,
-        padding: const EdgeInsets.all(16),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: const BorderSide(color: Colors.blue),
+    return SizedBox(
+      width: double.infinity,
+      child: TextButton.icon(
+        onPressed: () => _showAddItemDialog(foodItems),
+        icon: const Icon(Icons.add_circle_outline, color: AppColors.accent, size: 20),
+        label: Text(
+          "ADD MENU ITEM",
+          style: GoogleFonts.outfit(
+            color: AppColors.accent,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 1,
+          ),
+        ),
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.all(12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: AppColors.accent.withOpacity(0.3)),
+          ),
         ),
       ),
     );
@@ -283,55 +444,68 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      backgroundColor: AppColors.onyx,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
       builder: (context) {
         return DraggableScrollableSheet(
           initialChildSize: 0.7,
           minChildSize: 0.5,
-          maxChildSize: 0.9,
+          maxChildSize: 0.95,
           expand: false,
           builder: (context, scrollController) {
             return Column(
               children: [
                 const SizedBox(height: 12),
-                Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2))),
-                const Padding(
-                  padding: EdgeInsets.all(16.0),
-                  child: Text("Select Item", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(2))),
+                Padding(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Text(
+                    "SELECT FOOD ITEM",
+                    style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 1.5),
+                  ),
                 ),
                 Expanded(
                   child: ListView.builder(
                     controller: scrollController,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
                     itemCount: foodItems.length,
                     itemBuilder: (context, index) {
                       final item = foodItems[index];
                       final bool available = item['available'] == true || item['available'] == 'true';
                       if (!available) return const SizedBox.shrink();
 
-                      return ListTile(
-                        leading: Container(
-                          width: 40, height: 40,
-                          decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
-                          child: const Icon(Icons.fastfood, color: Colors.blue),
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.05),
+                          borderRadius: BorderRadius.circular(15),
                         ),
-                        title: Text(item['name']),
-                        subtitle: Text("₹${item['price']}"),
-                        onTap: () {
-                          setState(() {
-                            final existingIndex = _selectedItems.indexWhere((element) => element['id'] == item['id']);
-                            if (existingIndex != -1) {
-                              _selectedItems[existingIndex]['quantity']++;
-                            } else {
-                              _selectedItems.add({
-                                'id': item['id'],
-                                'name': item['name'],
-                                'price': item['price'],
-                                'quantity': 1,
-                              });
-                            }
-                          });
-                          Navigator.pop(context);
-                        },
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                          leading: CircleAvatar(
+                            backgroundColor: AppColors.accent.withOpacity(0.1),
+                            child: const Icon(Icons.fastfood, color: AppColors.accent, size: 20),
+                          ),
+                          title: Text(item['name'], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                          subtitle: Text("₹${item['price']}", style: TextStyle(color: AppColors.accent.withOpacity(0.7))),
+                          trailing: const Icon(Icons.add_circle, color: AppColors.accent),
+                          onTap: () {
+                            setState(() {
+                              final existingIndex = _selectedItems.indexWhere((element) => element['id'] == item['id']);
+                              if (existingIndex != -1) {
+                                _selectedItems[existingIndex]['quantity']++;
+                              } else {
+                                _selectedItems.add({
+                                  'id': item['id'],
+                                  'name': item['name'],
+                                  'price': item['price'],
+                                  'quantity': 1,
+                                });
+                              }
+                            });
+                            Navigator.pop(context);
+                          },
+                        ),
                       );
                     },
                   ),
@@ -344,43 +518,54 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     );
   }
 
-  Widget _buildSummary(KitchenProvider kitchen) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
-      ),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text("Total Amount", style: TextStyle(fontSize: 16, color: Colors.grey)),
-              Text("₹${_totalAmount.toStringAsFixed(2)}", style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            ],
-          ),
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: ElevatedButton(
-              onPressed: kitchen.isLoading || _selectedItems.isEmpty || _selectedRoomId == null
-                  ? null
-                  : () => _submitOrder(kitchen),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.black,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-              child: kitchen.isLoading
-                  ? const CircularProgressIndicator(color: Colors.white)
-                  : const Text("PLACE ORDER", style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1)),
+  Widget _buildSubmitSection(KitchenProvider kitchen) {
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              "TOTAL PAYABLE",
+              style: GoogleFonts.outfit(color: Colors.white.withOpacity(0.5), letterSpacing: 1),
             ),
+            Text(
+              "₹${_totalAmount.toStringAsFixed(2)}",
+              style: GoogleFonts.outfit(
+                fontSize: 24, 
+                fontWeight: FontWeight.bold, 
+                color: AppColors.accent
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        SizedBox(
+          width: double.infinity,
+          height: 60,
+          child: ElevatedButton(
+            onPressed: kitchen.isLoading || _selectedItems.isEmpty || _selectedRoomId == null
+                ? null
+                : () => _submitOrder(kitchen),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.accent,
+              foregroundColor: AppColors.onyx,
+              disabledBackgroundColor: Colors.white.withOpacity(0.05),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+              elevation: 0,
+            ),
+            child: kitchen.isLoading
+                ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: AppColors.onyx, strokeWidth: 2))
+                : Text(
+                    "PLACE ORDER",
+                    style: GoogleFonts.outfit(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 2,
+                    ),
+                  ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -407,12 +592,24 @@ class _NewOrderScreenState extends State<NewOrderScreen> {
     final success = await kitchen.createOrder(orderData);
     if (success) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Order placed successfully!")));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text("Order placed successfully!"),
+            backgroundColor: AppColors.success,
+            behavior: SnackBarBehavior.floating,
+          )
+        );
         Navigator.pop(context);
       }
     } else {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(kitchen.error ?? "Failed to place order")));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(kitchen.error ?? "Failed to place order"),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+          )
+        );
       }
     }
   }

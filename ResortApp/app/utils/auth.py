@@ -180,6 +180,8 @@ def has_permission(user: User, required_permission: str) -> bool:
             
         # permissions_list is a property on Role that returns a list of strings
         perms = getattr(user.role, "permissions_list", [])
+        print(f"[DEBUG-AUTH] Checking permission '{required_permission}' for user {user.email}")
+        print(f"[DEBUG-AUTH] Role: {user.role.name}, Permissions: {perms}")
         
         # 1. Exact match (e.g., "rooms:create")
         if required_permission in perms:

@@ -256,10 +256,13 @@ def create_return_items_service_request(db: Session, room_id: int, room_number: 
     return request
 
 def get_service_requests(db: Session, skip: int = 0, limit: int = 100, status: Optional[str] = None, room_id: Optional[int] = None, employee_id: Optional[int] = None, branch_id: int = None):
+    from sqlalchemy.orm import selectinload
     query = db.query(ServiceRequest).options(
-        joinedload(ServiceRequest.food_order).joinedload(FoodOrder.items).joinedload(FoodOrderItem.food_item),
         joinedload(ServiceRequest.room),
-        joinedload(ServiceRequest.employee)
+        joinedload(ServiceRequest.employee),
+        joinedload(ServiceRequest.food_order).options(
+            selectinload(FoodOrder.items).joinedload(FoodOrderItem.food_item)
+        )
     )
     
     if branch_id:

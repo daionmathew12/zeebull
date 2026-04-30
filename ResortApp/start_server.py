@@ -43,11 +43,10 @@ def start():
     # Run uvicorn
     # uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     # Assume main.py is in current dir, so "main:app"
-    cmd = [sys.executable, "main.py"] 
-    # OR python -m uvicorn main:app ...
-    
-    # Since main.py has uvicorn.run(), just running python main.py is fine.
-    subprocess.run([sys.executable, "main.py"], env=env)
+    # Since main.py has uvicorn.run(), just running python app/main.py is fine.
+    # But we need to ensure the root directory is in PYTHONPATH
+    env["PYTHONPATH"] = os.getcwd()
+    subprocess.run([sys.executable, "app/main.py"], env=env)
 
 if __name__ == "__main__":
     start()

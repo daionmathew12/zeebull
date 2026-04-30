@@ -184,17 +184,13 @@ def _populate_order_item_prices(order):
     if not order or not order.items:
         return order
     
-    with open("pricing_debug.log", "a") as f:
-        f.write(f"\n--- Populating Order #{order.id} (Type: {order.order_type}) ---\n")
-        for item in order.items:
-            if item.food_item:
-                item.price = resolve_food_item_price(item.food_item, order.order_type)
-                item.subtotal = item.price * (item.quantity or 0)
-                f.write(f"  Item: {item.food_item.name}, Price: {item.price}, Subtotal: {item.subtotal}\n")
-            else:
-                item.price = 0.0
-                item.subtotal = 0.0
-                f.write(f"  Item: UNKNOWN, Price: 0.0\n")
+    for item in order.items:
+        if item.food_item:
+            item.price = resolve_food_item_price(item.food_item, order.order_type)
+            item.subtotal = item.price * (item.quantity or 0)
+        else:
+            item.price = 0.0
+            item.subtotal = 0.0
     return order
 
 def create_food_order(db: Session, order_data: FoodOrderCreate, branch_id: int):
@@ -415,8 +411,7 @@ def get_food_orders(db: Session, branch_id: int, skip: int = 0, limit: int = 100
                 order.guest_name = get_guest_for_room(order.room_id, db, branch_id=branch_id, reference_date=order.created_at)
 
             # Populate item prices and subtotals for the UI
-            for order in orders:
-                _populate_order_item_prices(order)
+            _populate_order_item_prices(order)
 
         
         return orders

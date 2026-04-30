@@ -24,6 +24,8 @@ class AuthProvider extends ChangeNotifier {
   String? _branchName;
   String? _branchImage;
   List<String> _dailyTasks = [];
+  String? _error;
+
 
   AuthStatus get status => _status;
   UserRole get role => _role;
@@ -36,6 +38,8 @@ class AuthProvider extends ChangeNotifier {
   String? get branchName => _branchName;
   String? get branchImage => _branchImage;
   List<String> get dailyTasks => _dailyTasks;
+  String? get error => _error;
+
 
   AuthProvider(this._apiService) {
     _apiService.onUnauthorized = logout;
@@ -55,6 +59,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<bool> login(String username, String password) async {
+    _error = null;
     try {
       final response = await _apiService.login(username, password);
       
@@ -73,12 +78,22 @@ class AuthProvider extends ChangeNotifier {
           return true;
         }
       }
+      _error = "Invalid response from server";
+      notifyListeners();
       return false;
     } catch (e) {
       print("Login error: $e");
+      _error = e.toString();
+      if (_error!.contains("401")) {
+        _error = "Invalid Employee ID or Password";
+      } else if (_error!.contains("404")) {
+        _error = "Authentication service unavailable (404)";
+      }
+      notifyListeners();
       rethrow;
     }
   }
+
 
   Future<void> logout() async {
     await _storage.delete(key: AppConstants.tokenKey);
@@ -122,7 +137,8 @@ class AuthProvider extends ChangeNotifier {
   UserRole _parseRole(String? roleStr) {
     if (roleStr == null) return UserRole.unknown;
     roleStr = roleStr.toLowerCase();
-    if (roleStr.contains('manager')) return UserRole.manager;
+    if (roleStr.contains('manager') || roleStr.contains('admin')) return UserRole.manager;
+
     if (roleStr.contains('housekeeping')) return UserRole.housekeeping;
     if (roleStr.contains('kitchen') || roleStr.contains('chef') || roleStr.contains('cook')) return UserRole.kitchen;
     if (roleStr.contains('waiter') || roleStr.contains('server')) return UserRole.waiter;

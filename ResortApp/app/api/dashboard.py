@@ -29,6 +29,9 @@ def apply_branch_scope(query, model, branch_id: Optional[int]):
         return query.filter(model.branch_id == branch_id)
     return query
 
+# Cache for KPIs to improve performance
+_kpi_cache = {}
+
 @router.get("/kpis")
 def get_kpis(
     db: Session = Depends(get_db), 
@@ -38,7 +41,16 @@ def get_kpis(
     """
     Calculates and returns key performance indicators for the dashboard.
     """
+    # Throttle: Only calculate once every 2 minutes per branch
+    now = datetime.now()
+    cache_key = branch_id or 0
+    if cache_key in _kpi_cache:
+        cached_time, cached_data = _kpi_cache[cache_key]
+        if now - cached_time < timedelta(minutes=2):
+            return cached_data
+
     try:
+
         today = get_ist_today().date()
         ist_now = get_ist_now()
         start_ist, end_ist = get_ist_date_range('today')
@@ -167,7 +179,7 @@ def get_kpis(
             db.rollback()
             checkouts_rev_today = 0
 
-        return [{
+        result = [{
             "checkouts_today": checkouts_today,
             "checkouts_total": checkouts_total,
             "available_rooms": available_rooms_count,
@@ -177,6 +189,9 @@ def get_kpis(
             "revenue_today": float(checkouts_rev_today) + float(food_revenue_today) + float(service_revenue_today),
             "package_bookings_today": package_bookings_today,
         }]
+        _kpi_cache[cache_key] = (now, result)
+        return result
+
     except Exception as e:
         import traceback
         print(f"Error in get_kpis: {str(e)}")
@@ -388,6 +403,9 @@ def get_date_range(period: str):
     return start_date, end_date
 
 
+# Cache for summary to improve performance
+_summary_cache = {}
+
 @router.get("/summary")
 def get_summary(
     period: str = "all",
@@ -400,6 +418,15 @@ def get_summary(
     """
     Provides a comprehensive summary of KPIs for a given period (day, week, month, all).
     """
+    # Throttle: Only calculate once every 2 minutes per branch/period
+    now = datetime.now()
+    cache_key = f"{branch_id or 0}_{period}_{start_date}_{end_date}"
+    if cache_key in _summary_cache:
+        cached_time, cached_data = _summary_cache[cache_key]
+        if now - cached_time < timedelta(minutes=2):
+            print(f"DEBUG-DASH: Returning cached summary for {cache_key}")
+            return cached_data
+
     today = get_ist_today().date()
     today_ist = today
     if period != "custom":
@@ -1009,7 +1036,6 @@ def get_summary(
             except Exception as e:
                 # Skip this department if there's an error
                 continue
-    
     except Exception as e:
         db.rollback()
         # If department KPIs fail, return empty dict
@@ -1017,7 +1043,6 @@ def get_summary(
         print(f"Error calculating department KPIs: {e}")
         print(traceback.format_exc())
         department_kpis = {}
-    
     # Add inventory status KPIs
     kpis["low_stock_items"] = low_stock_count
     kpis["out_of_stock_items"] = out_of_stock_count
@@ -1026,6 +1051,8 @@ def get_summary(
     # Add department KPIs to response
     kpis["department_kpis"] = department_kpis
 
+    # Cache the result before returning
+    _summary_cache[cache_key] = (now, kpis)
     return kpis
 
 

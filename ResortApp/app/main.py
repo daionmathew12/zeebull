@@ -327,7 +327,7 @@ app.include_router(gst_reports.router, prefix="/api", tags=["GST Reports"])
 from app.api import channel_manager
 app.include_router(channel_manager.router, prefix="/api/channel-manager", tags=["Channel Manager"])
 
-app.include_router(notification.router, prefix="/api/notifications", tags=["Notifications"])
+app.include_router(notification.router, prefix="/api", tags=["Notifications"])
 app.include_router(activity_logs.router, prefix="/api/activity-logs", tags=["Activity Logs"])
 app.include_router(calendar.router, prefix="/api/calendar", tags=["Pricing Calendar"])
 app.include_router(legal.router, prefix="/api/legal", tags=["Legal Documents"])

@@ -35,14 +35,16 @@ class ManagementProvider with ChangeNotifier {
   }
 
   Future<void> loadDashboardData({String period = "day", bool force = false}) async {
+    print("🔄 [DEBUG-DASH] loadDashboardData START. period: $period, force: $force");
+    print("🔄 [DEBUG-DASH] Current status: _isLoading=$_isLoading, _isAlreadyLoading=$_isAlreadyLoading, _summary=${_summary != null}");
+    
     if (_isAlreadyLoading && !force) {
-      print("⏩ Dashboard fetch already in progress, skipping redundant call...");
+      print("⏩ [DEBUG-DASH] Dashboard fetch already in progress, skipping...");
       return;
     }
     
-    print("🔄 Loading dashboard data for period: $period (Force: $force)");
-    
     _isAlreadyLoading = true;
+
     final softLoading = _summary != null;
     
     if (!softLoading || force) {
@@ -54,16 +56,22 @@ class ManagementProvider with ChangeNotifier {
     try {
       // 1. Fetch Summary (MOST CRITICAL)
       try {
-        print("📡 Fetching: Dashboard Summary...");
+        print("📡 [DEBUG-DASH] Fetching: Dashboard Summary...");
         final summaryResp = await _apiService.getDashboardSummary(period: period);
+        print("📡 [DEBUG-DASH] Summary Response Code: ${summaryResp.statusCode}");
         if (summaryResp.statusCode == 200) {
-          print("✅ Dashboard summary received");
+          print("✅ [DEBUG-DASH] Dashboard summary data received: ${summaryResp.data}");
           _summary = ManagementSummary.fromJson(summaryResp.data);
+          print("✅ [DEBUG-DASH] ManagementSummary parsed successfully");
           notifyListeners();
         }
       } catch (e) {
-        print("⚠️ Dashboard Summary Fetch Failed: $e");
+        print("⚠️ [DEBUG-DASH] Dashboard Summary Fetch Failed: $e");
+        if (e is DioException) {
+          print("⚠️ [DEBUG-DASH] Dio error details: ${e.response?.data}");
+        }
       }
+
 
       // 2. Fetch Employee Status
       try {

@@ -40,9 +40,11 @@ export default function SuperAdminDashboard() {
     useEffect(() => {
         let mounted = true;
 
-        const fetchGlobalData = async () => {
+        const fetchGlobalData = async (showLoading = true) => {
             try {
-                setLoading(true);
+                if (showLoading || (branches.length === 0 && globalSummary.total_revenue === 0)) {
+                    setLoading(true);
+                }
                 // Force headers to NOT use a specific branch so we get all branch data
                 const config = { headers: { "X-Branch-ID": "all" } };
 
@@ -100,8 +102,8 @@ export default function SuperAdminDashboard() {
             }
         };
 
-        fetchGlobalData();
-        const interval = setInterval(() => fetchGlobalData(), 300000); // 5 min
+        fetchGlobalData(true);
+        const interval = setInterval(() => fetchGlobalData(false), 300000); // 5 min
         return () => { mounted = false; clearInterval(interval); };
     }, []);
 

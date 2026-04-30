@@ -5,6 +5,7 @@ import 'package:orchid_employee/core/constants/app_colors.dart';
 import 'package:orchid_employee/presentation/providers/room_provider.dart';
 import 'package:orchid_employee/presentation/screens/housekeeping/audit_screen.dart';
 import 'package:orchid_employee/presentation/screens/housekeeping/damage_report_screen.dart';
+import 'package:orchid_employee/presentation/widgets/onyx_glass_card.dart';
 
 class RoomListScreen extends StatefulWidget {
   const RoomListScreen({super.key});
@@ -28,10 +29,12 @@ class _RoomListScreenState extends State<RoomListScreen> {
     final rooms = roomProvider.rooms;
 
     return Scaffold(
+      backgroundColor: AppColors.onyx,
       appBar: AppBar(
-        title: const Text("My Rooms", style: TextStyle(color: Colors.white)),
-        backgroundColor: AppColors.primary,
-        iconTheme: const IconThemeData(color: Colors.white),
+        title: const Text("MY ROOMS", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: 1)),
+        backgroundColor: AppColors.onyx,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: AppColors.accent),
       ),
       body: roomProvider.isLoading 
           ? const Center(child: CircularProgressIndicator())
@@ -59,7 +62,7 @@ class _RoomListScreenState extends State<RoomListScreen> {
 
     final status = room.status.toLowerCase();
 
-    if (status == 'clean') {
+    if (status == 'clean' || status == 'available') {
       statusColor = Colors.green;
       statusIcon = Icons.check_circle;
     } else if (status == 'dirty') {
@@ -79,11 +82,9 @@ class _RoomListScreenState extends State<RoomListScreen> {
       statusIcon = Icons.help;
     }
 
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      child: OnyxGlassCard(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
@@ -94,21 +95,25 @@ class _RoomListScreenState extends State<RoomListScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      "Room ${room.roomNumber}",
+                      "ROOM ${room.roomNumber}",
                       style: const TextStyle(
                         fontSize: 18,
-                        fontWeight: FontWeight.bold,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white,
                       ),
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      room.type,
-                      style: const TextStyle(color: Colors.grey),
+                      room.type.toUpperCase(),
+                      style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
                     ),
                     if (room.guestName != null)
-                      Text(
-                        room.guestName!,
-                        style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          room.guestName!.toUpperCase(),
+                          style: TextStyle(color: AppColors.accent.withOpacity(0.7), fontSize: 11, fontWeight: FontWeight.bold),
+                        ),
                       ),
                   ],
                 ),
@@ -117,56 +122,72 @@ class _RoomListScreenState extends State<RoomListScreen> {
                   decoration: BoxDecoration(
                     color: statusColor.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: statusColor),
                   ),
                   child: Row(
                     children: [
-                      Icon(statusIcon, size: 16, color: statusColor),
-                      const SizedBox(width: 4),
+                      Icon(statusIcon, size: 14, color: statusColor),
+                      const SizedBox(width: 6),
                       Text(
-                        room.status,
+                        room.status.toUpperCase(),
                         style: TextStyle(
-                            color: statusColor, fontWeight: FontWeight.bold),
+                            color: statusColor, fontWeight: FontWeight.w900, fontSize: 10),
                       ),
                     ],
                   ),
                 ),
               ],
             ),
-            const Divider(height: 24),
+            Divider(height: 32, color: Colors.white.withOpacity(0.05)),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 if (status == 'dirty')
-                  _ActionButton(
-                    icon: Icons.play_arrow,
-                    label: "Start",
-                    color: AppColors.primary,
-                    onTap: () async {
-                       final success = await context.read<RoomProvider>().updateRoomStatus(room.id, 'Cleaning');
-                       if (success && mounted) {
-                         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Started Cleaning Room ${room.roomNumber}")));
-                       }
-                    },
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.play_arrow_rounded, size: 20),
+                      label: const Text("START", style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900)),
+                      onPressed: () async {
+                         final success = await context.read<RoomProvider>().updateRoomStatus(room.id, 'Cleaning');
+                         if (success && mounted) {
+                           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Started Cleaning Room ${room.roomNumber}")));
+                         }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.accent,
+                        foregroundColor: AppColors.onyx,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
                   ),
                 if (status == 'cleaning')
-                  _ActionButton(
-                    icon: Icons.check,
-                    label: "Mark Clean",
-                    color: Colors.green,
-                    onTap: () async {
-                       final success = await context.read<RoomProvider>().updateRoomStatus(room.id, 'Clean');
-                       if (success && mounted) {
-                         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Room ${room.roomNumber} marked as Clean")));
-                       }
-                    },
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.check_circle_rounded, size: 20),
+                      label: const Text("MARK CLEAN", style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900)),
+                      onPressed: () async {
+                         final success = await context.read<RoomProvider>().updateRoomStatus(room.id, 'Clean');
+                         if (success && mounted) {
+                           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Room ${room.roomNumber} marked as Clean")));
+                         }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.greenAccent.withOpacity(0.2),
+                        foregroundColor: Colors.greenAccent,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
                   ),
-                if (status == 'occupied' || status == 'checked-in' || status == 'dirty' || status == 'cleaning')
-                  _ActionButton(
-                    icon: Icons.inventory_2,
-                    label: "Audit",
-                    color: AppColors.secondary,
-                    onTap: () {
+                if (status == 'occupied' || status == 'checked-in' || status == 'dirty' || status == 'cleaning') ...[
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const Icon(Icons.inventory_2_rounded, color: Colors.white54, size: 20),
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.white.withOpacity(0.05),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: () {
                         Navigator.of(context).push(
                           MaterialPageRoute(
                             builder: (_) => AuditScreen(
@@ -177,11 +198,15 @@ class _RoomListScreenState extends State<RoomListScreen> {
                         );
                     },
                   ),
-                _ActionButton(
-                  icon: Icons.report_problem,
-                  label: "Damage",
-                  color: Colors.red,
-                  onTap: () {
+                ],
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.report_problem_outlined, color: Colors.white38, size: 20),
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.white.withOpacity(0.05),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () {
                     Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => DamageReportScreen(

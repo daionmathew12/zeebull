@@ -15,9 +15,11 @@ import 'package:intl/intl.dart';
 import 'package:orchid_employee/presentation/widgets/skeleton_loaders.dart';
 import 'checkout_verification_dialog.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:orchid_employee/presentation/widgets/attendance_helper.dart';
 import 'package:orchid_employee/data/models/service_request_model.dart';
-
+import 'package:orchid_employee/data/models/room_model.dart';
 import 'service_request_dialogs.dart';
+import 'package:orchid_employee/presentation/widgets/onyx_glass_card.dart';
 
 class HousekeepingDashboard extends StatefulWidget {
   const HousekeepingDashboard({super.key});
@@ -32,27 +34,27 @@ class _HousekeepingDashboardState extends State<HousekeepingDashboard> {
   @override
   void initState() {
     super.initState();
-    // Fetch initial data
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final empId = context.read<AuthProvider>().employeeId;
-      context.read<RoomProvider>().fetchRooms();
-      context.read<ServiceRequestProvider>().fetchRequests();
-      context.read<AttendanceProvider>().checkTodayStatus(empId);
-      // Always refresh profile to get latest daily_tasks
-      context.read<AuthProvider>().refreshProfile();
+      _refreshData(showLoading: true);
     });
     
-    // Auto-refresh every 30 seconds
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) {
-        final empId = context.read<AuthProvider>().employeeId;
-        context.read<ServiceRequestProvider>().fetchRequests();
-        context.read<RoomProvider>().fetchRooms();
-        if (empId != null && empId != 0) {
-           context.read<AttendanceProvider>().checkTodayStatus(empId);
-        }
+        _refreshData(showLoading: false);
       }
     });
+  }
+
+  Future<void> _refreshData({bool showLoading = false}) async {
+    final auth = context.read<AuthProvider>();
+    final empId = auth.employeeId;
+    
+    await Future.wait([
+      context.read<RoomProvider>().fetchRooms(),
+      context.read<ServiceRequestProvider>().fetchRequests(),
+      if (empId != null) context.read<AttendanceProvider>().checkTodayStatus(empId),
+      context.read<AuthProvider>().refreshProfile(),
+    ]);
   }
 
   @override
@@ -61,639 +63,275 @@ class _HousekeepingDashboardState extends State<HousekeepingDashboard> {
     super.dispose();
   }
 
-  Future<void> _refreshData() async {
-    await Future.wait([
-      context.read<RoomProvider>().fetchRooms(),
-      context.read<ServiceRequestProvider>().fetchRequests(),
-    ]);
+  String _getGreeting() {
+    final hour = DateTime.now().hour;
+    if (hour < 12) return 'Good Morning';
+    if (hour < 17) return 'Good Afternoon';
+    return 'Good Evening';
   }
 
   Future<Position?> _getCurrentLocation() async {
-    bool serviceEnabled;
-    LocationPermission permission;
-
     try {
-      // Test if location services are enabled.
-      serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        return null;
-      }
-
-      permission = await Geolocator.checkPermission();
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return null;
+      LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          return null;
-        }
+        if (permission == LocationPermission.denied) return null;
       }
-
-      if (permission == LocationPermission.deniedForever) {
-        return null;
-      }
-
-      // When we reach here, permissions are granted and we can
-      // continue accessing the position of the device.
-      return await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 5),
-      );
+      return await Geolocator.getCurrentPosition();
     } catch (e) {
-      print("Location error: $e");
       return null;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final roomProvider = context.watch<RoomProvider>();
-    final requestProvider = context.watch<ServiceRequestProvider>();
-
-    // Urgent rooms: Dirty or Cleaning status
-    final urgentRooms = roomProvider.rooms.where((r) => 
-      r.status.toLowerCase() == 'dirty' || r.status.toLowerCase() == 'cleaning'
-    ).toList();
-
-    // Active requests: Pending or In Progress
-    final activeRequests = requestProvider.requests.where((r) {
-      final status = r.status.toLowerCase().replaceAll('_', ' ');
-      return status == 'pending' || status == 'in progress';
-    }).toList();
-
-    // Count only tasks completed today
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final roomProvider = context.read<RoomProvider>();
+    final requestProvider = context.read<ServiceRequestProvider>();
+    final authProvider = context.read<AuthProvider>();
     
-    final completedRoomsToday = roomProvider.rooms.where((r) {
-      // For rooms, we don't have a completedAt field, so we just count clean rooms
-      // This is an approximation - ideally rooms should have a cleaned_at timestamp
-      return r.status.toLowerCase() == 'clean';
-    }).length;
-    
-    final completedRequestsToday = requestProvider.requests.where((r) {
-      if (r.status.toLowerCase() != 'completed') return false;
-      if (r.completedAt == null) return false;
-      
-      // Convert completedAt to local time to correctly check if it happened today
-      // from the user's perspective.
-      final completedLocal = r.completedAt!.toLocal();
-      final completedDate = DateTime(
-        completedLocal.year,
-        completedLocal.month,
-        completedLocal.day,
-      );
-      
-      final isToday = completedDate == today;
-      
-      // Debug logging
-      if (r.status.toLowerCase() == 'completed') {
-        print('[DEBUG] Service ${r.id}: status=${r.status}, completedLocal=$completedDate, today=$today, isToday=$isToday');
-      }
-      
-      return isToday;
-    }).length;
-    
-    final completedToday = completedRoomsToday + completedRequestsToday;
-    
-    print('[DEBUG] Completed today: rooms=$completedRoomsToday, requests=$completedRequestsToday, total=$completedToday');
-    
-    final auth = context.watch<AuthProvider>();
-    final pendingTasks = urgentRooms.length + activeRequests.length;
-
-    if ((roomProvider.isLoading && roomProvider.rooms.isEmpty) || (requestProvider.isLoading && requestProvider.requests.isEmpty)) {
-      return const DashboardSkeleton();
-    }
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: AppColors.onyx,
       body: SafeArea(
         child: RefreshIndicator(
-          onRefresh: _refreshData,
+          onRefresh: () => _refreshData(showLoading: true),
           child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
-              // Header with Stats
+              // Header
               SliverToBoxAdapter(
                 child: Container(
-                  padding: const EdgeInsets.fromLTRB(20, 30, 20, 30),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [AppColors.primary, AppColors.primary.withAlpha(200)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
+                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
+                  decoration: const BoxDecoration(
+                    color: AppColors.onyx,
+                    borderRadius: BorderRadius.only(
+                      bottomLeft: Radius.circular(36),
+                      bottomRight: Radius.circular(36),
                     ),
-                    borderRadius: const BorderRadius.only(
-                      bottomLeft: Radius.circular(30),
-                      bottomRight: Radius.circular(30),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.primary.withOpacity(0.3),
-                        blurRadius: 15,
-                        offset: const Offset(0, 5),
-                      )
-                    ]
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        "Today's Progress",
-                        style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                      ),
-                      const SizedBox(height: 16),
                       Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          _StatCard(
-                            icon: Icons.task_alt_rounded,
-                            value: "$completedToday",
-                            label: "Completed",
-                            color: Colors.greenAccent,
+                          Row(
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.menu_rounded, color: Colors.white),
+                                onPressed: () => Scaffold.of(context).openDrawer(),
+                              ),
+                              const SizedBox(width: 8),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _getGreeting().toUpperCase(),
+                                    style: const TextStyle(color: AppColors.accent, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 2),
+                                  ),
+                                  Text(
+                                    authProvider.userName?.toUpperCase() ?? "HOUSEKEEPER",
+                                    style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: 0.5),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 16),
-                          _StatCard(
-                            icon: Icons.pending_actions_rounded,
-                            value: "$pendingTasks",
-                            label: "Pending",
-                            color: Colors.orangeAccent,
+                          Row(
+                            children: [
+                              _SyncIndicator(),
+                              IconButton(
+                                icon: const Icon(Icons.logout_rounded, color: Colors.white70),
+                                onPressed: () async {
+                                  await context.read<AuthProvider>().logout();
+                                  if (context.mounted) {
+                                    Navigator.pushReplacementNamed(context, '/login');
+                                  }
+                                },
+                              ),
+                            ],
                           ),
                         ],
+                      ),
+                      const SizedBox(height: 24),
+                      Selector2<RoomProvider, ServiceRequestProvider, Map<String, int>>(
+                        selector: (_, rp, sp) {
+                          final pendingRooms = rp.rooms.where((r) => r.status.toLowerCase() == 'dirty' || r.status.toLowerCase() == 'cleaning').length;
+                          final pendingReqs = sp.requests.where((r) => r.status.toLowerCase() == 'pending' || r.status.toLowerCase() == 'in_progress').length;
+                          final doneRooms = rp.rooms.where((r) => r.status.toLowerCase() == 'clean').length;
+                          final doneReqs = sp.requests.where((r) => r.status.toLowerCase() == 'completed').length;
+                          return {'pending': pendingRooms + pendingReqs, 'done': doneRooms + doneReqs};
+                        },
+                        builder: (context, stats, _) {
+                          final total = stats['pending']! + stats['done']!;
+                          final progress = total > 0 ? stats['done']! / total : 1.0;
+                          return Row(
+                            children: [
+                              Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                    CircularProgressIndicator(
+                                      value: progress,
+                                      backgroundColor: Colors.white.withOpacity(0.05),
+                                      color: AppColors.accent,
+                                      strokeWidth: 4,
+                                    ),
+                                    Text("${(progress * 100).toInt()}%", style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900)),
+                                  ],
+                                ),
+                                const SizedBox(width: 20),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text("TODAY'S PROGRESS", style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1)),
+                                      Text("${stats['pending']} tasks remaining", style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            );
+                        },
                       ),
                     ],
                   ),
                 ),
               ),
 
-              // Account Status Warning (if employeeId is missing)
-              if (auth.employeeId == null)
-                SliverToBoxAdapter(
-                  child: Container(
-                    margin: const EdgeInsets.all(16),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.orange.shade100,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.orange),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 30),
-                        const SizedBox(width: 12),
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                "Account Incomplete",
-                                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.brown),
-                              ),
-                              Text(
-                                "Please re-login to sync profile.",
-                                style: TextStyle(fontSize: 12, color: Colors.brown),
-                              ),
-                            ],
-                          ),
-                        ),
-                        TextButton.icon(
-                          onPressed: () {
-                            auth.logout();
-                          },
-                          icon: const Icon(Icons.logout),
-                          label: const Text("LOGOUT"),
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.brown,
-                            backgroundColor: Colors.white.withOpacity(0.5),
-                          ),
-                        ),
-                      ],
-                    ),
+              // Quick Actions
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _QuickActionItem(icon: Icons.report_problem, label: "REPORT", color: Colors.redAccent, onTap: () {}),
+                      _QuickActionItem(icon: Icons.inventory, label: "STOCK", color: Colors.blueAccent, onTap: () {}),
+                      _QuickActionItem(icon: Icons.chat, label: "CHAT", color: AppColors.accent, onTap: () {}),
+                    ],
                   ),
                 ),
-
-              // Attendance Status & Control
-              SliverToBoxAdapter(
-                 child: Consumer<AttendanceProvider>(
-                   builder: (ctx, attendance, _) {
-                     final isClockedIn = attendance.isClockedIn;
-                     // Calculate duration if clocked in (Safe UTC difference)
-                     final duration = isClockedIn && attendance.clockInTime != null
-                        ? DateTime.now().toUtc().difference(attendance.clockInTime!.toUtc())
-                        : Duration.zero;
-                     final hours = duration.inHours;
-                     final minutes = duration.inMinutes.remainder(60);
-
-                     return Container(
-                       margin: const EdgeInsets.fromLTRB(16, 24, 16, 8),
-                       padding: const EdgeInsets.all(20),
-                       decoration: BoxDecoration(
-                         color: Colors.white,
-                         borderRadius: BorderRadius.circular(20),
-                         border: Border.all(
-                            color: isClockedIn ? Colors.green.withOpacity(0.3) : Colors.red.withOpacity(0.1),
-                            width: 1.5
-                         ),
-                         boxShadow: [
-                           BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4)),
-                         ],
-                       ),
-                       child: Column(
-                         children: [
-                           Row(
-                             children: [
-                               // Status Icon
-                               Container(
-                                 padding: const EdgeInsets.all(14),
-                                 decoration: BoxDecoration(
-                                   color: isClockedIn ? Colors.green[50] : Colors.red[50],
-                                   shape: BoxShape.circle,
-                                 ),
-                                 child: Icon(
-                                   isClockedIn ? Icons.access_time_filled_rounded : Icons.timer_off_rounded,
-                                   color: isClockedIn ? Colors.green : Colors.red,
-                                   size: 28,
-                                 ),
-                               ),
-                               const SizedBox(width: 16),
-                               // Status Text
-                               Expanded(
-                                 child: Column(
-                                   crossAxisAlignment: CrossAxisAlignment.start,
-                                   children: [
-                                     Text(
-                                       isClockedIn ? "You are Online" : "You are Offline",
-                                       style: TextStyle(
-                                         fontWeight: FontWeight.bold, 
-                                         fontSize: 18,
-                                         color: isClockedIn ? Colors.green[800] : Colors.red[800],
-                                       ),
-                                     ),
-                                     const SizedBox(height: 4),
-                                     if (isClockedIn)
-                                       Text(
-                                         "Working: ${hours}h ${minutes}m",
-                                         style: TextStyle(color: Colors.grey[700], fontSize: 14, fontWeight: FontWeight.w500),
-                                       )
-                                     else
-                                       Text("Tap to mark attendance", style: TextStyle(color: Colors.grey[500], fontSize: 13)),
-                                   ],
-                                 ),
-                               ),
-                               // Toggle Switch
-                               Transform.scale(
-                                 scale: 1.2,
-                                 child: Switch(
-                                   value: isClockedIn,
-                                   activeColor: Colors.green,
-                                   inactiveThumbColor: Colors.red[300],
-                                   onChanged: (val) async {
-                                     final auth = context.read<AuthProvider>();
-                                     final empId = auth.employeeId;
-                                     if (empId == null) {
-                                       ScaffoldMessenger.of(context).showSnackBar(
-                                         const SnackBar(
-                                           content: Text("Account setup incomplete. Please Logout and Login to refresh profile."),
-                                           backgroundColor: Colors.orange,
-                                           duration: Duration(seconds: 4),
-                                         )
-                                       );
-                                       return; 
-                                     }
-                                     
-                                     if (val) {
-                                       Position? position = await _getCurrentLocation();
-                                       final tasks = auth.dailyTasks;
-                                       print('[DEBUG] Clock-in: dailyTasks = $tasks (${tasks.length} tasks)');
-
-                                       if (tasks.isEmpty) {
-                                         await attendance.clockIn(
-                                           empId, 
-                                           latitude: position?.latitude, 
-                                           longitude: position?.longitude,
-                                         );
-                                       } else {
-                                         List<String> currentCompleted = [];
-                                         showDialog(
-                                           context: context,
-                                           barrierDismissible: false,
-                                           builder: (context) {
-                                             return StatefulBuilder(
-                                               builder: (context, setDialogState) {
-                                                 bool allChecked = true;
-                                                 for (String t in tasks) {
-                                                   if (!currentCompleted.contains(t)) {
-                                                     allChecked = false;
-                                                     break;
-                                                   }
-                                                 }
-
-                                                 return AlertDialog(
-                                                   title: const Text('Pre-Shift Task Check'),
-                                                   content: SizedBox(
-                                                     width: double.maxFinite,
-                                                     child: Column(
-                                                       mainAxisSize: MainAxisSize.min,
-                                                       children: [
-                                                         Text(
-                                                           'Please acknowledge your assigned daily tasks for today before starting.',
-                                                           style: TextStyle(color: Colors.grey.shade700),
-                                                         ),
-                                                         const SizedBox(height: 16),
-                                                         Flexible(
-                                                           child: ListView.builder(
-                                                             shrinkWrap: true,
-                                                             itemCount: tasks.length,
-                                                             itemBuilder: (context, index) {
-                                                               final task = tasks[index];
-                                                               final isChecked = currentCompleted.contains(task);
-                                                               return CheckboxListTile(
-                                                                 title: Text(task),
-                                                                 value: isChecked,
-                                                                 onChanged: (checkVal) {
-                                                                   setDialogState(() {
-                                                                     if (checkVal == true) {
-                                                                       currentCompleted.add(task);
-                                                                     } else {
-                                                                       currentCompleted.remove(task);
-                                                                     }
-                                                                   });
-                                                                 },
-                                                               );
-                                                             },
-                                                           ),
-                                                         ),
-                                                       ],
-                                                     ),
-                                                   ),
-                                                   actions: [
-                                                     TextButton(
-                                                       onPressed: () => Navigator.pop(context),
-                                                       child: const Text('Cancel'),
-                                                     ),
-                                                     ElevatedButton(
-                                                       onPressed: allChecked ? () async {
-                                                         Navigator.pop(context);
-                                                         await attendance.clockIn(
-                                                           empId, 
-                                                           latitude: position?.latitude, 
-                                                           longitude: position?.longitude,
-                                                           tasksToSync: currentCompleted,
-                                                         );
-                                                       } : null,
-                                                       style: ElevatedButton.styleFrom(
-                                                         backgroundColor: allChecked ? Colors.green : Colors.grey,
-                                                       ),
-                                                       child: const Text('Acknowledge & Clock In', style: TextStyle(color: Colors.white)),
-                                                     ),
-                                                   ],
-                                                 );
-                                               },
-                                             );
-                                           },
-                                         );
-                                       }
-                                     } else {
-                                        // Confirm Clock Out
-                                        final confirm = await showDialog<bool>(
-                                          context: context,
-                                          builder: (c) => AlertDialog(
-                                            title: const Text("Go Offline?"),
-                                            content: const Text("Are you sure you want to clock out?"),
-                                            actions: [
-                                               TextButton(child: const Text("Cancel"), onPressed: () => Navigator.pop(c, false)),
-                                               ElevatedButton(
-                                                 style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-                                                 onPressed: () => Navigator.pop(c, true),
-                                                 child: const Text("Clock Out"),
-                                               ),
-                                            ],
-                                          )
-                                        );
-                                        if (confirm == true) {
-                                           await attendance.clockOut(empId);
-                                        }
-                                     }
-                                   },
-                                 ),
-                               ),
-                             ],
-                           ),
-                           // Expanded Details for Times
-                           if (isClockedIn && attendance.clockInTime != null) ...[
-                              Padding(
-                                padding: const EdgeInsets.only(top: 16, bottom: 8),
-                                child: Divider(color: Colors.grey[200]),
-                              ),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Icon(Icons.access_time, size: 16, color: Colors.grey[500]),
-                                      const SizedBox(width: 6),
-                                      Text("Clock In Time (IST)", style: TextStyle(color: Colors.grey[600], fontSize: 13)),
-                                    ],
-                                  ),
-                                  Text(
-                                    // Backend sends time as string which is parsed to DateTime
-                                    // It represents IST. Displaying it directly will show correct time on device.
-                                    DateFormat('hh:mm a').format(attendance.clockInTime!),
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                                  ),
-                                ],
-                              ),
-                           ]
-                         ],
-                       ),
-                     );
-                   },
-                 ),
               ),
 
-              // Loading indicator
-              if (roomProvider.isLoading || requestProvider.isLoading)
-                const SliverToBoxAdapter(
-                  child: LinearProgressIndicator(),
-                ),
-
-              // Error message
-              if (roomProvider.error != null || requestProvider.error != null)
-                SliverToBoxAdapter(
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    color: Colors.red[50],
-                    child: Text(
-                      roomProvider.error ?? requestProvider.error ?? "Unknown error",
-                      style: TextStyle(color: Colors.red[700]),
-                    ),
-                  ),
-                ),
-
-              // Urgent Tasks Section
-              if (urgentRooms.isNotEmpty)
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
+              // Attendance
+              SliverToBoxAdapter(
+                child: Consumer<AttendanceProvider>(
+                  builder: (context, attendance, _) {
+                    final isClockedIn = attendance.isClockedIn;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: OnyxGlassCard(
+                        padding: const EdgeInsets.all(20),
+                        child: Row(
                           children: [
-                            Icon(Icons.priority_high, color: Colors.red[700], size: 20),
-                            const SizedBox(width: 8),
-                            const Text(
-                              "Today's Cleaning Tasks",
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black87,
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: (isClockedIn ? AppColors.success : AppColors.error).withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(12),
                               ),
+                              child: Icon(isClockedIn ? Icons.timer_rounded : Icons.timer_off_rounded, 
+                                color: isClockedIn ? AppColors.success : AppColors.error, size: 24),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(isClockedIn ? "ONLINE" : "OFFLINE", 
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 0.5)),
+                                  Text(isClockedIn 
+                                    ? "Working since ${attendance.clockInTime != null ? DateFormat('hh:mm a').format(attendance.clockInTime!) : '--'}" 
+                                    : "Clock in to start tasking",
+                                    style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 10, fontWeight: FontWeight.bold)),
+                                ],
+                              ),
+                            ),
+                            Switch(
+                              value: isClockedIn,
+                              activeColor: AppColors.accent,
+                              activeTrackColor: AppColors.accent.withOpacity(0.3),
+                              onChanged: (val) async {
+                                await AttendanceHelper.performAttendanceAction(
+                                  context: context, 
+                                  isClockingIn: val,
+                                );
+                                final empId = context.read<AuthProvider>().employeeId;
+                                if (empId != null) {
+                                  context.read<AttendanceProvider>().checkTodayStatus(empId);
+                                }
+                              },
                             ),
                           ],
                         ),
-                        const SizedBox(height: 12),
-                        ...urgentRooms.map((room) => _UrgentRoomCard(
-                          room: room,
-                          onStartCleaning: () {
-                             if (!context.read<AttendanceProvider>().isClockedIn) {
-                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Action Denied: You must Clock In first")));
-                                return;
-                             }
-                             roomProvider.updateRoomStatus(room.id, 'Cleaning');
-                          },
-                          onMarkClean: () {
-                             if (!context.read<AttendanceProvider>().isClockedIn) {
-                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Action Denied: You must Clock In first")));
-                                return;
-                             }
-                             roomProvider.updateRoomStatus(room.id, 'Clean');
-                          },
-                          onAudit: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => AuditScreen(
-                                  roomNumber: room.roomNumber,
-                                  roomId: room.id,
-                                ),
-                              ),
-                            );
-                          },
-                        )),
-                      ],
-                    ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+
+              // Tasks Section Header
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: _SectionHeader(
+                    title: "Urgent Tasks",
+                    actionLabel: "View All",
+                    onAction: () => Navigator.pushNamed(context, '/housekeeping/requests'),
                   ),
                 ),
+              ),
 
-              // Service Requests
-              if (activeRequests.isNotEmpty)
-                SliverToBoxAdapter(
-                  child: Padding(
+              // Tasks List
+              Selector2<RoomProvider, ServiceRequestProvider, List<dynamic>>(
+                selector: (_, rp, sp) {
+                  final urgentRooms = rp.rooms.where((r) => r.status.toLowerCase() == 'dirty' || r.status.toLowerCase() == 'cleaning').toList();
+                  final activeReqs = sp.requests.where((r) => r.status.toLowerCase() == 'pending' || r.status.toLowerCase() == 'in_progress').toList();
+                  return [...urgentRooms, ...activeReqs];
+                },
+                builder: (context, tasks, _) {
+                  if (tasks.isEmpty) {
+                    return const SliverToBoxAdapter(
+                      child: Padding(
+                        padding: EdgeInsets.all(32),
+                        child: Center(child: Text("ALL TASKS COMPLETED!", style: TextStyle(color: Colors.white24, fontWeight: FontWeight.w900, fontSize: 12, letterSpacing: 1))),
+                      ),
+                    );
+                  }
+                  return SliverPadding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          "Today's Service Requests",
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.black87,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        ...activeRequests.map((request) => _ServiceRequestCard(
-                          request: request,
-                          onComplete: () {
-                              final desc = request.description.toLowerCase();
-                              if (desc.contains("checkout") || request.type.toLowerCase() == 'checkout') {
-                                 showDialog(
-                                   context: context,
-                                   builder: (_) => CheckoutVerificationDialog(
-                                     roomNumber: request.roomNumber,
-                                     onSuccess: () => context.read<ServiceRequestProvider>().updateRequestStatus(request.id, 'completed', employeeId: context.read<AuthProvider>().employeeId),
-                                   )
-                                 );
-                                 return;
-                              }
-
-                              final isFood = request.type.toLowerCase().contains('food') || 
-                                             request.description.toLowerCase().contains('food') ||
-                                             request.type.toLowerCase() == 'delivery';
-
-                              showDialog(
-                                context: context,
-                                builder: (_) => CompleteServiceDialog(
-                                   requestId: request.id,
-                                   roomNumber: request.roomNumber,
-                                   refillItems: request.refillItems,
-                                    isFoodService: isFood,
-                                    currentBillingStatus: request.billingStatus,
-                                    foodOrderAmount: request.foodOrderAmount,
-                                    foodOrderGst: request.foodOrderGst,
-                                    foodOrderTotal: request.foodOrderTotal,
-                                    onJustComplete: (billingStatus) => requestProvider.updateRequestStatus(request.id, 'completed', employeeId: context.read<AuthProvider>().employeeId, billingStatus: billingStatus),
-                                   onReturn: (items, destId, billingStatus) async {
-                                      final provider = context.read<InventoryProvider>();
-                                      final locs = provider.locations;
-                                      
-                                      // Attempt to find Room Location ID (Format: "Room X")
-                                      dynamic roomLoc;
-                                      try {
-                                        roomLoc = locs.firstWhere((l) => l['name'] == "Room ${request.roomNumber}");
-                                      } catch (e) {
-                                        roomLoc = null;
-                                      }
-                                      
-                                      // Fallback: Try to find a "Housekeeping" or "Room" related location if exact match fails?
-                                      // For now, require match.
-                                      if (roomLoc == null) {
-                                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error: Room location not found in inventory system. Cannot return items.")));
-                                         return; 
-                                      }
-
-                                      await provider.createStockIssue(
-                                         sourceLocationId: roomLoc['id'],
-                                         destinationLocationId: destId,
-                                         items: items.map((i) => {
-                                            'item_id': i['item_id'],
-                                            'issued_quantity': i['quantity'],
-                                            'unit': i['unit']
-                                         }).toList(),
-                                         notes: "Return from Service Request #${request.id}"
-                                      );
-                                       requestProvider.updateRequestStatus(request.id, 'completed', employeeId: context.read<AuthProvider>().employeeId, billingStatus: billingStatus);
-                                   }
-                                )
-                              );
-                          },
-                        )),
-                      ],
+                    sliver: SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          final item = tasks[index];
+                          if (item is Room) {
+                            return _UrgentRoomCard(
+                              room: item,
+                              onStartCleaning: () => context.read<RoomProvider>().updateRoomStatus(item.id, 'Cleaning'),
+                              onMarkClean: () => context.read<RoomProvider>().updateRoomStatus(item.id, 'Clean'),
+                              onAudit: () => Navigator.push(context, MaterialPageRoute(builder: (_) => AuditScreen(roomNumber: item.roomNumber, roomId: item.id))),
+                            );
+                          } else if (item is ServiceRequest) {
+                            return _ServiceRequestCard(
+                              request: item,
+                              onComplete: () {
+                                // Logic to complete request
+                                context.read<ServiceRequestProvider>().updateRequestStatus(item.id, 'completed', employeeId: context.read<AuthProvider>().employeeId);
+                              },
+                            );
+                          }
+                          return const SizedBox.shrink();
+                        },
+                        childCount: tasks.length,
+                      ),
                     ),
-                  ),
-                ),
-
-              // Empty state
-              if (urgentRooms.isEmpty && activeRequests.isEmpty && !roomProvider.isLoading)
-                SliverToBoxAdapter(
-                  child: Container(
-                    padding: const EdgeInsets.all(40),
-                    alignment: Alignment.center,
-                    child: Column(
-                      children: [
-                        Icon(Icons.check_circle_outline, size: 64, color: Colors.grey[400]),
-                        const SizedBox(height: 16),
-                        Text(
-                          "All caught up!",
-                          style: TextStyle(color: Colors.grey[600], fontSize: 18, fontWeight: FontWeight.bold),
-                        ),
-                        Text(
-                          "No urgent tasks assigned to you right now.",
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.grey[500]),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
+                  );
+                },
+              ),
               const SliverToBoxAdapter(child: SizedBox(height: 100)),
             ],
           ),
@@ -701,31 +339,21 @@ class _HousekeepingDashboardState extends State<HousekeepingDashboard> {
       ),
       floatingActionButton: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           FloatingActionButton(
-            heroTag: "service_requests",
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ServiceRequestsScreen()),
-              );
-            },
-            backgroundColor: Colors.orange,
-            child: const Icon(Icons.room_service),
+            heroTag: 'rooms',
+            backgroundColor: AppColors.accent,
+            foregroundColor: AppColors.onyx,
+            onPressed: () => Navigator.pushNamed(context, '/housekeeping/rooms'),
+            child: const Icon(Icons.meeting_room_rounded),
           ),
           const SizedBox(height: 12),
-          FloatingActionButton.extended(
-            heroTag: "all_rooms",
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const RoomListScreen()),
-              );
-            },
-            backgroundColor: AppColors.secondary,
-            icon: const Icon(Icons.list),
-            label: const Text("All Rooms"),
+          FloatingActionButton(
+            heroTag: 'requests',
+            backgroundColor: Colors.white.withOpacity(0.05),
+            foregroundColor: Colors.white,
+            onPressed: () => Navigator.pushNamed(context, '/housekeeping/requests'),
+            child: const Icon(Icons.room_service_rounded),
           ),
         ],
       ),
@@ -733,61 +361,147 @@ class _HousekeepingDashboardState extends State<HousekeepingDashboard> {
   }
 }
 
-// Helper Widgets (Keep them as in original or slightly improved)
-class _StatCard extends StatelessWidget {
-  final IconData icon;
-  final String value;
-  final String label;
-  final Color color;
-
-  const _StatCard({
-    required this.icon,
-    required this.value,
-    required this.label,
-    required this.color,
-  });
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  final String actionLabel;
+  final VoidCallback onAction;
+  const _SectionHeader({required this.title, required this.actionLabel, required this.onAction});
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.12),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white.withOpacity(0.2)),
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(title.toUpperCase(), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 1)),
+        TextButton(
+          onPressed: onAction, 
+          child: Text(actionLabel.toUpperCase(), style: const TextStyle(color: AppColors.accent, fontSize: 10, fontWeight: FontWeight.w900)),
         ),
-        child: Row(
+      ],
+    );
+  }
+}
+
+class _SyncIndicator extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final syncing = context.select<RoomProvider, bool>((p) => p.isLoading) || 
+                    context.select<ServiceRequestProvider, bool>((p) => p.isLoading);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(20)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (syncing) const SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+          else const Icon(Icons.circle, color: Colors.greenAccent, size: 8),
+          const SizedBox(width: 6),
+          Text(syncing ? "Syncing" : "Live", style: const TextStyle(color: Colors.white, fontSize: 10)),
+        ],
+      ),
+    );
+  }
+}
+
+class _QuickActionItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+  const _QuickActionItem({required this.icon, required this.label, required this.color, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        OnyxGlassCard(
+          borderRadius: 20,
+          padding: EdgeInsets.zero,
+          child: IconButton(
+            onPressed: onTap, 
+            icon: Icon(icon, color: color, size: 20),
+            padding: const EdgeInsets.all(16),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(label, style: const TextStyle(fontSize: 9, color: Colors.white54, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
+      ],
+    );
+  }
+}
+
+class _UrgentRoomCard extends StatelessWidget {
+  final Room room;
+  final VoidCallback onStartCleaning;
+  final VoidCallback onMarkClean;
+  final VoidCallback onAudit;
+  const _UrgentRoomCard({required this.room, required this.onStartCleaning, required this.onMarkClean, required this.onAudit});
+
+  @override
+  Widget build(BuildContext context) {
+    final cleaning = room.status.toLowerCase() == 'cleaning';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: OnyxGlassCard(
+        padding: const EdgeInsets.all(16),
+        child: Column(
           children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.2),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: color, size: 28),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: (cleaning ? Colors.blue : Colors.red).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(cleaning ? Icons.cleaning_services_rounded : Icons.dirty_lens_rounded, 
+                    color: cleaning ? Colors.blueAccent : Colors.redAccent, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Expanded(child: Text("ROOM ${room.roomNumber}", 
+                  style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.white, fontSize: 14))),
+                _StatBadge(label: room.status.toUpperCase(), color: cleaning ? Colors.blueAccent : Colors.redAccent),
+              ],
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    value,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 26,
-                      fontWeight: FontWeight.w800,
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                if (!cleaning) Expanded(
+                  child: ElevatedButton(
+                    onPressed: onStartCleaning, 
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white.withOpacity(0.05),
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
-                    overflow: TextOverflow.ellipsis,
+                    child: const Text("START CLEANING", style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900)),
                   ),
-                  Text(
-                    label,
-                    style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500),
-                    overflow: TextOverflow.ellipsis,
+                )
+                else ...[
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: onMarkClean, 
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green.withOpacity(0.2),
+                        foregroundColor: Colors.greenAccent,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: const Text("MARK CLEAN", style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900)),
+                    ),
                   ),
-                ],
-              ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    onPressed: onAudit, 
+                    icon: const Icon(Icons.inventory_2_rounded, color: Colors.white54, size: 20),
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.white.withOpacity(0.05),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ]
+              ],
             ),
           ],
         ),
@@ -796,373 +510,49 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-class _UrgentRoomCard extends StatelessWidget {
-  final dynamic room; // Use dynamic or Room model
-  final VoidCallback onStartCleaning;
-  final VoidCallback onMarkClean;
-  final VoidCallback onAudit;
-
-  const _UrgentRoomCard({
-    required this.room,
-    required this.onStartCleaning,
-    required this.onMarkClean,
-    required this.onAudit,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final status = room.status.toLowerCase();
-    final isCleaning = status == 'cleaning';
-    
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.grey.shade100),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  "Room ${room.roomNumber}",
-                  style: TextStyle(
-                    color: AppColors.primary,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.red[50],
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  room.type,
-                  style: TextStyle(color: Colors.red[700], fontSize: 12),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Icon(Icons.info_outline, size: 16, color: Colors.grey[600]),
-              const SizedBox(width: 4),
-              Text(
-                room.guestName ?? "No guest current",
-                style: TextStyle(color: Colors.grey[600], fontSize: 14),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              if (!isCleaning)
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: onStartCleaning,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    icon: const Icon(Icons.play_arrow),
-                    label: const Text("Start Cleaning"),
-                  ),
-                ),
-              if (isCleaning) ...[
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: onMarkClean,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    icon: const Icon(Icons.check),
-                    label: const Text("Mark Clean"),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  onPressed: onAudit,
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  icon: const Icon(Icons.inventory_2, size: 20),
-                  label: const Text("Audit"),
-                ),
-              ],
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _ServiceRequestCard extends StatelessWidget {
-  final dynamic request;
+  final ServiceRequest request;
   final VoidCallback onComplete;
-
-  const _ServiceRequestCard({
-    required this.request,
-    required this.onComplete,
-  });
+  const _ServiceRequestCard({required this.request, required this.onComplete});
 
   @override
   Widget build(BuildContext context) {
-    // Backend returns UTC but might be missing 'Z'.
-    // We force UTC interpretation then convert to local.
-    // If createdAt is "2026-01-19 04:28:40", parsing it as local (on a +5:30 device) makes it 04:28 IST.
-    // But it SHOULD represent 04:28 UTC (09:58 IST).
-    // So if parsing as local yields X, we subtract timezone offset? No.
-    // Correct way: Parse as UTC. 
-    // The model now handles parsing with 'Z'.
-    // So created.toLocal() should differ from created by 5.5 hours.
-    
-    // Fallback logic for display:
-    final created = request.createdAt.isUtc ? request.createdAt.toLocal() : request.createdAt;
-    
-    final now = DateTime.now();
-    final diff = now.difference(created);
-    
-    String timeLabel;
-    if (diff.inMinutes < 1) {
-      timeLabel = "Just now";
-    } else if (diff.inMinutes < 60) {
-      timeLabel = "${diff.inMinutes} min ago";
-    } else if (diff.inHours < 24) {
-      timeLabel = "${diff.inHours}h ago";
-    } else {
-       final months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-       final h = created.hour > 12 ? created.hour - 12 : (created.hour == 0 ? 12 : created.hour);
-       final ampm = created.hour >= 12 ? "PM" : "AM";
-       timeLabel = "${created.day} ${months[created.month - 1]} • $h:${created.minute.toString().padLeft(2, '0')} $ampm";
-    }
-    final isPending = request.status.toLowerCase() == 'pending';
-    
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.orange.withOpacity(0.3), width: 1.5),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.orange.withOpacity(0.08),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
+      margin: const EdgeInsets.only(bottom: 12),
+      child: OnyxGlassCard(
+        padding: EdgeInsets.zero,
+        child: ListTile(
+          leading: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(color: AppColors.accent.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
+            child: const Icon(Icons.room_service_rounded, color: AppColors.accent, size: 20),
           ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: Colors.orange[50],
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(Icons.room_service, color: Colors.orange[700]),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      "Room ${request.roomNumber} - ${request.type}",
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      request.description,
-                      style: TextStyle(color: Colors.grey[600], fontSize: 13),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      timeLabel,
-                      style: TextStyle(color: Colors.grey[500], fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+          title: Text("ROOM ${request.roomNumber} - ${request.type.toUpperCase()}", 
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 12)),
+          subtitle: Text(request.description, 
+            style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 10, fontWeight: FontWeight.bold), 
+            maxLines: 1, overflow: TextOverflow.ellipsis),
+          trailing: IconButton(
+            icon: const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 22), 
+            onPressed: onComplete,
           ),
-          const SizedBox(height: 12),
-          // Action buttons
-          if (isPending)
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      print("==> Accept & Start clicked for req ${request.id}, type=${request.type}, desc=${request.description}");
-                      // Check for pending first
-                      if (!isPending) {
-                          print("==> isPending is false, returning.");
-                          return;
-                      }
-
-                      if (!context.read<AttendanceProvider>().isClockedIn) {
-                         print("==> Not clocked in.");
-                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Action Denied: You must Clock In first")));
-                         return;
-                      }
-
-                      final isFoodService = request.type.toLowerCase().contains('food') || 
-                                            request.description.toLowerCase().contains('food') ||
-                                            request.type.toLowerCase() == 'delivery';
-
-                      print("==> isFoodService = $isFoodService");
-
-                       if (isFoodService) {
-                          showDialog(
-                            context: context,
-                            builder: (_) => DeliveryStartDialog(
-                              request: request,
-                              onConfirm: () {
-                                if (context.mounted) {
-                                  final empId = context.read<AuthProvider>().employeeId;
-                                  context.read<ServiceRequestProvider>().updateRequestStatus(request.id, 'in_progress', employeeId: empId).then((success) {
-                                      print("==> updateRequestStatus returned $success");
-                                  }).catchError((e) {
-                                      print("==> updateRequestStatus threw error: $e");
-                                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
-                                  });
-                                }
-                              },
-                            ),
-                          );
-                          return;
-                       }
-
-                      showDialog(
-                        context: context,
-                        builder: (_) => PickInventoryDialog(
-                          requestId: request.id,
-                          roomNumber: request.roomNumber,
-                          preAssignedItems: request.refillItems,
-                          onStart: (items) async {
-                            if (items.isNotEmpty) {
-                              // Group items by location_id to create separate stock issues
-                              final groupedItems = <int, List<Map<String, dynamic>>>{};
-                              for (var item in items) {
-                                final locId = item['location_id'] as int?;
-                                if (locId != null) {
-                                  groupedItems.putIfAbsent(locId, () => []).add(item);
-                                }
-                              }
-
-                              for (var entry in groupedItems.entries) {
-                                if (context.mounted) {
-                                   await context.read<InventoryProvider>().createStockIssue(
-                                     sourceLocationId: entry.key,
-                                     items: entry.value,
-                                     notes: "Used for Service Request #${request.id} (Room ${request.roomNumber})",
-                                   );
-                                }
-                              }
-                            }
-                            if (context.mounted) {
-                               final empId = context.read<AuthProvider>().employeeId;
-                               await context.read<ServiceRequestProvider>().updateRequestStatus(request.id, 'in_progress', employeeId: empId);
-                            }
-                          },
-                        ),
-                      );
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    icon: const Icon(Icons.play_arrow, size: 18),
-                    label: const Text("Accept & Start", style: TextStyle(fontSize: 12)),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      final provider = context.read<ServiceRequestProvider>();
-                      provider.updateRequestStatus(request.id, 'cancelled', employeeId: context.read<AuthProvider>().employeeId);
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    icon: const Icon(Icons.close, size: 18),
-                    label: const Text("Reject", style: TextStyle(fontSize: 13)),
-                  ),
-                ),
-              ],
-            )
-          else if (request.status.toLowerCase().replaceAll('_', ' ') == 'in progress')
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: onComplete,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                icon: const Icon(Icons.check_circle, size: 18),
-                label: const Text("Complete", style: TextStyle(fontSize: 13)),
-              ),
-            ),
-        ],
+        ),
       ),
     );
   }
 }
 
+class _StatBadge extends StatelessWidget {
+  final String label;
+  final Color color;
+  const _StatBadge({required this.label, required this.color});
 
-
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
+      child: Text(label, style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
+    );
+  }
+}

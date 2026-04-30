@@ -742,7 +742,7 @@ def _get_rooms_impl(db: Session, branch_id: int, skip: int = 0, limit: int = 20,
             # Update room statuses before fetching (non-blocking - continues even if update fails)
             try:
                 from app.utils.room_status import update_room_statuses
-                update_room_statuses(db)
+                update_room_statuses(db, branch_id=branch_id)
             except Exception as status_error:
                 print(f"Room status update failed (continuing): {status_error}")
                 # Continue fetching rooms even if status update fails

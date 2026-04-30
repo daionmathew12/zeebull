@@ -42,6 +42,8 @@ class WorkingLogRecord(BaseModel):
     is_tasks_approved: int = 0
     tasks_approved_by_id: Optional[int] = None
     tasks_approved_at: Optional[datetime] = None
+    clock_in_image: Optional[str] = None
+    clock_out_image: Optional[str] = None
     class Config: from_attributes = True
 
 class TasksUpdate(BaseModel):

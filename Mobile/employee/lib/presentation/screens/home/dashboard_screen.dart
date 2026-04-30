@@ -41,7 +41,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return Scaffold(
       drawer: const AppDrawer(),
-      appBar: (userRole == UserRole.kitchen || userRole == UserRole.manager)
+      appBar: (userRole == UserRole.kitchen || 
+               userRole == UserRole.manager || 
+               userRole == UserRole.housekeeping || 
+               userRole == UserRole.waiter)
           ? null
           : AppBar(
               flexibleSpace: Container(
