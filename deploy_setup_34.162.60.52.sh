@@ -55,13 +55,13 @@ ACCESS_TOKEN_EXPIRE_MINUTES=1440
 
 # Aiosell Channel Manager
 AIOSELL_ACTIVE=true
-AIOSELL_HOTEL_CODE=sample-pms
-AIOSELL_PARTNER_ID=sample-pms
+AIOSELL_HOTEL_CODE=a0e3cff078
+AIOSELL_PARTNER_ID=teqmates-hospitality
 AIOSELL_API_URL=https://live.aiosell.com/api/v2/cm/update
-AIOSELL_USERNAME=sandboxpms
-AIOSELL_PASSWORD=sandboxpms
-AIOSELL_WEBHOOK_USERNAME=sandboxpms
-AIOSELL_WEBHOOK_PASSWORD=sandboxpms
+AIOSELL_USERNAME=teqmates-hospitality
+AIOSELL_PASSWORD=1zdv6udu
+AIOSELL_WEBHOOK_USERNAME=teqmates-hospitality
+AIOSELL_WEBHOOK_PASSWORD=1zdv6udu
 EOF
 
 # 4. Database Setup
